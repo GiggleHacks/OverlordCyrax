@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs/promises";
 import { existsSync } from "node:fs";
-import { upsertClientRow, setOnlineState, listClients, markAllClientsOffline, getBuild, getBuildByTag, getAllBuilds, deleteExpiredBuilds, deleteBuild, getNotificationScreenshot, clearNotificationScreenshots, deleteClientRow, getClientIp, banIp, isIpBanned, clientExists, deleteExpiredSharedFiles, getChatHistory, insertChatMessage, getOnlineClientCountForUser, deleteExpiredChatMessages, recordBuildClaim } from "./db";
+import { upsertClientRow, setOnlineState, listClients, markAllClientsOffline, getBuild, getBuildByTag, getAllBuilds, deleteExpiredBuilds, deleteBuild, getNotificationScreenshot, clearNotificationScreenshots, deleteClientRow, getClientIp, banIp, isIpBanned, clientExists, deleteExpiredSharedFiles, getChatHistory, insertChatMessage, getOnlineClientCountForUser, deleteExpiredChatMessages, recordBuildClaim, getClientMetricsSummary } from "./db";
 import { handleFrame, handleHello, handlePing, handlePong } from "./wsHandlers";
 import { getMessageByteLength, getMaxPayloadLimit, isAllowedClientMessageType } from "./wsValidation";
 import { ClientInfo, ClientRole } from "./types";
@@ -139,6 +139,19 @@ import * as sessionManager from "./sessions/sessionManager";
 import type { SocketData } from "./sessions/types";
 import { SERVER_VERSION } from "./version";
 
+
+metrics.setSnapshotEnricher((snapshot) => {
+  const summary = getClientMetricsSummary();
+  snapshot.clients.total = summary.total;
+  snapshot.clients.online = summary.online;
+  snapshot.clients.offline = summary.total - summary.online;
+  snapshot.clients.byOS = summary.byOS;
+  snapshot.clients.byCountry = summary.byCountry;
+  snapshot.sessions.console = sessionManager.getConsoleSessionCount();
+  snapshot.sessions.remoteDesktop = sessionManager.getRdSessionCount();
+  snapshot.sessions.fileBrowser = sessionManager.getFileBrowserSessionCount();
+  snapshot.sessions.process = sessionManager.getProcessSessionCount();
+});
 
 const config = loadConfig();
 const isAuthorizedAgent = (req: Request, url: URL) =>

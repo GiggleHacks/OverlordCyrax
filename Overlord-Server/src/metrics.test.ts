@@ -178,13 +178,13 @@ describe("MetricsCollector", () => {
     });
 
     test("history is capped at maxHistoryPoints", () => {
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 4500; i++) {
         const snap = metrics.getSnapshot();
         metrics.recordHistoryEntry(snap);
       }
 
       const history = metrics.getHistory();
-      expect(history.length).toBeLessThanOrEqual(60);
+      expect(history.length).toBeLessThanOrEqual(4320);
     });
 
     test("getHistory returns a copy", () => {

@@ -54,8 +54,6 @@ export async function handleMiscRoutes(
     snapshot.sessions.fileBrowser = deps.getFileBrowserSessionCount();
     snapshot.sessions.process = deps.getProcessSessionCount();
 
-    metrics.recordHistoryEntry(snapshot);
-
     const history = metrics.getHistory();
 
     return new Response(JSON.stringify({ snapshot, history }), {

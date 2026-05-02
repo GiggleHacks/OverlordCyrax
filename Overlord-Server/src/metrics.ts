@@ -94,7 +94,8 @@ class MetricsCollector {
   private receivedPerSecond: number = 0;
 
   private history: MetricsHistory[] = [];
-  private maxHistoryPoints: number = 60;
+  private maxHistoryPoints: number = 4320;
+  private snapshotEnricher: ((snapshot: MetricsSnapshot) => void) | null = null;
 
   private pingValues: number[] = [];
   private maxPingHistory: number = 1000;
@@ -205,7 +206,21 @@ class MetricsCollector {
     return { min, max, avg, count: this.pingValues.length };
   }
 
-  private recordHistory() {}
+  setSnapshotEnricher(fn: ((snapshot: MetricsSnapshot) => void) | null): void {
+    this.snapshotEnricher = fn;
+  }
+
+  private recordHistory() {
+    const snapshot = this.getSnapshot();
+    if (this.snapshotEnricher) {
+      try {
+        this.snapshotEnricher(snapshot);
+      } catch (err) {
+        console.error("metrics snapshot enricher failed:", err);
+      }
+    }
+    this.recordHistoryEntry(snapshot);
+  }
 
   private trackEventLoopDelay() {
     const intervalMs = 1000;

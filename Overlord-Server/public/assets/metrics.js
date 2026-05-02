@@ -30,12 +30,16 @@ function initCharts() {
           backgroundColor: "rgba(96, 165, 250, 0.1)",
           fill: true,
           tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          borderWidth: 2,
         },
       ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -53,7 +57,12 @@ function initCharts() {
           grid: { color: "rgba(100, 116, 139, 0.1)" },
         },
         x: {
-          ticks: { color: "#94a3b8", maxTicksLimit: 10 },
+          ticks: {
+            color: "#94a3b8",
+            maxTicksLimit: 6,
+            autoSkip: true,
+            maxRotation: 0,
+          },
           grid: { color: "rgba(100, 116, 139, 0.1)" },
         },
       },
@@ -72,12 +81,16 @@ function initCharts() {
           backgroundColor: "rgba(192, 132, 252, 0.1)",
           fill: true,
           tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          borderWidth: 2,
         },
       ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -95,7 +108,12 @@ function initCharts() {
           grid: { color: "rgba(100, 116, 139, 0.1)" },
         },
         x: {
-          ticks: { color: "#94a3b8", maxTicksLimit: 10 },
+          ticks: {
+            color: "#94a3b8",
+            maxTicksLimit: 6,
+            autoSkip: true,
+            maxRotation: 0,
+          },
           grid: { color: "rgba(100, 116, 139, 0.1)" },
         },
       },
