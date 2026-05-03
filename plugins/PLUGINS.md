@@ -4,7 +4,7 @@ This document explains how to build Overlord plugins using the **native plugin s
 
 Plugins can be written in **any language** that can produce a C-ABI shared library: **Go**, **C**, **C++**, **Rust**, or anything else that compiles to native code.
 
-> TL;DR: A plugin is a zip with platform-specific binaries (`.so`/`.dll`/`.dylib`) plus `<id>.html`, `<id>.css`, `<id>.js`. Upload it in the Plugins page or drop it in Overlord-Server/plugins.
+> TL;DR: A plugin is a zip with platform-specific binaries (`.so`/`.dll`/`.dylib`) plus `<id>.html`, `<id>.css`, `<id>.js`. Upload it in the Plugins page or drop it in Overlord-Server/plugins. Optionally include a `server.js` for a per-plugin server runtime with a private SQLite DB, an RPC API, and live broadcasts to open UIs (see [section 11](#11-server-side-plugin-runtime)).
 
 ## 1) How plugins are structured
 
@@ -32,6 +32,7 @@ sample.zip
   ├─ sample.html
   ├─ sample.css
   ├─ sample.js
+  ├─ server.js            (optional — server-side runtime, see section 11)
   └─ config.json          (optional — enables navbar & metadata)
 ```
 
@@ -43,7 +44,10 @@ Overlord-Server/plugins/sample/
   ├─ sample-linux-arm64.so
   ├─ sample-darwin-arm64.dylib
   ├─ sample-windows-amd64.dll
+  ├─ server.js              (optional — picked up by the plugin runtime)
   ├─ manifest.json          (auto-generated, merged with config.json)
+  ├─ data/
+  │  └─ plugin.db           (auto-created when server.js is present)
   └─ assets/
      ├─ sample.html
      ├─ sample.css
@@ -659,6 +663,13 @@ Because the plugin UI is injected into a persistent single-page application, nav
 
 See [section 10](#10-server-side-plugin-data-directory) for full details.
 
+### Server-side plugin runtime
+
+- `POST /api/plugins/<id>/rpc` — invoke a method on the plugin's worker
+- `GET /api/plugins/<id>/stream` — Server-Sent Events stream of `ctx.broadcast()` calls
+
+See [section 11](#11-server-side-plugin-runtime) for full details.
+
 ### Per-client plugin runtime
 
 - `POST /api/clients/<clientId>/plugins/<pluginId>/load`
@@ -881,6 +892,157 @@ const { files } = await (await fetch(`/api/plugins/myplugin/data`)).json();
 - Null bytes in paths are rejected
 - The data directory is created automatically on first use (no pre-setup needed)
 - Deleting and reinstalling a plugin leaves `data/` untouched
+
+## 11) Server-side plugin runtime
+
+A plugin can ship an optional **`server.js`** at the root of its zip. When present, the server boots a dedicated **Bun Worker** for that plugin, opens a private SQLite database for it (`plugins/<id>/data/plugin.db`), and gives the worker an RPC + broadcast API.
+
+This is the right place for plugin logic that:
+
+- Has to run **without an open UI** (e.g. persisting credentials the agent harvests in the background).
+- Needs to **aggregate state across every connected client** (the per-client native binary only sees its own host).
+- Wants to **stream live updates** to whatever plugin pages are open right now without polling.
+
+The worker is process-isolated from the main server: a buggy plugin that throws inside `onEvent` or `rpc` does not take the rest of Overlord down with it.
+
+### Lifecycle
+
+| Event | Effect |
+|-------|--------|
+| Server starts | Every enabled plugin with a `server.js` is booted in its own worker. |
+| Plugin enabled (`POST /api/plugins/<id>/enable {enabled:true}`) | Worker is started if `server.js` exists. |
+| Plugin disabled | Worker is stopped (graceful shutdown → `terminate()` after 750 ms). |
+| Plugin re-uploaded | Worker is restarted so the new `server.js` takes effect. |
+| Plugin deleted | Worker is stopped; the `data/` directory (including `plugin.db`) is preserved across reinstalls. |
+| Server SIGINT/SIGTERM | All workers are shut down before the process exits. |
+
+### `server.js` contract
+
+`server.js` is an ES module whose default export is a plain object with up to four optional handlers:
+
+```js
+// plugins/credharvest/server.js
+export default {
+  // Run once when the worker boots. Use this to migrate the schema or seed
+  // any state. Throwing here marks the plugin as failed (visible in
+  // /api/plugins → lastError) and the worker exits.
+  setup(ctx) {
+    ctx.db.exec(`
+      CREATE TABLE IF NOT EXISTS creds (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id   TEXT NOT NULL,
+        service     TEXT,
+        username    TEXT,
+        password    TEXT,
+        captured_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS creds_by_client ON creds(client_id);
+    `);
+  },
+
+  // Fired every time an agent's native plugin sends a callback event back
+  // through the WebSocket (PluginOnEvent → host callback → server). Also
+  // fires for the lifecycle events the host injects: "loaded", "unloaded",
+  // "error".
+  onEvent(ctx, clientId, event, payload) {
+    if (event !== "credential") return;
+    ctx.db
+      .prepare(`INSERT INTO creds(client_id, service, username, password, captured_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(clientId, payload.service, payload.username, payload.password, Date.now());
+    ctx.broadcast("cred_added", { clientId, service: payload.service });
+  },
+
+  // Methods called by the plugin UI via POST /api/plugins/<id>/rpc.
+  // Each handler receives (ctx, params, meta). Whatever you return becomes
+  // the `result` field of the JSON response.
+  rpc: {
+    list_all(ctx) {
+      return ctx.db
+        .prepare(`SELECT * FROM creds ORDER BY captured_at DESC LIMIT 1000`)
+        .all();
+    },
+    list_for_client(ctx, params) {
+      return ctx.db
+        .prepare(`SELECT * FROM creds WHERE client_id = ? ORDER BY captured_at DESC`)
+        .all(params.clientId);
+    },
+    delete_all(ctx, _params, { caller }) {
+      if (caller.role !== "admin") throw new Error("Admin only");
+      ctx.db.exec(`DELETE FROM creds`);
+      ctx.broadcast("cleared", { by: caller.id });
+      return { ok: true };
+    },
+  },
+
+  // Called when the plugin is being shut down (disable, re-upload, server
+  // exit). Use it to flush state. The worker is forcibly terminated 750 ms
+  // after this returns, so don't rely on async cleanup taking longer.
+  teardown(ctx) {
+    ctx.log.info("shutting down");
+  },
+};
+```
+
+### The `ctx` object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ctx.pluginId` | `string` | The sanitized plugin ID. |
+| `ctx.db` | `Database` (`bun:sqlite`) | A pre-opened SQLite connection backed by `plugins/<id>/data/plugin.db`. WAL mode is enabled. The plugin owns the schema entirely. |
+| `ctx.dataDir` | `string` | Absolute path to the plugin's `data/` directory. Use this if you want to read/write files alongside the DB (the same directory the `/api/plugins/<id>/data/*` filesystem API serves). |
+| `ctx.log` | `{debug, info, warn, error}` | Each call is forwarded to the main server logger as `[plugin:<id>] <message>`. |
+| `ctx.broadcast(channel, data)` | function | Push an event to every UI currently subscribed to this plugin's SSE stream. `data` must be JSON-serializable. |
+
+### Calling the plugin from the UI
+
+Plugin UI JS can call any RPC method:
+
+```js
+const res = await fetch(`/api/plugins/credharvest/rpc`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ method: "list_all" }),
+});
+const { ok, result, error } = await res.json();
+```
+
+Subscribe to broadcasts:
+
+```js
+const stream = new EventSource(`/api/plugins/credharvest/stream`);
+stream.addEventListener("cred_added", (e) => {
+  const { clientId, service } = JSON.parse(e.data);
+  appendRow(clientId, service);
+});
+stream.addEventListener("cleared", () => clearTable());
+```
+
+The SSE stream keeps itself alive with a comment heartbeat every 25 s, which works through the standard reverse-proxy idle timeouts. Close the stream with `stream.close()` when the plugin page unmounts.
+
+### End-to-end flow for a credential harvester
+
+1. Native binary on the agent captures a credential and calls the host callback with `event="credential"` and a JSON payload.
+2. Agent forwards the event over its `/api/clients/<id>/stream/ws` connection.
+3. Server's `handlePluginEvent` records it for short-lived UI polling (the existing per-client behavior) **and** dispatches it into the plugin's worker via `onEvent`.
+4. Worker INSERTs the credential into `plugin.db` and calls `ctx.broadcast("cred_added", ...)`.
+5. Every open `/plugins/credharvest` page receives a `cred_added` SSE event and updates its UI in real time.
+6. A user landing on `/plugins/credharvest` later calls `POST /api/plugins/credharvest/rpc {method:"list_all"}` and gets the full history back from `plugin.db`, regardless of which clients are currently online.
+
+### API surface (server runtime)
+
+- `POST /api/plugins/<id>/rpc` → `{ method: string, params?: any }` returns `{ ok, result }` or `{ ok:false, error }`. Requires `clients:control`. The method must exist on the plugin's `rpc` map. RPCs time out after 30 s.
+- `GET /api/plugins/<id>/stream` → `text/event-stream`. Requires `clients:control`. Each `ctx.broadcast(channel, data)` becomes an SSE event named `channel` whose `data` field is `JSON.stringify(data)`.
+- `GET /api/plugins` now includes two extra fields per plugin:
+  - `hasServer: boolean` — the bundle ships a `server.js`.
+  - `serverRunning: boolean` — the worker is live right now.
+
+### Caveats
+
+- **One worker per plugin.** RPC calls into the same plugin serialise. Long-running RPCs block other RPCs to that plugin (not other plugins). Do heavy work in `onEvent` and let RPCs read pre-computed state.
+- **`bun:sqlite` is single-writer per database file.** Since each plugin gets its own DB this is fine; just don't open the same `plugin.db` from another process.
+- **The worker is not a security sandbox.** It has the same filesystem and network access as the main server. Treat `server.js` with the same trust as your other server code, and lean on plugin signing if you load third-party bundles.
+- **Compiled binaries.** Workers spawned from the bundled `--compile` build need the worker host module embedded; if you ship that build, run `bun build` with the worker host included as an entry point or stick with `bun run` for now.
+- **No automatic restart on worker crash.** A crashed worker is logged and `pluginState.lastError` is set, but it will not loop-restart on its own. Disable + re-enable the plugin to bring it back up.
 
 ---
 

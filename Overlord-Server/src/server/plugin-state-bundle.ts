@@ -95,6 +95,7 @@ export async function ensurePluginExtracted(
   let htmlEntry: Buffer | null = null;
   let cssEntry: Buffer | null = null;
   let jsEntry: Buffer | null = null;
+  let serverEntry: Buffer | null = null;
   let configEntry: Buffer | null = null;
   const nativeBinaries: Map<string, Buffer> = new Map();
 
@@ -104,6 +105,8 @@ export async function ensurePluginExtracted(
     const lower = base.toLowerCase();
     if (lower.endsWith(".so") || lower.endsWith(".dll") || lower.endsWith(".dylib")) {
       nativeBinaries.set(base, entry.getData());
+    } else if (lower === "server.js") {
+      serverEntry = entry.getData();
     } else if (lower.endsWith(".html")) {
       htmlEntry = entry.getData();
     } else if (lower.endsWith(".css")) {
@@ -132,6 +135,15 @@ export async function ensurePluginExtracted(
   await fs.writeFile(path.join(assetsDir, `${safeId}.css`), cssEntry);
   await fs.writeFile(path.join(assetsDir, `${safeId}.js`), jsEntry);
 
+  const serverScriptPath = path.join(pluginDir, "server.js");
+  if (serverEntry) {
+    await fs.writeFile(serverScriptPath, serverEntry);
+  } else {
+    // A previous extraction may have left a stale server.js — drop it so the
+    // runtime accurately reflects the current bundle.
+    try { await fs.rm(serverScriptPath, { force: true }); } catch {}
+  }
+
   let extraConfig: any = {};
   if (configEntry) {
     try {
@@ -154,6 +166,7 @@ export async function ensurePluginExtracted(
       js: `${safeId}.js`,
     },
     ...(extraConfig.navbar && { navbar: extraConfig.navbar }),
+    hasServer: serverEntry !== null,
   };
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 

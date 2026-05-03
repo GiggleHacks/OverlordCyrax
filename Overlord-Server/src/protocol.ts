@@ -274,6 +274,7 @@ export type PluginManifest = {
     label?: string;
     icon?: string;
   };
+  hasServer?: boolean;
 };
 
 export type PluginSignatureInfo = {

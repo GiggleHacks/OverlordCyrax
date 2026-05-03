@@ -11,11 +11,13 @@ import { metrics } from "../../metrics";
 import { encodeMessage, type PluginSignatureInfo } from "../../protocol";
 import { getConfig, updatePluginsConfig } from "../../config";
 import { getOrVerifySignature, BUILTIN_TRUSTED_KEYS } from "../plugin-signature";
+import type { PluginRuntime } from "../plugin-runtime/runtime";
 
 type PluginManifest = {
   id: string;
   name: string;
   signature?: PluginSignatureInfo;
+  hasServer?: boolean;
 };
 
 type PluginBundle = {
@@ -50,6 +52,7 @@ type PluginRouteDeps = {
   drainPluginUIEvents: (clientId: string, pluginId: string) => Array<{ event: string; payload: any }>;
   secureHeaders: (contentType?: string) => Record<string, string>;
   mimeType: (path: string) => string;
+  pluginRuntime: PluginRuntime;
 };
 
 export async function handlePluginRoutes(
@@ -85,6 +88,8 @@ export async function handlePluginRoutes(
       autoLoad: deps.pluginState.autoLoad[p.id] === true,
       autoStartEvents: deps.pluginState.autoStartEvents[p.id] || [],
       signature: p.signature || { signed: false, trusted: false, valid: false },
+      hasServer: p.hasServer === true || deps.pluginRuntime.hasServerCode(p.id),
+      serverRunning: deps.pluginRuntime.isRunning(p.id),
     }));
     return Response.json({ plugins: enriched });
   }
@@ -244,6 +249,16 @@ export async function handlePluginRoutes(
       await deps.savePluginState();
     }
 
+    // Re-extracting the bundle may have replaced server.js, so cycle the
+    // runtime if the plugin is enabled.
+    if (deps.pluginState.enabled[pluginId] !== false && deps.pluginRuntime.hasServerCode(pluginId)) {
+      try {
+        await deps.pluginRuntime.restartPlugin(pluginId);
+      } catch {}
+    } else if (deps.pluginRuntime.isRunning(pluginId)) {
+      await deps.pluginRuntime.stopPlugin(pluginId);
+    }
+
     return Response.json({ ok: true, id: pluginId, enabled: deps.pluginState.enabled[pluginId], signature: sigInfo });
   }
 
@@ -282,6 +297,15 @@ export async function handlePluginRoutes(
 
     deps.pluginState.enabled[pluginId] = enabled;
     await deps.savePluginState();
+
+    if (enabled) {
+      if (deps.pluginRuntime.hasServerCode(pluginId) && !deps.pluginRuntime.isRunning(pluginId)) {
+        try { await deps.pluginRuntime.startPlugin(pluginId); } catch {}
+      }
+    } else if (deps.pluginRuntime.isRunning(pluginId)) {
+      await deps.pluginRuntime.stopPlugin(pluginId);
+    }
+
     return Response.json({ ok: true, id: pluginId, enabled });
   }
 
@@ -623,6 +647,10 @@ export async function handlePluginRoutes(
     delete deps.pluginState.autoStartEvents[pluginId];
     await deps.savePluginState();
 
+    if (deps.pluginRuntime.isRunning(pluginId)) {
+      await deps.pluginRuntime.stopPlugin(pluginId);
+    }
+
     return Response.json({ ok: true, id: pluginId });
   }
 
@@ -797,6 +825,116 @@ export async function handlePluginRoutes(
     deps.pendingPluginEvents.delete(`${targetId}:${pluginId}`);
 
     return Response.json({ ok: true, id: pluginId });
+  }
+
+  const pluginRpcMatch = url.pathname.match(/^\/api\/plugins\/([^/]+)\/rpc$/);
+  if (req.method === "POST" && pluginRpcMatch) {
+    const user = await authenticateRequest(req);
+    if (!user) return new Response("Unauthorized", { status: 401 });
+    try {
+      requirePermission(user, "clients:control");
+    } catch (error) {
+      if (error instanceof Response) return error;
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    let pluginId = "";
+    try { pluginId = deps.sanitizePluginId(pluginRpcMatch[1]); } catch {
+      return new Response("Invalid plugin id", { status: 400 });
+    }
+
+    if (deps.pluginState.enabled[pluginId] === false) {
+      return Response.json({ ok: false, error: "Plugin disabled" }, { status: 400 });
+    }
+    if (!deps.pluginRuntime.isRunning(pluginId)) {
+      return Response.json(
+        { ok: false, error: "Plugin server runtime not running" },
+        { status: 503 },
+      );
+    }
+
+    let body: any = {};
+    try { body = await req.json(); } catch {}
+    const method = typeof body.method === "string" ? body.method.trim() : "";
+    if (!method) {
+      return Response.json({ ok: false, error: "Missing 'method'" }, { status: 400 });
+    }
+    if (method.length > 128) {
+      return Response.json({ ok: false, error: "Method name too long" }, { status: 400 });
+    }
+
+    try {
+      const result = await deps.pluginRuntime.rpc(pluginId, method, body.params, {
+        id: user.userId,
+        role: user.role,
+      });
+      metrics.recordCommand("plugin_rpc");
+      return Response.json({ ok: true, result });
+    } catch (err) {
+      return Response.json({ ok: false, error: (err as Error).message }, { status: 500 });
+    }
+  }
+
+  const pluginStreamMatch = url.pathname.match(/^\/api\/plugins\/([^/]+)\/stream$/);
+  if (req.method === "GET" && pluginStreamMatch) {
+    const user = await authenticateRequest(req);
+    if (!user) return new Response("Unauthorized", { status: 401 });
+    try {
+      requirePermission(user, "clients:control");
+    } catch (error) {
+      if (error instanceof Response) return error;
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    let pluginId = "";
+    try { pluginId = deps.sanitizePluginId(pluginStreamMatch[1]); } catch {
+      return new Response("Invalid plugin id", { status: 400 });
+    }
+
+    if (deps.pluginState.enabled[pluginId] === false) {
+      return new Response("Plugin disabled", { status: 400 });
+    }
+    if (!deps.pluginRuntime.isRunning(pluginId)) {
+      return new Response("Plugin server runtime not running", { status: 503 });
+    }
+
+    const encoder = new TextEncoder();
+    let unsubscribe: (() => void) | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const safeEnqueue = (chunk: Uint8Array) => {
+          try { controller.enqueue(chunk); } catch {}
+        };
+        const send = (sse: string) => safeEnqueue(encoder.encode(sse));
+        const close = () => {
+          try { controller.close(); } catch {}
+        };
+
+        unsubscribe = deps.pluginRuntime.subscribe(pluginId, send, close);
+        if (!unsubscribe) {
+          close();
+          return;
+        }
+
+        send(`: connected to ${pluginId}\n\n`);
+        heartbeat = setInterval(() => send(`: ping\n\n`), 25_000);
+      },
+      cancel() {
+        if (heartbeat) clearInterval(heartbeat);
+        if (unsubscribe) unsubscribe();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    });
   }
 
   const pluginFrameMatch = url.pathname.match(/^\/plugins\/([^/]+)\/frame$/);

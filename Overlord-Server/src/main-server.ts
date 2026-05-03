@@ -67,6 +67,7 @@ import {
   sendPluginBundle,
   dispatchAutoLoadPlugins,
 } from "./server/plugin-state-bundle";
+import { createPluginRuntime } from "./server/plugin-runtime/runtime";
 import {
   DISCONNECT_TIMEOUT_MS,
   HEARTBEAT_INTERVAL_MS,
@@ -224,6 +225,15 @@ const savePluginState = () => savePluginStateToDisk(PLUGIN_ROOT, PLUGIN_STATE_PA
 const loadPluginState = async () => {
   pluginState = await loadPluginStateFromDisk(PLUGIN_STATE_PATH);
 };
+
+const pluginRuntime = createPluginRuntime({
+  pluginRoot: PLUGIN_ROOT,
+  workerHostUrl: new URL("./server/plugin-runtime/worker-host.ts", import.meta.url).href,
+  setLastError: (pluginId, error) => {
+    pluginState.lastError[pluginId] = error;
+    void savePluginState();
+  },
+});
 const ensurePluginExtracted = (pluginId: string) =>
   ensurePluginExtractedFromRoot(PLUGIN_ROOT, pluginId, sanitizePluginId);
 const listPluginManifests = () =>
@@ -323,6 +333,8 @@ const notificationPluginHandlers = createNotificationPluginHandlers({
   getUserRole: (userId: number) => getUserById(userId)?.role,
   storeNotificationScreenshot: storeNotificationScreenshotForPending,
   deliverNotificationWithScreenshot: deliverNotificationWithScreenshotForRecord,
+  forwardPluginEventToRuntime: (clientId, pluginId, event, payload) =>
+    pluginRuntime.dispatchClientEvent(clientId, pluginId, event, payload),
   getDeliveryTargetsForClientEvent: (event: string, clientId: string): UserDeliveryTarget[] => {
     const mapRow = (u: any): UserDeliveryTarget => ({
       userId: u.id,
@@ -368,6 +380,21 @@ const pendingCommandReplies = new Map<string, PendingCommandReply>();
 
 async function startServer() {
   await loadPluginState();
+
+  try {
+    const manifests = await listPluginManifests();
+    for (const manifest of manifests) {
+      if (pluginState.enabled[manifest.id] === false) continue;
+      if (!pluginRuntime.hasServerCode(manifest.id)) continue;
+      try {
+        await pluginRuntime.startPlugin(manifest.id);
+      } catch (err) {
+        logger.warn(`[plugin-runtime] boot failed for ${manifest.id}: ${(err as Error).message}`);
+      }
+    }
+  } catch (err) {
+    logger.warn(`[plugin-runtime] startup scan failed: ${(err as Error).message}`);
+  }
 
   setPostApproveHook((clientId: string) => {
     const client = clientManager.getClient(clientId);
@@ -460,6 +487,7 @@ async function startServer() {
       drainPluginUIEvents: notificationPluginHandlers.drainPluginUIEvents,
       secureHeaders,
       mimeType,
+      pluginRuntime,
     },
     fileShare: {
       FILE_SHARE_ROOT,
@@ -775,12 +803,14 @@ startServer();
 
 process.on("SIGINT", () => {
   logger.info("\n[server] Shutting down gracefully...");
+  void pluginRuntime.shutdownAll();
   flushAuditLogsSync();
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
   logger.info("\n[server] Shutting down gracefully...");
+  void pluginRuntime.shutdownAll();
   flushAuditLogsSync();
   process.exit(0);
 });

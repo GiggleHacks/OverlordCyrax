@@ -70,6 +70,12 @@ type CreateDeps = {
     clientId: string,
   ) => UserDeliveryTarget[];
   savePluginState: () => Promise<void>;
+  forwardPluginEventToRuntime?: (
+    clientId: string,
+    pluginId: string,
+    event: string,
+    payload: unknown,
+  ) => void;
 };
 
 function safeSendViewer(ws: ServerWebSocket<SocketData>, payload: unknown) {
@@ -440,6 +446,18 @@ export function createNotificationPluginHandlers(deps: CreateDeps) {
       // Buffer all events for UI polling
       if (pluginId && event) {
         bufferPluginUIEvent(clientId, pluginId, event, eventPayload ?? (error ? { error } : null));
+      }
+      if (pluginId && event && deps.forwardPluginEventToRuntime) {
+        try {
+          deps.forwardPluginEventToRuntime(
+            clientId,
+            pluginId,
+            event,
+            eventPayload ?? (error ? { error } : null),
+          );
+        } catch (err) {
+          logger.warn(`[plugin] runtime dispatch failed: ${(err as Error).message}`);
+        }
       }
     },
 
