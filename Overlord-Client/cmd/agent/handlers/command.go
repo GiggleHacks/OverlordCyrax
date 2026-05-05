@@ -569,12 +569,16 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		if err != nil {
 			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
 		}
-		if err := env.Plugins.Load(ctx, manifest, binaryBytes); err != nil {
-			_ = wire.WriteMsg(ctx, env.Conn, wire.PluginEvent{Type: "plugin_event", PluginID: manifest.ID, Event: "error", Error: err.Error()})
-			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
-		}
-		_ = wire.WriteMsg(ctx, env.Conn, wire.PluginEvent{Type: "plugin_event", PluginID: manifest.ID, Event: "loaded"})
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: true})
+		go func() {
+			if err := env.Plugins.Load(ctx, manifest, binaryBytes); err != nil {
+				_ = wire.WriteMsg(ctx, env.Conn, wire.PluginEvent{Type: "plugin_event", PluginID: manifest.ID, Event: "error", Error: err.Error()})
+				_ = wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
+				return
+			}
+			_ = wire.WriteMsg(ctx, env.Conn, wire.PluginEvent{Type: "plugin_event", PluginID: manifest.ID, Event: "loaded"})
+			_ = wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: true})
+		}()
+		return nil
 	case "plugin_load_http":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload == nil {
@@ -587,7 +591,8 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		}
 		pullURL, _ := payload["url"].(string)
 		expectedSize := int64(toInt(payload["size"]))
-		return HandlePluginLoadHTTP(ctx, env, cmdID, manifest, pullURL, expectedSize)
+		go HandlePluginLoadHTTP(ctx, env, cmdID, manifest, pullURL, expectedSize)
+		return nil
 	case "plugin_unload":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload == nil || env.Plugins == nil {

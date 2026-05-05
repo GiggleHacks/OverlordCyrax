@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"sync"
+	"time"
 
 	"overlord-client/cmd/agent/wire"
 )
@@ -69,15 +70,19 @@ func (m *Manager) Load(ctx context.Context, manifest PluginManifest, binary []by
 				payloadVal = string(payload)
 			}
 		}
-		err := wire.WriteMsg(context.Background(), m.writer, wire.PluginEvent{
+		msg := wire.PluginEvent{
 			Type:     "plugin_event",
 			PluginID: pluginID,
 			Event:    event,
 			Payload:  payloadVal,
-		})
-		if err != nil {
-			log.Printf("[plugin] %s send event error: %v", pluginID, err)
 		}
+		go func() {
+			sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := wire.WriteMsg(sendCtx, m.writer, msg); err != nil {
+				log.Printf("[plugin] %s send event error: %v", pluginID, err)
+			}
+		}()
 	}
 
 	hostJSON, err := json.Marshal(m.host)
