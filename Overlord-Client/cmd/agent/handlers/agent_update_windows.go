@@ -97,10 +97,9 @@ func launchDeferredUpdateScript(sourcePath string, targetPath string) error {
 		return err
 	}
 
-	cmdLine := fmt.Sprintf("\"%s\"", scriptPath)
-	cmd := exec.Command("cmd.exe", "/D", "/Q", "/C", cmdLine)
+	cmd := exec.Command("cmd.exe", "/D", "/Q", "/C", scriptPath)
 	cmd.Dir = filepath.Dir(scriptPath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
 	log.Printf("agent_update[win]: deferred updater script=%q debugLog=%q cmd=%q args=%v", scriptPath, debugLogPath, cmd.Path, cmd.Args)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start deferred updater: %w", err)
@@ -138,11 +137,11 @@ func writeDeferredUpdateBatch(sourcePath string, targetPath string) (string, str
 		"echo src=%SRC% >> \"%LOG%\"",
 		"echo dst=%DST% >> \"%LOG%\"",
 		"echo start_time=%DATE% %TIME% >> \"%LOG%\"",
-		"timeout /t 2 /nobreak >NUL",
+		"ping -n 3 127.0.0.1 >NUL",
 		"for /L %%I in (1,1,8) do (",
 		"  echo copy_attempt=%%I >> \"%LOG%\"",
 		"  copy /Y \"%SRC%\" \"%DST%\" >> \"%LOG%\" 2>&1 && (set \"COPIED=1\" & goto copied)",
-		"  timeout /t 1 /nobreak >NUL",
+		"  ping -n 2 127.0.0.1 >NUL",
 		")",
 		":copied",
 		"if \"%COPIED%\"==\"1\" (",
