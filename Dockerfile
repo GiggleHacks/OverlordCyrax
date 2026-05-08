@@ -92,6 +92,8 @@ WORKDIR /app
 
 # openssl/ca-certificates: TLS cert generation + HTTPS validation.
 # wget/tar/unzip/xz-utils: required by toolchain-manager for on-demand downloads.
+# clang: fallback C compiler for darwin/CGO agent builds (no toolchain mapping in
+# toolchain-manager.ts, so build-process.ts falls back to the default `cc`).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -102,6 +104,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         unzip \
         xz-utils \
         git \
+        clang \
     && rm -rf /var/lib/apt/lists/*
 
 # Reuse Go + garble from the builder so we don't re-download.

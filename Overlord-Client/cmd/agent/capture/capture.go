@@ -304,9 +304,10 @@ func safeActiveDisplays() int {
 }
 
 func safeCaptureDisplay(display int) (*image.RGBA, error) {
-	defer func() {
-		_ = recover()
-	}()
+	// Log panics with a stack trace so the actual culprit is captured in the
+	// crash log instead of being silently swallowed (returns nil image, which
+	// the caller treats as a transient capture failure).
+	defer recoverAndLog("safeCaptureDisplay", nil)
 	img, err := captureDisplayFn(display)
 	if err != nil {
 		return nil, err

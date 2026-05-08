@@ -701,12 +701,18 @@ func (s *duplicationState) capture(display int) (*image.RGBA, error) {
 		}
 		if s.lastBase != nil {
 			img := s.composeFrame(s.lastBase, int(s.desc.ModeDesc.Width), int(s.desc.ModeDesc.Height))
-			s.lastFrame = img
+			// composeFrame may return s.lastBase or s.cursorScratch directly;
+			// both are reused across captures, so the caller's PutRGBA would
+			// hand them to the pool and a subsequent capture would race.
+			if img == s.lastBase || img == s.cursorScratch {
+				img = cloneRGBA(img)
+			}
+			s.lastFrame = cloneRGBA(img)
 			s.lastFrameAt = time.Now()
 			return img, nil
 		}
 		if s.lastFrame != nil {
-			return s.lastFrame, nil
+			return cloneRGBA(s.lastFrame), nil
 		}
 		if waitMs >= 50 {
 			return nil, errors.New("dxgi: frame timeout")
@@ -749,22 +755,25 @@ func (s *duplicationState) capture(display int) (*image.RGBA, error) {
 			_ = s.dup.ReleaseFrame()
 			return nil, fmt.Errorf("dxgi: map desktop surface failed 0x%x", hr)
 		}
+		// Unmap and release the frame on every exit, including a panic in
+		// the conversion code below. Leaving the surface mapped wedges the
+		// duplication object until the device is fully closed.
+		dup := s.dup
+		defer func() {
+			_ = dup.UnMapDesktopSurface()
+			_ = dup.ReleaseFrame()
+		}()
+
 		if mapped.Pitch <= 0 || mapped.Bits == nil {
-			_ = s.dup.UnMapDesktopSurface()
-			_ = s.dup.ReleaseFrame()
 			return nil, errors.New("dxgi: invalid mapped surface")
 		}
 
 		pitch := int(mapped.Pitch)
 		if pitch < width*4 {
-			_ = s.dup.UnMapDesktopSurface()
-			_ = s.dup.ReleaseFrame()
 			return nil, fmt.Errorf("dxgi: pitch %d too small for width %d", pitch, width)
 		}
 		totalBytes := pitch * height
 		if totalBytes/height != pitch {
-			_ = s.dup.UnMapDesktopSurface()
-			_ = s.dup.ReleaseFrame()
 			return nil, fmt.Errorf("dxgi: pitch*height overflow (%d * %d)", pitch, height)
 		}
 		src := unsafe.Slice(mapped.Bits, totalBytes)
@@ -774,8 +783,6 @@ func (s *duplicationState) capture(display int) (*image.RGBA, error) {
 		if img == nil {
 			img = convertBGRA(src, pitch, width, height, s.desc.Rotation)
 		}
-		_ = s.dup.UnMapDesktopSurface()
-		_ = s.dup.ReleaseFrame()
 		if img == nil {
 			return nil, errors.New("dxgi: pixel conversion failed (buffer too small)")
 		}
@@ -788,9 +795,17 @@ func (s *duplicationState) capture(display int) (*image.RGBA, error) {
 		}
 	}
 
-	s.lastBase = img
+	// Cache an independent clone so the timeout path (which serves the cached
+	// frame back to callers) doesn't alias a buffer the caller will return to
+	// the RGBA pool via PutRGBA.
+	s.lastBase = cloneRGBA(img)
 	img = s.composeFrame(img, width, height)
-	s.lastFrame = img
+	if img == s.cursorScratch {
+		// cursorScratch is reused across captures; clone before returning so
+		// the next compose doesn't write into a buffer the caller has pooled.
+		img = cloneRGBA(img)
+	}
+	s.lastFrame = cloneRGBA(img)
 	s.lastFrameAt = time.Now()
 
 	return img, nil
