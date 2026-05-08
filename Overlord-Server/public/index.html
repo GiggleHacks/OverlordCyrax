@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="/assets/nav-prelude.js"></script>
+    <link rel="modulepreload" href="/assets/nav.js" />
     <title>Overlord Dashboard</title>
     <link rel="stylesheet" href="/vendor/inter/400.css" />
     <link rel="stylesheet" href="/vendor/inter/600.css" />
@@ -14,9 +16,9 @@
     <link rel="stylesheet" href="/assets/main.css" />
     <link rel="stylesheet" href="/assets/custom.css" />
     <script defer src="/vendor/animejs/anime.min.js"></script>
-    <link rel="preload" href="/api/clients?page=1&amp;pageSize=12&amp;q=&amp;sort=stable&amp;status=all&amp;os=all&amp;country=all&amp;group=all" as="fetch" crossorigin />
-    <link rel="preload" href="/api/auth/me" as="fetch" crossorigin />
-    <link rel="preload" href="/api/groups" as="fetch" crossorigin />
+    <link rel="preload" href="/api/clients?page=1&amp;pageSize=12&amp;q=&amp;sort=stable&amp;status=all&amp;os=all&amp;country=all&amp;group=all" as="fetch" crossorigin="use-credentials" />
+    <link rel="preload" href="/api/auth/me" as="fetch" crossorigin="use-credentials" />
+    <link rel="preload" href="/api/groups" as="fetch" crossorigin="use-credentials" />
   </head>
   <body class="min-h-screen bg-slate-950 text-slate-100">
     <header id="top-nav"></header>

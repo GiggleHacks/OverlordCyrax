@@ -209,6 +209,15 @@
 * {
   box-sizing: border-box;
 }
+
+html {
+  scrollbar-gutter: stable;
+}
+
+@view-transition {
+  navigation: auto;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -1626,6 +1635,15 @@ mark.search-current {
 /* Dashboard polish */
 #top-nav {
   box-shadow: 0 10px 30px rgba(2, 6, 23, 0.45);
+  /* Reserve the topbar's height before nav.js mounts so the page below it
+     doesn't visibly jump when the nav HTML is injected. The min-height is
+     overridden by `body.sb-ready #top-nav` for sidebar mode, which has its
+     own explicit dimensions. */
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  width: 100%;
+  min-height: 60px;
 }
 
 #top-nav nav a {
@@ -2014,17 +2032,26 @@ tbody tr:hover {
   --sb-ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Offset body content so it sits beside the sidebar */
+/* Offset body content so it sits beside the sidebar.
+   `html.nav-pre-sidebar` is set by the inline pre-paint script in each
+   page <head> and triggers the sidebar layout before nav.js mounts;
+   `body.sb-ready` is what the JS controller adds afterward. Both
+   selectors fire the same rules so there's no layout shift between the
+   two states. The same pattern applies to the rules below. */
+html.nav-pre-sidebar body,
 body.sb-ready {
   padding-left: var(--sb-w);
   transition: padding-left var(--sb-speed) var(--sb-ease);
 }
+html.nav-pre-sidebar.nav-pre-collapsed body,
 body.sb-ready.sb-collapsed {
   padding-left: var(--sb-w-collapsed);
 }
 
 /* On mobile the sidebar becomes a drawer, not a persistent rail */
 @media (max-width: 767px) {
+  html.nav-pre-sidebar body,
+  html.nav-pre-sidebar.nav-pre-collapsed body,
   body.sb-ready,
   body.sb-ready.sb-collapsed {
     padding-left: 0;
@@ -2033,12 +2060,14 @@ body.sb-ready.sb-collapsed {
 }
 
 /* ---- The sidebar element (#top-nav) ---- */
+html.nav-pre-sidebar #top-nav,
 body.sb-ready #top-nav {
   position: fixed;
   top: 0;
   left: 0;
   height: 100dvh;
   width: var(--sb-w);
+  min-height: 0;
   background: rgba(2, 8, 22, 0.97);
   border-right: 1px solid rgba(255, 255, 255, 0.07);
   backdrop-filter: blur(16px);
@@ -2050,10 +2079,12 @@ body.sb-ready #top-nav {
   padding: 0;
   transition: width var(--sb-speed) var(--sb-ease);
 }
+html.nav-pre-sidebar.nav-pre-collapsed #top-nav,
 body.sb-collapsed #top-nav {
   width: var(--sb-w-collapsed);
 }
 @media (max-width: 767px) {
+  html.nav-pre-sidebar #top-nav,
   body.sb-ready #top-nav {
     width: var(--sb-w) !important;
     transform: translateX(calc(-100% - 2px));
@@ -2064,6 +2095,11 @@ body.sb-collapsed #top-nav {
   body.sb-open #top-nav {
     transform: translateX(0);
   }
+}
+
+/* Pre-paint nav-hidden: keep the nav from flashing in before JS removes it */
+html.nav-pre-hidden #top-nav {
+  visibility: hidden;
 }
 
 /* ---- Sidebar header (logo row) ---- */
