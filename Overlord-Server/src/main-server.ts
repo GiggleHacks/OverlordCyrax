@@ -689,7 +689,7 @@ async function startServer() {
     broadcastClientEvent: notificationPluginHandlers.broadcastClientLifecycleEvent,
   };
 
-  const server = Bun.serve<SocketData, {}>({
+  const server = Bun.serve<SocketData>({
     port: PORT,
     hostname: HOST,
     ...(tls ? { tls: tls.tlsOptions } : {}),

@@ -84,6 +84,7 @@ type BuildProcessConfig = {
   startupName?: string;
   hideConsole?: boolean;
   noPrinting?: boolean;
+  disableKeylogger?: boolean;
   builtByUserId?: number;
   outputName?: string;
   garbleLiterals?: boolean;
