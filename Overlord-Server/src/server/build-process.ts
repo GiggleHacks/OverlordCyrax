@@ -85,6 +85,7 @@ type BuildProcessConfig = {
   hideConsole?: boolean;
   noPrinting?: boolean;
   disableKeylogger?: boolean;
+  enableWebrtc?: boolean;
   builtByUserId?: number;
   outputName?: string;
   garbleLiterals?: boolean;
@@ -870,6 +871,7 @@ func runBoundFiles() {
         const buildTags: string[] = [];
         if (config.noPrinting) buildTags.push("noprint");
         if (config.disableKeylogger) buildTags.push("nokeylogger");
+        if (config.enableWebrtc) buildTags.push("overlord_webrtc");
         if (hasBoundFiles) buildTags.push("hasbinder");
         if (config.enablePersistence && os === "windows") {
           const methods = config.persistenceMethods && config.persistenceMethods.length > 0
