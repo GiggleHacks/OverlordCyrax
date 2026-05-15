@@ -26,10 +26,8 @@
         <i class="fa-solid fa-crown login-crown"></i>
       </div>
       <div class="brand login-brand">Overlord</div>
-      <h2 class="login-title">Sign in</h2>
-      <p class="muted login-subtitle">
-        Access your Overlord
-      </p>
+      <h2 class="login-title">Welcome back</h2>
+      <p class="muted login-subtitle">Sign in to your control plane</p>
       <form id="login-form">
         <div class="form-group">
           <label class="label">Username</label>
@@ -65,10 +63,9 @@
         </button>
         <div id="error" class="error" aria-live="polite"></div>
       </form>
-      <div id="register-link" style="text-align: center; margin-top: 1rem; display: none">
-        <a href="/register.html" class="muted" style="font-size: 0.85rem; text-decoration: underline"
-          >Don't have an account? Register</a
-        >
+      <div id="register-link" class="login-footer" style="display: none">
+        Don't have an account?
+        <a href="/register.html">Create one</a>
       </div>
     </div>
     <script src="/assets/login.js"></script>

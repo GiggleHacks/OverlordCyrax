@@ -7,14 +7,6 @@ export function secureHeaders(contentType?: string) {
   };
 }
 
-export function securePluginHeaders() {
-  return {
-    ...SECURITY_HEADERS,
-    "X-Frame-Options": "SAMEORIGIN",
-    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss: ws:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
-  };
-}
-
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",

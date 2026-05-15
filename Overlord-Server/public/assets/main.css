@@ -1478,20 +1478,73 @@ article.card[data-bookmarked="true"] {
 
 .error {
   color: #ff9b9b;
-  min-height: 18px;
   margin-top: 12px;
   font-size: 13px;
   text-align: center;
-  padding: 8px;
+  padding: 0;
   border-radius: 8px;
-  background: rgba(255, 99, 99, 0.1);
-  border: 1px solid rgba(255, 99, 99, 0.2);
+  background: transparent;
+  border: 1px solid transparent;
   opacity: 0;
+  transition:
+    opacity 220ms ease,
+    padding 220ms ease,
+    background-color 220ms ease,
+    border-color 220ms ease;
 }
 
 .error:not(:empty) {
   opacity: 1;
+  padding: 8px 10px;
+  background: rgba(255, 99, 99, 0.1);
+  border-color: rgba(255, 99, 99, 0.22);
 }
+
+.success {
+  color: #6ee7b7;
+  margin-top: 12px;
+  font-size: 13px;
+  text-align: center;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  opacity: 0;
+  transition:
+    opacity 220ms ease,
+    padding 220ms ease,
+    background-color 220ms ease,
+    border-color 220ms ease;
+}
+
+.success:not(:empty) {
+  opacity: 1;
+  padding: 8px 10px;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.28);
+}
+
+.login-footer {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.login-footer a {
+  color: #c4b8ff;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(196, 184, 255, 0.25);
+  transition: color 180ms ease, border-color 180ms ease;
+}
+
+.login-footer a:hover {
+  color: #e6dffe;
+  border-bottom-color: rgba(230, 223, 254, 0.7);
+}
+
 
 .console-body {
   background:

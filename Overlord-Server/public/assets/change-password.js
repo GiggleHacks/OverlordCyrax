@@ -124,7 +124,7 @@ if (typeof anime !== "undefined") {
 form?.addEventListener("submit", async (e) => {
   e.preventDefault();
   errEl.textContent = "";
-  successEl.style.display = "none";
+  successEl.textContent = "";
 
   if (newPass.value !== confirmPass.value) {
     errEl.textContent = "New passwords do not match";
@@ -164,19 +164,14 @@ form?.addEventListener("submit", async (e) => {
     sessionStorage.removeItem("temp_user");
 
     successEl.textContent = "Password changed successfully! Redirecting...";
-    successEl.style.opacity = "0";
-    successEl.style.display = "block";
 
     if (typeof anime !== "undefined") {
       anime({
         targets: successEl,
-        opacity: [0, 1],
         translateY: [-5, 0],
         duration: 400,
         easing: "easeOutQuad",
       });
-    } else {
-      successEl.style.opacity = "1";
     }
 
     setTimeout(() => {

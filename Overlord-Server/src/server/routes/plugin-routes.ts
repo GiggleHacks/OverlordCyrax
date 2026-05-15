@@ -1065,9 +1065,9 @@ export async function handlePluginRoutes(
       return new Response(null, { status: 304 });
     }
 
-    return new Response(injected, {
-      headers: { ...deps.secureHeaders("text/html; charset=utf-8"), "Cache-Control": "no-cache", ETag: etag },
-    });
+    const frameHeaders = { ...deps.secureHeaders("text/html; charset=utf-8"), "Cache-Control": "no-cache", ETag: etag };
+    delete (frameHeaders as any)["Content-Security-Policy"];
+    return new Response(injected, { headers: frameHeaders });
   }
 
   const pluginPageMatch = url.pathname.match(/^\/plugins\/([^/]+)$/);
@@ -1166,9 +1166,9 @@ export async function handlePluginRoutes(
   </body>
 </html>`;
 
-    return new Response(html, {
-      headers: { ...deps.secureHeaders("text/html; charset=utf-8"), "Cache-Control": "no-cache", ETag: etag },
-    });
+    const pageHeaders = { ...deps.secureHeaders("text/html; charset=utf-8"), "Cache-Control": "no-cache", ETag: etag };
+    delete (pageHeaders as any)["Content-Security-Policy"];
+    return new Response(html, { headers: pageHeaders });
   }
 
   const pluginAssetMatch = url.pathname.match(/^\/plugins\/([^/]+)\/assets\/(.+)$/);
