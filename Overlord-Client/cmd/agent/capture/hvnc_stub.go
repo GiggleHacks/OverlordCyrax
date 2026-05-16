@@ -31,7 +31,7 @@ func HVNCMonitorCount() int {
 	return 0
 }
 
-func StartHVNCProcess(filePath string, operaPatch bool) error {
+func StartHVNCProcess(filePath string, operaPatch bool, display int) error {
 	return errors.New("HVNC not supported on this platform")
 }
 
