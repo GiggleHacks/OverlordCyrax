@@ -74,6 +74,9 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	GETPROCADDRESS pGetProcAddress = NULL;
 	VIRTUALALLOC pVirtualAlloc = NULL;
 	NTFLUSHINSTRUCTIONCACHE pNtFlushInstructionCache = NULL;
+#ifdef WIN_X64
+	FARPROC pRtlAddFunctionTable = NULL;
+#endif
 
 	USHORT usCounter;
 
@@ -279,6 +282,16 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 		uiValueA = DEREF(uiValueA);
 	}
 
+#ifdef WIN_X64
+	// Resolve RtlAddFunctionTable so we can register exception unwind data.
+	// Without this, stack unwinding through our hook functions crashes browsers.
+	{
+		HMODULE hNtdll = (HMODULE)pLoadLibraryA("ntdll.dll");
+		if (hNtdll)
+			pRtlAddFunctionTable = pGetProcAddress(hNtdll, "RtlAddFunctionTable");
+	}
+#endif
+
 	// STEP 2: load our image into a new permanent location in memory...
 
 	// get the VA of the NT Header for the PE to be loaded
@@ -466,6 +479,30 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 			uiValueC = uiValueC + ((PIMAGE_BASE_RELOCATION)uiValueC)->SizeOfBlock;
 		}
 	}
+
+	// STEP 5b: register exception function table (.pdata) with the OS.
+	// Reflective loading bypasses the normal loader which would do this via
+	// LdrpInsertDataTableEntry. Without registration, any exception that
+	// unwinds through our hook functions causes STATUS_ACCESS_VIOLATION.
+#ifdef WIN_X64
+	if (pRtlAddFunctionTable)
+	{
+		PIMAGE_NT_HEADERS pLoadedNtHdrs = (PIMAGE_NT_HEADERS)(uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew);
+		if (pLoadedNtHdrs->OptionalHeader.NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_EXCEPTION)
+		{
+			PIMAGE_DATA_DIRECTORY pExcDir = &pLoadedNtHdrs->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+			if (pExcDir->VirtualAddress && pExcDir->Size)
+			{
+				typedef BOOLEAN(NTAPI* RTLADDFNTABLE)(PRUNTIME_FUNCTION, DWORD, DWORD64);
+				((RTLADDFNTABLE)pRtlAddFunctionTable)(
+					(PRUNTIME_FUNCTION)(uiBaseAddress + pExcDir->VirtualAddress),
+					pExcDir->Size / sizeof(RUNTIME_FUNCTION),
+					(DWORD64)uiBaseAddress
+				);
+			}
+		}
+	}
+#endif
 
 	// STEP 6: call our images entry point
 

