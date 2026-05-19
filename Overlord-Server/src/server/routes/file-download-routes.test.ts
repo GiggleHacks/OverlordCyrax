@@ -4,7 +4,13 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { generateToken } from "../../auth";
 import * as clientManager from "../../clientManager";
-import { createUser, deleteUser, getUserById } from "../../users";
+import {
+  createUser,
+  deleteUser,
+  getUserById,
+  setUserClientAccessScope,
+  setUserFeaturePermission,
+} from "../../users";
 import { handleFileDownloadRoutes } from "./file-download-routes";
 
 const PASSWORD = "Aa1!RouteUploadTestPass123";
@@ -243,6 +249,318 @@ describe("file upload route flow", () => {
       } else {
         process.env.OVERLORD_DISABLE_AGENT_AUTH = prevDisableAgentAuth;
       }
+      clientManager.deleteClient(clientId);
+      deleteUser(auth.userId);
+      await removeTempDataDir(dataDir);
+    }
+  });
+});
+
+async function createOperatorToken(opts: { fileBrowserAllowed: boolean; clientScope?: "none" | "all" } = { fileBrowserAllowed: true, clientScope: "all" }) {
+  const username = `op_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
+  const created = await createUser(username, PASSWORD, "operator", "test");
+  expect(created.success).toBe(true);
+  expect(typeof created.userId).toBe("number");
+
+  const userId = created.userId!;
+  setUserClientAccessScope(userId, opts.clientScope ?? "all");
+  setUserFeaturePermission(userId, "file_browser", opts.fileBrowserAllowed);
+
+  const user = getUserById(userId);
+  expect(user).not.toBeNull();
+
+  const token = await generateToken(user!);
+  return { userId, token };
+}
+
+describe("file route feature_browser enforcement", () => {
+  test("upload request returns 403 when file_browser is denied", async () => {
+    const auth = await createOperatorToken({ fileBrowserAllowed: false });
+    const clientId = `client-${Date.now().toString(36)}`;
+    const dataDir = await createTempDataDir();
+    const deps = makeRouteDeps(dataDir);
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      ws: { send: () => {} },
+    });
+
+    try {
+      const requestUrl = new URL("https://localhost/api/file/upload/request");
+      const res = await handleFileDownloadRoutes(
+        new Request(requestUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({
+            clientId,
+            path: "C:\\Games\\big.iso",
+            fileName: "big.iso",
+          }),
+        }),
+        requestUrl,
+        mockServer,
+        deps,
+      );
+
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(403);
+      expect(await res!.text()).toContain("feature access denied");
+    } finally {
+      clientManager.deleteClient(clientId);
+      deleteUser(auth.userId);
+      await removeTempDataDir(dataDir);
+    }
+  });
+
+  test("download request returns 403 when file_browser is denied", async () => {
+    const auth = await createOperatorToken({ fileBrowserAllowed: false });
+    const clientId = `client-${Date.now().toString(36)}`;
+    const dataDir = await createTempDataDir();
+    const deps = makeRouteDeps(dataDir);
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      ws: { send: () => {} },
+    });
+
+    try {
+      const requestUrl = new URL("https://localhost/api/file/download/request");
+      const res = await handleFileDownloadRoutes(
+        new Request(requestUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({
+            clientId,
+            path: "C:\\secret\\data.bin",
+          }),
+        }),
+        requestUrl,
+        mockServer,
+        deps,
+      );
+
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(403);
+      expect(await res!.text()).toContain("feature access denied");
+    } finally {
+      clientManager.deleteClient(clientId);
+      deleteUser(auth.userId);
+      await removeTempDataDir(dataDir);
+    }
+  });
+
+  test("client_access check still beats feature check when client access is missing", async () => {
+    // If both are denied, client access fires first — guards against misordered checks.
+    const auth = await createOperatorToken({ fileBrowserAllowed: false, clientScope: "none" });
+    const clientId = `client-${Date.now().toString(36)}`;
+    const dataDir = await createTempDataDir();
+    const deps = makeRouteDeps(dataDir);
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      ws: { send: () => {} },
+    });
+
+    try {
+      const requestUrl = new URL("https://localhost/api/file/upload/request");
+      const res = await handleFileDownloadRoutes(
+        new Request(requestUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({
+            clientId,
+            path: "C:\\Games\\big.iso",
+            fileName: "big.iso",
+          }),
+        }),
+        requestUrl,
+        mockServer,
+        deps,
+      );
+
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(403);
+      expect(await res!.text()).toContain("client access denied");
+    } finally {
+      clientManager.deleteClient(clientId);
+      deleteUser(auth.userId);
+      await removeTempDataDir(dataDir);
+    }
+  });
+
+  test("upload stage PUT returns 403 when file_browser is revoked after intent creation", async () => {
+    const auth = await createOperatorToken({ fileBrowserAllowed: true });
+    const clientId = `client-${Date.now().toString(36)}`;
+    const dataDir = await createTempDataDir();
+    const deps = makeRouteDeps(dataDir);
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      ws: { send: () => {} },
+    });
+
+    try {
+      const requestUrl = new URL("https://localhost/api/file/upload/request");
+      const requestRes = await handleFileDownloadRoutes(
+        new Request(requestUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({
+            clientId,
+            path: "C:\\Games\\small.bin",
+            fileName: "small.bin",
+          }),
+        }),
+        requestUrl,
+        mockServer,
+        deps,
+      );
+      expect(requestRes!.status).toBe(200);
+      const requestJson = (await requestRes!.json()) as any;
+
+      // Revoke after the intent has been created.
+      setUserFeaturePermission(auth.userId, "file_browser", false);
+
+      const stageUrl = new URL(`https://localhost${requestJson.uploadUrl}`);
+      const stageRes = await handleFileDownloadRoutes(
+        new Request(stageUrl, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${auth.token}` },
+          body: new TextEncoder().encode("hello"),
+        }),
+        stageUrl,
+        mockServer,
+        deps,
+      );
+
+      expect(stageRes).not.toBeNull();
+      expect(stageRes!.status).toBe(403);
+      expect(await stageRes!.text()).toContain("feature access denied");
+    } finally {
+      clientManager.deleteClient(clientId);
+      deleteUser(auth.userId);
+      await removeTempDataDir(dataDir);
+    }
+  });
+
+  test("download serve returns 403 when file_browser is revoked after intent creation", async () => {
+    const auth = await createOperatorToken({ fileBrowserAllowed: true });
+    const clientId = `client-${Date.now().toString(36)}`;
+    const dataDir = await createTempDataDir();
+    const deps = makeRouteDeps(dataDir);
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      ws: { send: () => {} },
+    });
+
+    try {
+      const requestUrl = new URL("https://localhost/api/file/download/request");
+      const requestRes = await handleFileDownloadRoutes(
+        new Request(requestUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({
+            clientId,
+            path: "C:\\Games\\file.bin",
+          }),
+        }),
+        requestUrl,
+        mockServer,
+        deps,
+      );
+      expect(requestRes!.status).toBe(200);
+      const requestJson = (await requestRes!.json()) as any;
+      expect(typeof requestJson.downloadUrl).toBe("string");
+
+      // Revoke after the intent has been created.
+      setUserFeaturePermission(auth.userId, "file_browser", false);
+
+      const downloadUrl = new URL(`https://localhost${requestJson.downloadUrl}`);
+      const downloadRes = await handleFileDownloadRoutes(
+        new Request(downloadUrl, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${auth.token}` },
+        }),
+        downloadUrl,
+        mockServer,
+        deps,
+      );
+
+      expect(downloadRes).not.toBeNull();
+      expect(downloadRes!.status).toBe(403);
+      expect(await downloadRes!.text()).toContain("feature access denied");
+    } finally {
+      clientManager.deleteClient(clientId);
+      deleteUser(auth.userId);
+      await removeTempDataDir(dataDir);
+    }
+  });
+
+  test("upload request succeeds for operator with file_browser allowed (positive control)", async () => {
+    const auth = await createOperatorToken({ fileBrowserAllowed: true });
+    const clientId = `client-${Date.now().toString(36)}`;
+    const dataDir = await createTempDataDir();
+    const deps = makeRouteDeps(dataDir);
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      ws: { send: () => {} },
+    });
+
+    try {
+      const requestUrl = new URL("https://localhost/api/file/upload/request");
+      const res = await handleFileDownloadRoutes(
+        new Request(requestUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({
+            clientId,
+            path: "C:\\Games\\ok.bin",
+            fileName: "ok.bin",
+          }),
+        }),
+        requestUrl,
+        mockServer,
+        deps,
+      );
+
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(200);
+      const body = (await res!.json()) as any;
+      expect(body.ok).toBe(true);
+      expect(typeof body.uploadUrl).toBe("string");
+    } finally {
       clientManager.deleteClient(clientId);
       deleteUser(auth.userId);
       await removeTempDataDir(dataDir);

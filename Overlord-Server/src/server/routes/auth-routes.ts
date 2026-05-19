@@ -23,7 +23,7 @@ import {
   recordFailedAttempt,
   recordSuccessfulAttempt,
 } from "../../rateLimit";
-import { getUserById, canUserAccessClient, canUserAccessFeature, type FeatureName, ALL_FEATURES } from "../../users";
+import { getUserById, canUserAccessClient, canUserAccessFeature, getUserFeaturePermissions, type FeatureName, ALL_FEATURES } from "../../users";
 import { makeAuthCookie, makeAuthCookieClear } from "./auth-cookie";
 
 type RequestIpProvider = {
@@ -340,6 +340,7 @@ export async function handleAuthRoutes(
     }
 
     const dbUser = getUserById(user.userId);
+    const featurePermissions = getUserFeaturePermissions(user.userId);
 
     return new Response(
       JSON.stringify({
@@ -349,6 +350,7 @@ export async function handleAuthRoutes(
         mustChangePassword: dbUser ? Boolean(dbUser.must_change_password) : false,
         canBuild: dbUser ? Boolean(dbUser.can_build) : false,
         telegramChatId: dbUser?.telegram_chat_id || "",
+        featurePermissions,
       }),
       {
         headers: { "Content-Type": "application/json" },

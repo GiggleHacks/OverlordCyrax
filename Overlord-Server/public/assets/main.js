@@ -274,6 +274,37 @@ function applyMenuSupportRules(clientId) {
   ["ping", "reconnect", "disconnect", "uninstall"].forEach(action => {
     setAvailability(menu.querySelector(`[data-action="${action}"]`), isOnline, "Client is offline");
   });
+
+  applyFeaturePermissionRules();
+}
+
+const MENU_OPEN_TO_FEATURE = {
+  console: "console",
+  remotedesktop: "remote_desktop",
+  Backstage: "hvnc",
+  webcam: "webcam",
+  files: "file_browser",
+  processes: "processes",
+  keylogger: "keylogger",
+  voice: "voice",
+};
+
+function applyFeaturePermissionRules() {
+  const perms = currentUser?.featurePermissions;
+  if (!perms) return;
+
+  for (const [openKey, feature] of Object.entries(MENU_OPEN_TO_FEATURE)) {
+    const btn = menu.querySelector(`[data-open="${openKey}"]`);
+    if (!btn) continue;
+    if (perms[feature] === false) {
+      btn.disabled = true;
+      btn.setAttribute("aria-disabled", "true");
+      btn.classList.add("opacity-50", "cursor-not-allowed");
+      btn.classList.remove("hover:bg-slate-700");
+      btn.classList.add("hover:bg-slate-800/50");
+      btn.title = "Feature access disabled by administrator";
+    }
+  }
 }
 
 async function loadCurrentUser() {

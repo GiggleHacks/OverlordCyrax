@@ -80,136 +80,11 @@ func listProcesses() ([]wire.ProcessInfo, error) {
 			continue
 		}
 
-		handle, _, _ := procOpenProcess.Call(
-			windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ,
-			0,
-			uintptr(pid),
-		)
-
-		if handle == 0 {
+		info := queryProcess(pid, selfPID, numCPU)
+		if info == nil {
 			continue
 		}
-		defer windows.CloseHandle(windows.Handle(handle))
-
-		var filename [windows.MAX_PATH]uint16
-		ret, _, _ := procGetProcessImageFileNameW.Call(
-			handle,
-			uintptr(unsafe.Pointer(&filename[0])),
-			uintptr(len(filename)),
-		)
-
-		name := "Unknown"
-		if ret != 0 {
-			name = syscall.UTF16ToString(filename[:])
-
-			for i := len(name) - 1; i >= 0; i-- {
-				if name[i] == '\\' || name[i] == '/' {
-					name = name[i+1:]
-					break
-				}
-			}
-		}
-
-		var memCounters PROCESS_MEMORY_COUNTERS
-		memCounters.CB = uint32(unsafe.Sizeof(memCounters))
-		memory := uint64(0)
-
-		ret, _, _ = procGetProcessMemoryInfo.Call(
-			handle,
-			uintptr(unsafe.Pointer(&memCounters)),
-			uintptr(memCounters.CB),
-		)
-
-		if ret != 0 {
-			memory = uint64(memCounters.WorkingSetSize)
-		}
-
-		cpu := 0.0
-		var creation, exit, kernel, user windows.Filetime
-		ret, _, _ = procGetProcessTimes.Call(
-			handle,
-			uintptr(unsafe.Pointer(&creation)),
-			uintptr(unsafe.Pointer(&exit)),
-			uintptr(unsafe.Pointer(&kernel)),
-			uintptr(unsafe.Pointer(&user)),
-		)
-		if ret != 0 {
-			cpuTotal := (uint64(kernel.HighDateTime)<<32 | uint64(kernel.LowDateTime)) +
-				(uint64(user.HighDateTime)<<32 | uint64(user.LowDateTime))
-			now := time.Now()
-			cpuSamplesMu.Lock()
-			if prev, ok := cpuSamples[pid]; ok {
-				wallDelta := now.Sub(prev.sampledAt).Seconds()
-				if wallDelta > 0 && cpuTotal >= prev.cpuTime100ns {
-					cpuDelta := float64(cpuTotal-prev.cpuTime100ns) / 1e7
-					cpu = (cpuDelta / wallDelta) / float64(numCPU) * 100.0
-					if cpu < 0 {
-						cpu = 0
-					} else if cpu > 100 {
-						cpu = 100
-					}
-				}
-			}
-			cpuSamples[pid] = cpuSample{cpuTime100ns: cpuTotal, sampledAt: now}
-			cpuSamplesMu.Unlock()
-		}
-
-		var pbi windows.PROCESS_BASIC_INFORMATION
-		ppid := int32(0)
-		err := windows.NtQueryInformationProcess(windows.Handle(handle), windows.ProcessBasicInformation, unsafe.Pointer(&pbi), uint32(unsafe.Sizeof(pbi)), nil)
-		if err == nil {
-			ppid = int32(pbi.InheritedFromUniqueProcessId)
-		}
-
-		username := "System"
-		var token windows.Token
-		if err := windows.OpenProcessToken(windows.Handle(handle), windows.TOKEN_QUERY, &token); err == nil {
-			defer token.Close()
-			tokenUser, err := token.GetTokenUser()
-			if err == nil {
-				account, domain, _, err := tokenUser.User.Sid.LookupAccount("")
-				if err == nil {
-					if domain != "" {
-						username = domain + "\\" + account
-					} else {
-						username = account
-					}
-				}
-			}
-		}
-
-		procType := "other"
-		usernameLower := strings.ToLower(username)
-		nameLower := strings.ToLower(name)
-
-		if pid <= 4 || nameLower == "system" || nameLower == "registry" {
-			procType = "system"
-		} else if strings.Contains(usernameLower, "system") ||
-			strings.Contains(usernameLower, "local service") ||
-			strings.Contains(usernameLower, "network service") ||
-			usernameLower == "system" {
-			procType = "service"
-		} else {
-
-			currentUser, err := windows.GetCurrentProcessToken().GetTokenUser()
-			if err == nil {
-				tokenUser, err := token.GetTokenUser()
-				if err == nil && tokenUser.User.Sid.Equals(currentUser.User.Sid) {
-					procType = "own"
-				}
-			}
-		}
-
-		processes = append(processes, wire.ProcessInfo{
-			PID:      pid,
-			PPID:     ppid,
-			Name:     name,
-			CPU:      cpu,
-			Memory:   memory,
-			Username: username,
-			Type:     procType,
-			Self:     pid == selfPID,
-		})
+		processes = append(processes, *info)
 	}
 
 	cpuSamplesMu.Lock()
@@ -225,6 +100,136 @@ func listProcesses() ([]wire.ProcessInfo, error) {
 	cpuSamplesMu.Unlock()
 
 	return processes, nil
+}
+
+func queryProcess(pid, selfPID int32, numCPU int) *wire.ProcessInfo {
+	handle, _, _ := procOpenProcess.Call(
+		windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ,
+		0,
+		uintptr(pid),
+	)
+	if handle == 0 {
+		return nil
+	}
+	defer windows.CloseHandle(windows.Handle(handle))
+
+	var filename [windows.MAX_PATH]uint16
+	ret, _, _ := procGetProcessImageFileNameW.Call(
+		handle,
+		uintptr(unsafe.Pointer(&filename[0])),
+		uintptr(len(filename)),
+	)
+
+	name := "Unknown"
+	if ret != 0 {
+		name = syscall.UTF16ToString(filename[:])
+		for i := len(name) - 1; i >= 0; i-- {
+			if name[i] == '\\' || name[i] == '/' {
+				name = name[i+1:]
+				break
+			}
+		}
+	}
+
+	var memCounters PROCESS_MEMORY_COUNTERS
+	memCounters.CB = uint32(unsafe.Sizeof(memCounters))
+	memory := uint64(0)
+
+	ret, _, _ = procGetProcessMemoryInfo.Call(
+		handle,
+		uintptr(unsafe.Pointer(&memCounters)),
+		uintptr(memCounters.CB),
+	)
+	if ret != 0 {
+		memory = uint64(memCounters.WorkingSetSize)
+	}
+
+	cpu := 0.0
+	var creation, exit, kernel, user windows.Filetime
+	ret, _, _ = procGetProcessTimes.Call(
+		handle,
+		uintptr(unsafe.Pointer(&creation)),
+		uintptr(unsafe.Pointer(&exit)),
+		uintptr(unsafe.Pointer(&kernel)),
+		uintptr(unsafe.Pointer(&user)),
+	)
+	if ret != 0 {
+		cpuTotal := (uint64(kernel.HighDateTime)<<32 | uint64(kernel.LowDateTime)) +
+			(uint64(user.HighDateTime)<<32 | uint64(user.LowDateTime))
+		now := time.Now()
+		cpuSamplesMu.Lock()
+		if prev, ok := cpuSamples[pid]; ok {
+			wallDelta := now.Sub(prev.sampledAt).Seconds()
+			if wallDelta > 0 && cpuTotal >= prev.cpuTime100ns {
+				cpuDelta := float64(cpuTotal-prev.cpuTime100ns) / 1e7
+				cpu = (cpuDelta / wallDelta) / float64(numCPU) * 100.0
+				if cpu < 0 {
+					cpu = 0
+				} else if cpu > 100 {
+					cpu = 100
+				}
+			}
+		}
+		cpuSamples[pid] = cpuSample{cpuTime100ns: cpuTotal, sampledAt: now}
+		cpuSamplesMu.Unlock()
+	}
+
+	var pbi windows.PROCESS_BASIC_INFORMATION
+	ppid := int32(0)
+	if err := windows.NtQueryInformationProcess(windows.Handle(handle), windows.ProcessBasicInformation, unsafe.Pointer(&pbi), uint32(unsafe.Sizeof(pbi)), nil); err == nil {
+		ppid = int32(pbi.InheritedFromUniqueProcessId)
+	}
+
+	username := "System"
+	var token windows.Token
+	tokenOpen := false
+	if err := windows.OpenProcessToken(windows.Handle(handle), windows.TOKEN_QUERY, &token); err == nil {
+		tokenOpen = true
+		defer token.Close()
+		tokenUser, err := token.GetTokenUser()
+		if err == nil {
+			account, domain, _, err := tokenUser.User.Sid.LookupAccount("")
+			if err == nil {
+				if domain != "" {
+					username = domain + "\\" + account
+				} else {
+					username = account
+				}
+			}
+		}
+	}
+
+	procType := "other"
+	usernameLower := strings.ToLower(username)
+	nameLower := strings.ToLower(name)
+
+	if pid <= 4 || nameLower == "system" || nameLower == "registry" {
+		procType = "system"
+	} else if strings.Contains(usernameLower, "system") ||
+		strings.Contains(usernameLower, "local service") ||
+		strings.Contains(usernameLower, "network service") ||
+		usernameLower == "system" {
+		procType = "service"
+	} else if tokenOpen {
+		currentUser, err := windows.GetCurrentProcessToken().GetTokenUser()
+		if err == nil {
+			tokenUser, err := token.GetTokenUser()
+			if err == nil && tokenUser.User.Sid.Equals(currentUser.User.Sid) {
+				procType = "own"
+			}
+		}
+	}
+
+	return &wire.ProcessInfo{
+		PID:      pid,
+		PPID:     ppid,
+		Name:     name,
+		CPU:      cpu,
+		Memory:   memory,
+		Username: username,
+		Type:     procType,
+		Self:     pid == selfPID,
+	}
 }
 
 func killProcess(pid int32) error {
