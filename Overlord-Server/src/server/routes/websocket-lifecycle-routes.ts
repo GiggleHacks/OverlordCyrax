@@ -453,22 +453,25 @@ export async function handleWebSocketMessage(
           logger.info(`[purgatory] client ${resolvedId} is pending approval`);
           ws.send(encodeMessage({ type: "enrollment_status", status: "pending" }));
           deps.notifyDashboard();
-          deps.notifyDashboardClientEvent("client_purgatory", {
-            id: resolvedId,
-            host: _s((payload as any).host),
-            user: _s((payload as any).user),
-            os: _s((payload as any).os),
-            ip: ip || undefined,
-            country,
-          });
-          deps.broadcastClientEvent("client_purgatory", {
-            id: resolvedId,
-            host: _s((payload as any).host),
-            user: _s((payload as any).user),
-            os: _s((payload as any).os),
-            ip: ip || undefined,
-            country,
-          });
+          const isNewPurgatoryEntry = !existing || existing.enrollmentStatus !== "pending";
+          if (isNewPurgatoryEntry) {
+            deps.notifyDashboardClientEvent("client_purgatory", {
+              id: resolvedId,
+              host: _s((payload as any).host),
+              user: _s((payload as any).user),
+              os: _s((payload as any).os),
+              ip: ip || undefined,
+              country,
+            });
+            deps.broadcastClientEvent("client_purgatory", {
+              id: resolvedId,
+              host: _s((payload as any).host),
+              user: _s((payload as any).user),
+              os: _s((payload as any).os),
+              ip: ip || undefined,
+              country,
+            });
+          }
           setTimeout(() => { try { ws.close(4001, "pending"); } catch {} }, 100);
           return;
         }
