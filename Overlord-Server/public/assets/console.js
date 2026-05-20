@@ -12,6 +12,7 @@ const userLabel = document.getElementById("user-label");
 const osLabel = document.getElementById("os-label");
 const reconnectBtn = document.getElementById("reconnect-btn");
 const clearBtn = document.getElementById("clear-btn");
+const interruptBtn = document.getElementById("interrupt-btn");
 
 const clientId = decodeURIComponent(
   location.pathname.split("/").filter(Boolean)[0] || "",
@@ -19,49 +20,82 @@ const clientId = decodeURIComponent(
 const wsProto = location.protocol === "https:" ? "wss" : "ws";
 const wsUrl = `${wsProto}://${location.host}/api/clients/${encodeURIComponent(clientId)}/console/ws`;
 
-const term = new Terminal({
-  cursorBlink: true,
-  fontFamily: '"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace',
-  fontSize: 13,
-  scrollback: 10000,
-  allowProposedApi: true,
-  theme: {
-    background: "#050913",
-    foreground: "#e8edf2",
-    cursor: "#6ee7b7",
-    cursorAccent: "#050913",
-    selectionBackground: "rgba(110, 231, 183, 0.25)",
-    black: "#1a1d29",
-    red: "#ef4444",
-    green: "#22c55e",
-    yellow: "#eab308",
-    blue: "#60a5fa",
-    magenta: "#c084fc",
-    cyan: "#22d3ee",
-    white: "#e8edf2",
-    brightBlack: "#475569",
-    brightRed: "#f87171",
-    brightGreen: "#4ade80",
-    brightYellow: "#facc15",
-    brightBlue: "#93c5fd",
-    brightMagenta: "#d8b4fe",
-    brightCyan: "#67e8f9",
-    brightWhite: "#f8fafc",
-  },
-});
-const fit = new FitAddon();
-term.loadAddon(fit);
-term.loadAddon(new WebLinksAddon());
-term.open(containerEl);
+const THEME = {
+  background: "#050913",
+  foreground: "#e8edf2",
+  cursor: "#6ee7b7",
+  cursorAccent: "#050913",
+  selectionBackground: "rgba(110, 231, 183, 0.25)",
+  black: "#1a1d29",
+  red: "#ef4444",
+  green: "#22c55e",
+  yellow: "#eab308",
+  blue: "#60a5fa",
+  magenta: "#c084fc",
+  cyan: "#22d3ee",
+  white: "#e8edf2",
+  brightBlack: "#475569",
+  brightRed: "#f87171",
+  brightGreen: "#4ade80",
+  brightYellow: "#facc15",
+  brightBlue: "#93c5fd",
+  brightMagenta: "#d8b4fe",
+  brightCyan: "#67e8f9",
+  brightWhite: "#f8fafc",
+};
 
+let term = null;
+let fit = null;
 let ws = null;
 let connected = false;
 let sessionClosed = false;
 let offlineNotified = false;
 let lastSize = { cols: 0, rows: 0 };
 let resizeTimer = 0;
+let pendingSystem = [];
+
+function isWindowsOs(os) {
+  return typeof os === "string" && /win/i.test(os);
+}
+
+function initTerminal(os) {
+  if (term) return;
+  const opts = {
+    cursorBlink: true,
+    fontFamily: '"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace',
+    fontSize: 13,
+    scrollback: 10000,
+    allowProposedApi: true,
+    theme: THEME,
+  };
+  if (isWindowsOs(os)) {
+    opts.windowsPty = { backend: "conpty", buildNumber: 22621 };
+  }
+
+  term = new Terminal(opts);
+  fit = new FitAddon();
+  term.loadAddon(fit);
+  term.loadAddon(new WebLinksAddon());
+  term.open(containerEl);
+
+  term.onData((d) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (sessionClosed) return;
+    ws.send(encodeMsgpack({ type: "input", data: d }));
+  });
+
+  term.onResize(() => {
+    sendResize();
+  });
+
+  for (const msg of pendingSystem) term.writeln(msg);
+  pendingSystem.length = 0;
+
+  tryFit();
+}
 
 function tryFit() {
+  if (!fit) return;
   try {
     fit.fit();
   } catch {
@@ -76,12 +110,18 @@ function setStatus(label, tone = "pill-offline") {
 }
 
 function writeSystem(msg) {
-  term.writeln(`\x1b[2m[${msg}]\x1b[0m`);
+  const line = `\x1b[2m[${msg}]\x1b[0m`;
+  if (term) {
+    term.writeln(line);
+  } else {
+    pendingSystem.push(line);
+  }
 }
 
 function sendResize() {
   if (sessionClosed) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!term) return;
   const cols = term.cols;
   const rows = term.rows;
   if (!cols || !rows) return;
@@ -91,7 +131,7 @@ function sendResize() {
 }
 
 function applyOutput(data) {
-  if (!data) return;
+  if (!data || !term) return;
   if (data instanceof Uint8Array) {
     term.write(data);
   } else if (typeof data === "string") {
@@ -112,9 +152,6 @@ function connect() {
   ws.addEventListener("open", () => {
     connected = true;
     setStatus("Connected", "pill-online");
-    term.options.disableStdin = false;
-    tryFit();
-    sendResize();
   });
 
   ws.addEventListener("message", (event) => {
@@ -123,10 +160,18 @@ function connect() {
 
     switch (payload.type) {
       case "ready":
-        if (clientLabel) clientLabel.textContent = payload.clientId || "unknown";
+        if (clientLabel) {
+          const full = payload.clientId || "unknown";
+          clientLabel.textContent = full.length > 7 ? full.slice(0, 7) + "…" : full;
+          clientLabel.title = full;
+        }
         if (hostLabel) hostLabel.textContent = payload.host || "unknown";
         if (userLabel) userLabel.textContent = payload.user || "unknown";
         if (osLabel) osLabel.textContent = payload.os || "unknown";
+        initTerminal(payload.os);
+        if (term) term.options.disableStdin = false;
+        tryFit();
+        sendResize();
         setStatus("Live", "pill-online");
         break;
       case "status":
@@ -137,12 +182,12 @@ function connect() {
             writeSystem(payload.reason || "Client offline");
           }
           sessionClosed = true;
-          term.options.disableStdin = true;
+          if (term) term.options.disableStdin = true;
         } else if (payload.status === "closed") {
           setStatus("Closed", "pill-offline");
           writeSystem(payload.reason || "Console closed");
           sessionClosed = true;
-          term.options.disableStdin = true;
+          if (term) term.options.disableStdin = true;
         } else if (payload.status === "online") {
           offlineNotified = false;
         }
@@ -151,10 +196,10 @@ function connect() {
         applyOutput(payload.data);
         if (payload.error) writeSystem(payload.error);
         if (typeof payload.exitCode === "number") {
-          term.writeln(`\r\n\x1b[33m[Process exited (${payload.exitCode})]\x1b[0m`);
+          if (term) term.writeln(`\r\n\x1b[33m[Process exited (${payload.exitCode})]\x1b[0m`);
           setStatus("Closed", "pill-offline");
           sessionClosed = true;
-          term.options.disableStdin = true;
+          if (term) term.options.disableStdin = true;
         }
         break;
       default:
@@ -167,23 +212,13 @@ function connect() {
     connected = false;
     setStatus("Disconnected", "pill-offline");
     if (!sessionClosed) writeSystem("Connection closed");
-    term.options.disableStdin = true;
+    if (term) term.options.disableStdin = true;
   });
 
   ws.addEventListener("error", () => {
     setStatus("Error", "pill-offline");
   });
 }
-
-term.onData((d) => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (sessionClosed) return;
-  ws.send(encodeMsgpack({ type: "input", data: d }));
-});
-
-term.onResize(() => {
-  sendResize();
-});
 
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
@@ -192,16 +227,23 @@ window.addEventListener("resize", () => {
 
 reconnectBtn?.addEventListener("click", () => {
   try { ws?.close(); } catch { /* ignore */ }
-  term.reset();
+  if (term) term.reset();
+  lastSize = { cols: 0, rows: 0 };
   connect();
 });
 
 clearBtn?.addEventListener("click", () => {
-  term.clear();
+  if (term) term.clear();
+});
+
+interruptBtn?.addEventListener("click", () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (sessionClosed) return;
+  ws.send(encodeMsgpack({ type: "input", data: "\x03" }));
+  if (term) term.focus();
 });
 
 requestAnimationFrame(() => {
-  tryFit();
   checkFeatureAccess("console", clientId).then((ok) => ok && connect());
 });
 

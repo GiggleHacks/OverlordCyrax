@@ -345,7 +345,7 @@ export function handleConsoleViewerOpen(ws: ServerWebSocket<SocketData>) {
   const effectiveSessionId = sessionId || uuidv4();
   ws.data.sessionId = effectiveSessionId;
   const target = clientManager.getClient(clientId);
-  const session: ConsoleSession = { id: effectiveSessionId, clientId, viewer: ws, createdAt: Date.now() };
+  const session: ConsoleSession = { id: effectiveSessionId, clientId, viewer: ws, createdAt: Date.now(), started: false };
   sessionManager.addConsoleSession(session);
   safeSendViewer(ws, {
     type: "ready",
@@ -360,7 +360,6 @@ export function handleConsoleViewerOpen(ws: ServerWebSocket<SocketData>) {
     safeSendViewer(ws, { type: "status", status: "offline", reason: "Client is offline", sessionId: effectiveSessionId });
     return;
   }
-  startConsoleForViewer(target, effectiveSessionId);
 }
 
 export function handleRemoteDesktopViewerOpen(ws: ServerWebSocket<SocketData>) {
@@ -1219,7 +1218,13 @@ export function handleConsoleViewerMessage(ws: ServerWebSocket<SocketData>, raw:
     case "resize": {
       const cols = Number(payload.cols) || 120;
       const rows = Number(payload.rows) || 36;
-      sendConsoleCommand(target, "console_resize", { sessionId, cols, rows });
+      const session = sessionId ? sessionManager.getConsoleSession(sessionId) : undefined;
+      if (session && !session.started) {
+        session.started = true;
+        startConsoleForViewer(target, sessionId!, cols, rows);
+      } else {
+        sendConsoleCommand(target, "console_resize", { sessionId, cols, rows });
+      }
       break;
     }
     case "stop": {

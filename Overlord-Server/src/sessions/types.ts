@@ -35,6 +35,7 @@ export type ConsoleSession = {
   clientId: string;
   viewer: ServerWebSocket<SocketData>;
   createdAt: number;
+  started?: boolean;
 };
 
 export type RemoteDesktopViewer = {

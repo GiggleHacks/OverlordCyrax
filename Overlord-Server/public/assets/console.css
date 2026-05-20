@@ -14,12 +14,15 @@
   flex: 1;
   padding: 18px;
   box-sizing: border-box;
+  max-width: none !important;
+  width: 100%;
+  margin: 0;
 }
 
 .console-card {
-  max-width: 1280px;
   width: 100%;
-  margin: 0 auto;
+  max-width: none !important;
+  margin: 0;
   box-sizing: border-box;
   background: rgba(8, 12, 22, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -40,8 +43,9 @@
 }
 
 .console-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, max-content));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 14px 24px;
   color: #a9b8d4;
 }

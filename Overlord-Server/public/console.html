@@ -17,7 +17,7 @@
     <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
     <link rel="stylesheet" href="/assets/main.css" />
     <link rel="stylesheet" href="/assets/custom.css" />
-    <link rel="stylesheet" href="/assets/console.css" />
+    <link rel="stylesheet" href="/assets/console.css?v=3" />
   </head>
   <body class="console-body">
     <header id="top-nav"></header>
@@ -46,6 +46,9 @@
             <span id="status-pill" class="pill pill-offline"><i class="fa-solid fa-circle"></i> Offline</span>
             <button type="button" id="reconnect-btn" class="button ghost" title="Reconnect">
               <i class="fa-solid fa-rotate-right"></i><span>Reconnect</span>
+            </button>
+            <button type="button" id="interrupt-btn" class="button ghost" title="Send Ctrl+C">
+              <i class="fa-solid fa-hand"></i><span>Ctrl+C</span>
             </button>
             <button type="button" id="clear-btn" class="button ghost" title="Clear screen">
               <i class="fa-solid fa-eraser"></i><span>Clear</span>
