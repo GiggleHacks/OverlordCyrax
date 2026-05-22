@@ -135,7 +135,7 @@ func NowWebcam(ctx context.Context, env *rt.Env) error {
 				log.Printf("webcam: h264 skipped for odd dimensions (%dx%d), falling back to jpeg", w, h)
 			} else {
 				rgba := toRGBA(img)
-				if h264Bytes, err := encodeH264Frame(rgba); err == nil && len(h264Bytes) > 0 {
+				if h264Bytes, err := encodeH264FrameWebcam(rgba); err == nil && len(h264Bytes) > 0 {
 					frameBytes = h264Bytes
 					outFormat = "h264"
 				} else {

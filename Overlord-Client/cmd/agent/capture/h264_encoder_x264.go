@@ -221,3 +221,82 @@ func closeHVNCH264EncoderLocked() {
 	hvncH264FPS = 0
 	hvncH264Buf.Reset()
 }
+
+var (
+	webcamH264Mu      sync.Mutex
+	webcamH264Enc     *x264.Encoder
+	webcamH264Buf     bytes.Buffer
+	webcamH264Width   int
+	webcamH264Height  int
+	webcamH264FPS     int
+	webcamH264Scratch []byte
+)
+
+func encodeH264FrameWebcam(img *image.RGBA) ([]byte, error) {
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	webcamH264Mu.Lock()
+	defer webcamH264Mu.Unlock()
+
+	if err := ensureWebcamH264EncoderLocked(width, height); err != nil {
+		return nil, err
+	}
+
+	webcamH264Buf.Reset()
+	if err := webcamH264Enc.Encode(img); err != nil {
+		return nil, err
+	}
+
+	n := webcamH264Buf.Len()
+	if n == 0 {
+		return nil, nil
+	}
+	if cap(webcamH264Scratch) < n {
+		webcamH264Scratch = make([]byte, n, n+(n/4))
+	} else {
+		webcamH264Scratch = webcamH264Scratch[:n]
+	}
+	copy(webcamH264Scratch, webcamH264Buf.Bytes())
+	return webcamH264Scratch, nil
+}
+
+func ensureWebcamH264EncoderLocked(width, height int) error {
+	fps := activeH264FPS()
+	if webcamH264Enc != nil && webcamH264Width == width && webcamH264Height == height && webcamH264FPS == fps {
+		return nil
+	}
+	closeWebcamH264EncoderLocked()
+	opts := &x264.Options{
+		Width:        width,
+		Height:       height,
+		FrameRate:    fps,
+		Tune:         "zerolatency",
+		Preset:       "veryfast",
+		Profile:      "main",
+		RateControl:  "crf",
+		RateConstant: 23,
+		LogLevel:     x264.LogError,
+	}
+	enc, err := x264.NewEncoder(&webcamH264Buf, opts)
+	if err != nil {
+		return err
+	}
+	webcamH264Enc = enc
+	webcamH264Width = width
+	webcamH264Height = height
+	webcamH264FPS = fps
+	return nil
+}
+
+func closeWebcamH264EncoderLocked() {
+	if webcamH264Enc != nil {
+		_ = webcamH264Enc.Close()
+		webcamH264Enc = nil
+	}
+	webcamH264Width = 0
+	webcamH264Height = 0
+	webcamH264FPS = 0
+	webcamH264Buf.Reset()
+}
