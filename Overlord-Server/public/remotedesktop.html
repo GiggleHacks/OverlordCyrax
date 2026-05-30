@@ -130,6 +130,9 @@
                   </label>
                   <span id="codecMode" class="pill pill-ghost text-slate-100 text-xs">Codec: auto</span>
                 </div>
+                <label class="mt-2 flex items-center gap-2 text-sm text-slate-200" title="Use GPU desktop duplication (Windows only)">
+                  <input type="checkbox" id="duplicationCtrl" /> GPU Capture
+                </label>
               </div>
 
               <div class="px-4 py-3 border-b border-slate-800">
@@ -161,9 +164,6 @@
                   </label>
                   <label class="flex items-center gap-2 text-sm text-slate-200" title="Show mouse cursor in captured frames">
                     <input type="checkbox" id="cursorCtrl" /> Cursor
-                  </label>
-                  <label class="flex items-center gap-2 text-sm text-slate-200" title="Use GPU desktop duplication (Windows only)">
-                    <input type="checkbox" id="duplicationCtrl" /> GPU Capture
                   </label>
                   <label class="flex items-center gap-2 text-sm text-slate-200 col-span-2" title="Sync clipboard between your browser and the remote machine">
                     <input type="checkbox" id="clipboardSyncCtrl" /> Clipboard Sync

@@ -1,5 +1,5 @@
 import type { ClientInfo, ListFilters, ListResult, ClientRole } from "../types";
-import { hasThumbnail, getThumbnailVersion } from "../thumbnails";
+import { getThumbnailSummaries } from "../thumbnails";
 import { db, dbPath } from "./connection";
 import "./schema";
 
@@ -905,48 +905,52 @@ export function listClients(filters: ListFilters): ListResult {
     .all(...params, pageSize, offset);
 
   const { floodedHwids, floodedHardware, floodedIps } = getFloodSetsWithCache();
+  const thumbnailSummaries = getThumbnailSummaries(rows.map((row: any) => row.id));
 
-  const items = rows.map((c: any) => ({
-    id: c.id,
-    hwid: c.hwid,
-    role: (c.role as ClientRole) || "client",
-    ip: c.ip || null,
-    lastSeen: Number(c.lastSeen) || 0,
-    host: c.host,
-    os: c.os || "unknown",
-    arch: c.arch || "arch?",
-    version: c.version || "0",
-    user: c.user,
-    nickname: c.nickname || null,
-    customTag: c.customTag || null,
-    customTagNote: c.customTagNote ?? null,
-    monitors: c.monitors,
-    country: c.country || "ZZ",
-    pingMs: c.pingMs ?? null,
-    online: c.online === 1,
-    bookmarked: c.bookmarked === 1,
-    buildTag: c.buildTag || null,
-    builtByUserId: typeof c.builtByUserId === "number" ? c.builtByUserId : null,
-    enrollmentStatus: c.enrollmentStatus || "pending",
-    publicKey: c.publicKey || null,
-    keyFingerprint: c.keyFingerprint || null,
-    cpu: c.cpu || null,
-    gpu: c.gpu || null,
-    ram: c.ram || null,
-    isAdmin: c.isAdmin === 1,
-    elevation: c.elevation || null,
-    permissions: c.permissions ? (() => { try { return JSON.parse(c.permissions); } catch { return null; } })() : null,
-    disconnectReason: c.disconnectReason || null,
-    disconnectDetail: c.disconnectDetail || null,
-    groupId: typeof c.groupId === "number" ? c.groupId : null,
-    groupName: c.groupName || null,
-    groupColor: c.groupColor || null,
-    notificationsMuted: c.notificationsMuted === 1,
-    denyReason: c.denyReason || null,
-    hasThumbnail: hasThumbnail(c.id),
-    thumbnailVersion: getThumbnailVersion(c.id),
-    suspiciousFlags: computeClientSuspiciousFlags(c, { floodedHwids, floodedHardware, floodedIps }),
-  }));
+  const items = rows.map((c: any) => {
+    const thumbnail = thumbnailSummaries.get(c.id);
+    return {
+      id: c.id,
+      hwid: c.hwid,
+      role: (c.role as ClientRole) || "client",
+      ip: c.ip || null,
+      lastSeen: Number(c.lastSeen) || 0,
+      host: c.host,
+      os: c.os || "unknown",
+      arch: c.arch || "arch?",
+      version: c.version || "0",
+      user: c.user,
+      nickname: c.nickname || null,
+      customTag: c.customTag || null,
+      customTagNote: c.customTagNote ?? null,
+      monitors: c.monitors,
+      country: c.country || "ZZ",
+      pingMs: c.pingMs ?? null,
+      online: c.online === 1,
+      bookmarked: c.bookmarked === 1,
+      buildTag: c.buildTag || null,
+      builtByUserId: typeof c.builtByUserId === "number" ? c.builtByUserId : null,
+      enrollmentStatus: c.enrollmentStatus || "pending",
+      publicKey: c.publicKey || null,
+      keyFingerprint: c.keyFingerprint || null,
+      cpu: c.cpu || null,
+      gpu: c.gpu || null,
+      ram: c.ram || null,
+      isAdmin: c.isAdmin === 1,
+      elevation: c.elevation || null,
+      permissions: c.permissions ? (() => { try { return JSON.parse(c.permissions); } catch { return null; } })() : null,
+      disconnectReason: c.disconnectReason || null,
+      disconnectDetail: c.disconnectDetail || null,
+      groupId: typeof c.groupId === "number" ? c.groupId : null,
+      groupName: c.groupName || null,
+      groupColor: c.groupColor || null,
+      notificationsMuted: c.notificationsMuted === 1,
+      denyReason: c.denyReason || null,
+      hasThumbnail: thumbnail?.hasThumbnail ?? false,
+      thumbnailVersion: thumbnail?.thumbnailVersion ?? 0,
+      suspiciousFlags: computeClientSuspiciousFlags(c, { floodedHwids, floodedHardware, floodedIps }),
+    };
+  });
 
   return { page, pageSize, total: totalRow.c, online: onlineRow.c, items };
 }

