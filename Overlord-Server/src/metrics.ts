@@ -94,7 +94,7 @@ class MetricsCollector {
   private receivedPerSecond: number = 0;
 
   private history: MetricsHistory[] = [];
-  private maxHistoryPoints: number = 4320;
+  private maxHistoryPoints: number = 7 * 24 * 60 * 12;
   private snapshotEnricher: ((snapshot: MetricsSnapshot) => void) | null = null;
 
   private pingValues: number[] = [];

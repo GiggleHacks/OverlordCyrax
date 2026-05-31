@@ -13,6 +13,7 @@ import {
   markManualDisconnect,
 } from "./data.js";
 import { ThumbnailLoader } from "./thumbnail-loader.js";
+import { initDashboardStats, updateDashboardStatsFromClients } from "./dashboard-stats.js";
 
 const grid = document.getElementById("grid");
 const totalPill = document.getElementById("total-pill");
@@ -844,7 +845,11 @@ function initializeRenderer() {
     getDisplayFields: () => displayFields,
   });
   rendererSetLayout = rSetLayout;
-  registerRenderer(renderMerge);
+  registerRenderer((data, options) => {
+    renderMerge(data, options);
+    updateDashboardStatsFromClients(data);
+  });
+  initDashboardStats();
   setupDashboardThumbnailLoader();
   refreshGroupFilter();
   loadWithOptions();

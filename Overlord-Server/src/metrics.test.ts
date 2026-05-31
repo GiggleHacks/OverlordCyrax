@@ -178,13 +178,14 @@ describe("MetricsCollector", () => {
     });
 
     test("history is capped at maxHistoryPoints", () => {
-      for (let i = 0; i < 4500; i++) {
+      const weekOfFiveSecondSamples = 7 * 24 * 60 * 12;
+      for (let i = 0; i < weekOfFiveSecondSamples + 180; i++) {
         const snap = metrics.getSnapshot();
         metrics.recordHistoryEntry(snap);
       }
 
       const history = metrics.getHistory();
-      expect(history.length).toBeLessThanOrEqual(4320);
+      expect(history.length).toBeLessThanOrEqual(weekOfFiveSecondSamples);
     });
 
     test("getHistory returns a copy", () => {

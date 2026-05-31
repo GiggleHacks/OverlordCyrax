@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="/assets/main.css" />
     <link rel="stylesheet" href="/assets/custom.css" />
     <script defer src="/vendor/animejs/anime.min.js"></script>
+    <script defer src="/vendor/chart.js/chart.umd.js"></script>
     <link rel="preload" href="/api/clients?page=1&amp;pageSize=12&amp;q=&amp;sort=stable&amp;status=all&amp;os=all&amp;country=all&amp;group=all" as="fetch" crossorigin="use-credentials" />
     <link rel="preload" href="/api/auth/me" as="fetch" crossorigin="use-credentials" />
     <link rel="preload" href="/api/groups" as="fetch" crossorigin="use-credentials" />
@@ -38,6 +39,91 @@
             >0 online</span
           >
         </div>
+        <section id="dashboard-stats" class="dashboard-stats-shell" aria-label="Dashboard status">
+          <div class="dashboard-stats-bar">
+            <div class="dashboard-stats-title">
+              <i class="fa-solid fa-chart-simple"></i>
+              <span>Status overview</span>
+            </div>
+            <button id="dashboard-stats-toggle" class="dashboard-stats-toggle" type="button" aria-expanded="true" title="Hide status overview">
+              <i class="fa-solid fa-eye-slash"></i>
+            </button>
+          </div>
+          <div id="dashboard-stats-content" class="dashboard-stats-content">
+          <div class="dashboard-stat-card dashboard-stat-card--online">
+            <div class="dashboard-stat-topline">
+              <span class="dashboard-live-dot is-live"></span>
+              <span>Online</span>
+            </div>
+            <div id="dash-online-count" class="dashboard-stat-value">0</div>
+            <div class="dashboard-stat-subline">
+              <span id="dash-total-count">0 total</span>
+              <span id="dash-online-ratio">0%</span>
+            </div>
+          </div>
+          <div class="dashboard-stat-card dashboard-stat-card--sessions">
+            <div class="dashboard-stat-topline">
+              <i class="fa-solid fa-wave-square"></i>
+              <span>Sessions</span>
+            </div>
+            <div id="dash-session-count" class="dashboard-stat-value">0</div>
+            <div class="dashboard-stat-subline">
+              <span id="dash-command-minute">0 cmd/min</span>
+              <span id="dash-http-errors">0 errors</span>
+            </div>
+          </div>
+          <div class="dashboard-chart-card">
+            <div class="dashboard-chart-head">
+              <div>
+                <span class="dashboard-chart-kicker">Past Week</span>
+                <strong>Clients Online</strong>
+              </div>
+              <span id="dash-trend-status" class="dashboard-chart-pill">Live</span>
+            </div>
+            <div class="dashboard-chart-wrap">
+              <canvas id="dash-online-chart"></canvas>
+            </div>
+          </div>
+          <div class="dashboard-chart-card">
+            <div class="dashboard-chart-head">
+              <div>
+                <span class="dashboard-chart-kicker">Fleet Mix</span>
+                <strong>Operating Systems</strong>
+              </div>
+              <span id="dash-os-leader" class="dashboard-chart-pill">None</span>
+            </div>
+            <div class="dashboard-chart-wrap dashboard-chart-wrap--donut">
+              <canvas id="dash-os-chart"></canvas>
+            </div>
+          </div>
+          <div class="dashboard-health-card">
+            <div class="dashboard-chart-head">
+              <div>
+                <span class="dashboard-chart-kicker">Status</span>
+                <strong>Server Pulse</strong>
+              </div>
+              <span id="dash-last-refresh" class="dashboard-chart-pill">Waiting</span>
+            </div>
+            <div class="dashboard-health-list">
+              <div class="dashboard-health-row">
+                <span class="dashboard-live-dot is-live"></span>
+                <span>API</span>
+                <strong id="dash-api-status">Live</strong>
+              </div>
+              <div class="dashboard-health-row">
+                <span id="dash-memory-dot" class="dashboard-live-dot is-live"></span>
+                <span>Memory</span>
+                <strong id="dash-memory-status">0%</strong>
+              </div>
+              <div class="dashboard-health-row">
+                <span id="dash-ping-dot" class="dashboard-live-dot is-muted"></span>
+                <span>Ping Avg</span>
+                <strong id="dash-ping-status">-</strong>
+              </div>
+            </div>
+          </div>
+          </div>
+        </section>
         <div class="dashboard-toolbar">
           <label
             id="search-shell"
