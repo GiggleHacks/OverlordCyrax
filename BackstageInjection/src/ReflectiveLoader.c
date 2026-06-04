@@ -301,6 +301,12 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	// relocate the image. Also zeros all memory and marks it as READ, WRITE and EXECUTE to avoid any problems.
 	uiBaseAddress = (ULONG_PTR)pVirtualAlloc(NULL, ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 
+	// Guard against allocation failure (out-of-memory, ACG/CFG policy, etc.).
+	// Without this check, every subsequent write to uiBaseAddress would be a
+	// write through NULL — an access violation in the remote process.
+	if (!uiBaseAddress)
+		return 0;
+
 	// we must now copy over the headers
 	uiValueA = ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader.SizeOfHeaders;
 	uiValueB = uiLibraryAddress;
@@ -510,7 +516,9 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	uiValueA = (uiBaseAddress + ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader.AddressOfEntryPoint);
 
 	// We must flush the instruction cache to avoid stale code being used which was updated by our relocation processing.
-	pNtFlushInstructionCache((HANDLE)-1, NULL, 0);
+	// Guard against pNtFlushInstructionCache being NULL (e.g. if ntdll was not found in the PEB module list).
+	if (pNtFlushInstructionCache)
+		pNtFlushInstructionCache((HANDLE)-1, NULL, 0);
 
 	// call our respective entry point, fudging our hInstance value
 #ifdef REFLECTIVEDLLINJECTION_VIA_LOADREMOTELIBRARYR

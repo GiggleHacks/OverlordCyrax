@@ -11,6 +11,7 @@ export function createFilePreviewModal({
   clientId,
   notifyToast,
   onDownload,
+  beforeFileRead,
 }) {
   const filePreviewModal = document.getElementById("file-preview-modal");
   const previewFileNameEl = document.getElementById("preview-file-name");
@@ -40,6 +41,10 @@ export function createFilePreviewModal({
 
     if (typeof knownSize === "number" && knownSize > PREVIEW_MAX_BYTES) {
       notifyToast(`File too large to preview (${formatBytes(knownSize)})`, "info", 4000);
+      return;
+    }
+
+    if (beforeFileRead && !(await beforeFileRead(path, "preview file"))) {
       return;
     }
 

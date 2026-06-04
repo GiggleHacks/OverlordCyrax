@@ -1,4 +1,11 @@
 //go:build !windows && !linux && !darwin && !nokeylogger
+// Catch-all stub for platforms without a native keylogger implementation
+// (FreeBSD, OpenBSD, Android, etc.).
+//
+// Darwin is excluded because it has its own implementations:
+//   - keylogger_darwin.go      (darwin && cgo)    — CGEventTap, full capture
+//   - keylogger_darwin_nocgo.go (darwin && !cgo)  — osascript permission gate,
+//                                                   stub capture
 
 package keylogger
 

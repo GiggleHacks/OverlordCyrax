@@ -16,6 +16,7 @@ export function createFileHexHashManager({
   send,
   notifyToast,
   getCurrentPreviewEntry,
+  beforeFileRead,
 }) {
   const previewTextHeadHost = document.getElementById("preview-text-head-host");
   const previewTextHead = document.getElementById("preview-text-head");
@@ -50,7 +51,10 @@ export function createFileHexHashManager({
     }
   }
 
-  function requestFilePeek(path, kind) {
+  async function requestFilePeek(path, kind) {
+    if (beforeFileRead && !(await beforeFileRead(path, kind === "hex" ? "read file bytes" : "preview file"))) {
+      return false;
+    }
     const commandId = `peek-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const fileName = path.split(/[\/\\]/).pop() || "";
     peekRequests.set(commandId, { kind, path, fileName });
@@ -60,10 +64,14 @@ export function createFileHexHashManager({
       id: commandId,
       payload: { path, bytes: 4096 },
     });
+    return true;
   }
 
-  function openHexViewer(path) {
+  async function openHexViewer(path) {
     if (!hexViewerModal) return;
+    if (beforeFileRead && !(await beforeFileRead(path, "read file bytes"))) {
+      return;
+    }
     const fileName = path.split(/[\/\\]/).pop() || "";
     if (hexViewerFile) hexViewerFile.textContent = fileName;
     if (hexViewerBody) hexViewerBody.innerHTML = '<div class="text-slate-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading...</div>';
@@ -153,7 +161,10 @@ export function createFileHexHashManager({
     previewTextHeadHost?.classList.remove("hidden");
   }
 
-  function requestFileHash(path, source) {
+  async function requestFileHash(path, source) {
+    if (beforeFileRead && !(await beforeFileRead(path, "read file"))) {
+      return false;
+    }
     const commandId = `hash-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const fileName = path.split(/[\/\\]/).pop() || "";
     hashRequests.set(commandId, { path, fileName, source });
@@ -164,6 +175,7 @@ export function createFileHexHashManager({
       payload: { path, algorithm: "sha256" },
     });
     notifyToast(`Hashing ${fileName}...`, "info", 2500);
+    return true;
   }
 
   function handleFileHashResult(msg) {

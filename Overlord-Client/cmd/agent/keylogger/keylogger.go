@@ -33,6 +33,14 @@ type Keylogger struct {
 	lastKeyTime        time.Time
 	lineStarted        bool
 	currentWindowTitle string
+	permissionGranted  bool // set to true once OS permission has been confirmed
+}
+
+// IsRunning returns whether the keylogger capture loop is active.
+func (k *Keylogger) IsRunning() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.running
 }
 
 func New() *Keylogger {
