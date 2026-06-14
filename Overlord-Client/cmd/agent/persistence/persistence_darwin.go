@@ -243,3 +243,34 @@ func uninstall() error {
 
 	return nil
 }
+
+func removeCurrentInstall(currentExe string) error {
+	currentExe = filepath.Clean(strings.TrimSpace(currentExe))
+	if currentExe == "" {
+		return nil
+	}
+
+	targetPath, err := getTargetPath()
+	if err == nil && filepath.Clean(targetPath) == currentExe {
+		return nil
+	}
+
+	plistPath, err := getPlistPath()
+	if err != nil {
+		return nil
+	}
+	if startupFileReferences(plistPath, currentExe) {
+		if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove current plist file: %w", err)
+		}
+	}
+	return nil
+}
+
+func startupFileReferences(path string, exePath string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "<string>"+exePath+"</string>")
+}

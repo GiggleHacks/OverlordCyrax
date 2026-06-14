@@ -279,6 +279,10 @@ func uninstall() error {
 	return nil
 }
 
+func removeCurrentInstall(_ string) error {
+	return nil
+}
+
 func cleanupPrefixedExecutables(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

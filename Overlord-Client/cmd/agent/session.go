@@ -124,6 +124,12 @@ func runClient(cfg config.Config) {
 
 		var sessionErr error
 		if err := runSession(ctx, cancel, conn, sessionCfg); err != nil {
+			if isSupersededError(err) {
+				log.Printf("session superseded by a newer connection; exiting")
+				handleSuperseded(cfg)
+				exitProcess(0)
+				return
+			}
 			sessionErr = err
 			log.Printf("session ended: %v (retrying in %s)", err, backoff)
 			lastDisconnect = time.Now()
@@ -418,7 +424,7 @@ func shouldRetryImmediately(err error) bool {
 	}
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) {
-		if closeErr.Code == 4001 || closeErr.Code == 4002 || closeErr.Code == 4003 {
+		if closeErr.Code == 4001 || closeErr.Code == 4002 || closeErr.Code == 4003 || closeErr.Code == supersededCloseCode {
 			return false
 		}
 		if closeErr.Code == websocket.StatusNormalClosure || closeErr.Code == websocket.StatusGoingAway {
