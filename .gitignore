@@ -515,3 +515,4 @@ FodyWeavers.xsd
 save.txt
 *.wasm
 Albedo/*
+plink/*

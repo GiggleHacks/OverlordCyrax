@@ -2961,6 +2961,33 @@ tbody tr:hover {
 .cv-pill-muted { background: rgba(245, 158, 11, 0.12); color: #fcd34d; border-color: rgba(245, 158, 11, 0.3); }
 .cv-pill-macperm.is-ok { background: rgba(16, 185, 129, 0.12); color: #86efac; border-color: rgba(16, 185, 129, 0.3); }
 .cv-pill-macperm.is-warn { background: rgba(245, 158, 11, 0.12); color: #fcd34d; border-color: rgba(245, 158, 11, 0.3); }
+.cv-plugin-badge {
+  width: auto;
+  min-width: 18px;
+  gap: 4px;
+  padding: 0 5px;
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  text-decoration: none;
+  cursor: pointer;
+}
+.cv-plugin-badge span {
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-plugin-badge img {
+  width: 13px;
+  height: 13px;
+  object-fit: contain;
+  border-radius: 3px;
+}
+.cv-plugin-badge-good { color: #86efac; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.3); }
+.cv-plugin-badge-warn { color: #fcd34d; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.3); }
+.cv-plugin-badge-danger { color: #fca5a5; background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3); }
+.cv-plugin-badge:hover { filter: brightness(1.18); }
 
 .cv-perm-list {
   display: flex;

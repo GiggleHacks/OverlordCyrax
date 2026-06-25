@@ -220,6 +220,7 @@ export async function ensurePluginExtracted(
       js: `${safeId}.js`,
     },
     ...(extraConfig.navbar && { navbar: extraConfig.navbar }),
+    ...(extraConfig.dashboard && { dashboard: extraConfig.dashboard }),
     ...(build && { build }),
     hasServer: serverEntry !== null || !!serverTsEntry,
   };

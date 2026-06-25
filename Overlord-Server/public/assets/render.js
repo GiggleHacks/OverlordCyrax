@@ -328,6 +328,7 @@ export function createRenderer({
   userRole,
   getServerVersion,
   getDisplayFields,
+  getDashboardBadges,
 }) {
   const isViewer = userRole === "viewer";
   const LARGE_CLIENT_THRESHOLD = 50_000;
@@ -510,6 +511,11 @@ export function createRenderer({
         return;
       }
 
+      if (e.target.closest(".cv-plugin-badge")) {
+        e.stopPropagation();
+        return;
+      }
+
       const thumbImg = e.target.closest(".thumb-img");
       if (thumbImg) {
         if (thumbImg.src) openModal(thumbImg.src);
@@ -661,8 +667,50 @@ export function createRenderer({
     });
   }
 
+  function dashboardBadges(client) {
+    if (typeof getDashboardBadges !== "function") return [];
+    const badges = getDashboardBadges(client) || [];
+    return Array.isArray(badges) ? badges.slice(0, 8) : [];
+  }
+
+  function dashboardBadgesDigest(client) {
+    return JSON.stringify(dashboardBadges(client).map((badge) => ({
+      id: badge.id,
+      pluginId: badge.pluginId,
+      label: badge.label,
+      title: badge.title,
+      icon: badge.icon,
+      imageUrl: badge.imageUrl,
+      href: badge.href,
+      tone: badge.tone,
+      priority: badge.priority,
+    })));
+  }
+
+  function dashboardBadgesHtml(client) {
+    return dashboardBadges(client)
+      .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0))
+      .map((badge) => {
+        const label = String(badge.label || badge.title || badge.pluginId || "Plugin");
+        const title = String(badge.title || label);
+        const tone = String(badge.tone || "info").replace(/[^a-z0-9_-]/gi, "").toLowerCase() || "info";
+        const icon = String(badge.icon || "").replace(/[^a-z0-9_\- ]/gi, "").trim();
+        const imageUrl = String(badge.imageUrl || "").trim();
+        const href = String(badge.href || "").trim();
+        const visual = imageUrl
+          ? `<img src="${escapeHtml(imageUrl)}" alt="">`
+          : `<i class="${escapeHtml(icon || "fa-solid fa-puzzle-piece")}"></i>`;
+        const inner = `${visual}<span>${escapeHtml(label)}</span>`;
+        const attrs = `class="cv-mini-pill cv-plugin-badge cv-plugin-badge-${escapeHtml(tone)}" title="${escapeHtml(title)}"`;
+        return href
+          ? `<a ${attrs} href="${escapeHtml(href)}" target="_blank" rel="noopener">${inner}</a>`
+          : `<span ${attrs}>${inner}</span>`;
+      })
+      .join("");
+  }
+
   function cardDigest(c) {
-    return `${currentDisplayDigest}|${currentLayout}|${c.id}|${!!c.online}|${c.lastSeen}|${c.pingMs}|${c.host}|${c.user}|${c.os}|${c.arch}|${c.version}|${c.monitors}|${c.country}|${c.nickname}|${c.customTag}|${c.customTagNote}|${!!c.bookmarked}|${!!c.isAdmin}|${c.elevation}|${JSON.stringify(c.permissions || {})}|${c.cpu}|${c.gpu}|${c.ram}|${c.batteryPercent}|${c.batteryCharging}|${!!c.webcamAvailable}|${JSON.stringify(c.webcamDevices || [])}|${c.hwid}|${c.disconnectReason}|${c.disconnectDetail}|${c.groupId}|${c.groupName}|${c.groupColor}|${!!c.notificationsMuted}`;
+    return `${currentDisplayDigest}|${currentLayout}|${dashboardBadgesDigest(c)}|${c.id}|${!!c.online}|${c.lastSeen}|${c.pingMs}|${c.host}|${c.user}|${c.os}|${c.arch}|${c.version}|${c.monitors}|${c.country}|${c.nickname}|${c.customTag}|${c.customTagNote}|${!!c.bookmarked}|${!!c.isAdmin}|${c.elevation}|${JSON.stringify(c.permissions || {})}|${c.cpu}|${c.gpu}|${c.ram}|${c.batteryPercent}|${c.batteryCharging}|${!!c.webcamAvailable}|${JSON.stringify(c.webcamDevices || [])}|${c.hwid}|${c.disconnectReason}|${c.disconnectDetail}|${c.groupId}|${c.groupName}|${c.groupColor}|${!!c.notificationsMuted}`;
   }
 
   function cardThumbDigest(c) {
@@ -901,6 +949,7 @@ export function createRenderer({
     const cpuHtml = client.cpu ? cpuBadgeHtml(client.cpu) : "—";
     const batteryIndicator = showBattery ? batteryHtml(client) : "";
     const verLatest = isClientVersionCurrent(client.version, typeof getServerVersion === "function" ? getServerVersion() : "");
+    const pluginBadges = dashboardBadgesHtml(client);
 
     const metaParts = [
       showField("system") ? `<span class="cv-os cv-tone-${os.tone}"><i class="fa ${os.icon}"></i> ${escapeHtml(shortOsLabel(client.os))}</span>` : "",
@@ -935,6 +984,7 @@ export function createRenderer({
           ${webcamBadgeHtml(client)}
           ${macPermissionBadgeHtml(client)}
           ${client.notificationsMuted ? `<span class="cv-mini-pill cv-pill-muted" title="Notifications muted"><i class="fa-solid fa-bell-slash"></i></span>` : ""}
+          ${pluginBadges}
         </div>
         ${showField("user") ? `<div class="cv-user-line"><i class="fa-solid fa-user"></i> ${escapeHtml(userLine)}</div>` : ""}
         ${meta ? `<div class="cv-meta-line">${meta}</div>` : ""}
@@ -985,6 +1035,7 @@ export function createRenderer({
     const nickname = String(client.nickname || "").trim();
     const displayName = nickname || client.host || deviceId;
     const userLine = client.user || client.host || deviceId;
+    const pluginBadges = dashboardBadgesHtml(client);
     const userMeta = [
       showField("user") ? `<i class="fa-solid fa-user"></i> ${escapeHtml(userLine)}` : "",
       showField("ip") && client.ip ? `<span class="cv-mid">·</span><i class="fa-solid fa-network-wired"></i> ${escapeHtml(client.ip)}` : "",
@@ -1016,6 +1067,7 @@ export function createRenderer({
               ${webcamBadgeHtml(client)}
               ${macPermissionBadgeHtml(client)}
               ${client.notificationsMuted ? `<span class="cv-mini-pill cv-pill-muted" title="Notifications muted"><i class="fa-solid fa-bell-slash"></i></span>` : ""}
+              ${pluginBadges}
             </span>
             ${userMeta ? `<span class="cv-user-line cv-mono">${userMeta}</span>` : ""}
           </div>
@@ -1079,6 +1131,7 @@ export function createRenderer({
       webcamBadgeHtml(client),
       macPermissionBadgeHtml(client),
       client.notificationsMuted ? `<span class="cv-mini-pill cv-pill-muted" title="Notifications muted"><i class="fa-solid fa-bell-slash"></i></span>` : "",
+      dashboardBadgesHtml(client),
     ].join("");
 
     article.innerHTML = `

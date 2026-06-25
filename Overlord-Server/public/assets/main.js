@@ -139,6 +139,9 @@ const clearContext = () => {
 let _pluginCache = null;
 let _pluginCacheAge = 0;
 const PLUGIN_CACHE_TTL = 30_000;
+const pluginDashboardBadges = new Map();
+let pluginDashboardDigest = "";
+let pluginDashboardRefreshInFlight = false;
 
 async function refreshPluginCache() {
   try {
@@ -155,6 +158,71 @@ function getCachedPlugins() {
     return _pluginCache;
   }
   return null;
+}
+
+function dashboardBadgeHref(href, clientId, pluginId) {
+  const raw = String(href || `/plugins/${encodeURIComponent(pluginId)}?clientId=${encodeURIComponent(clientId)}`);
+  return raw
+    .replaceAll("{clientId}", encodeURIComponent(clientId))
+    .replaceAll("{pluginId}", encodeURIComponent(pluginId));
+}
+
+function getDashboardBadgesForClient(client) {
+  return pluginDashboardBadges.get(client?.id || "") || [];
+}
+
+async function refreshDashboardPluginContributions(items = []) {
+  if (pluginDashboardRefreshInFlight) return;
+  const clientIds = items.map((item) => item?.id).filter(Boolean);
+  if (!clientIds.length) {
+    if (pluginDashboardBadges.size) {
+      pluginDashboardBadges.clear();
+      pluginDashboardDigest = "";
+      renderCachedClients({ force: true, fromPluginDashboard: true });
+    }
+    return;
+  }
+  pluginDashboardRefreshInFlight = true;
+  try {
+    const res = await fetch("/api/plugins/dashboard-contributions", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ clientIds }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const pluginNames = new Map((Array.isArray(data.plugins) ? data.plugins : []).map((p) => [p.id, p.name || p.id]));
+    const next = new Map();
+    for (const row of Array.isArray(data.contributions) ? data.contributions : []) {
+      const clientId = String(row?.clientId || "");
+      const pluginId = String(row?.pluginId || "");
+      if (!clientId || !pluginId || !clientIds.includes(clientId)) continue;
+      const badges = Array.isArray(row.badges) ? row.badges : [];
+      const current = next.get(clientId) || [];
+      for (const badge of badges) {
+        const id = String(badge?.id || pluginId || "plugin");
+        current.push({
+          ...badge,
+          id: `${pluginId}:${id}`,
+          pluginId,
+          pluginName: pluginNames.get(pluginId) || pluginId,
+          href: dashboardBadgeHref(badge?.href, clientId, pluginId),
+        });
+      }
+      next.set(clientId, current);
+    }
+    const nextDigest = JSON.stringify(Array.from(next.entries()).sort(([a], [b]) => a.localeCompare(b)));
+    if (nextDigest === pluginDashboardDigest) return;
+    pluginDashboardDigest = nextDigest;
+    pluginDashboardBadges.clear();
+    for (const [clientId, badges] of next.entries()) pluginDashboardBadges.set(clientId, badges);
+    renderCachedClients({ force: true, fromPluginDashboard: true });
+  } catch {
+    // Dashboard badges are decorative; leave the last known state in place.
+  } finally {
+    pluginDashboardRefreshInFlight = false;
+  }
 }
 
 function detectClientPlatform(clientId) {
@@ -1031,11 +1099,15 @@ function initializeRenderer() {
     userRole: currentUser?.role,
     getServerVersion: () => currentServerVersion,
     getDisplayFields: () => displayFields,
+    getDashboardBadges: getDashboardBadgesForClient,
   });
   rendererSetLayout = rSetLayout;
   registerRenderer((data, options) => {
     renderMerge(data, options);
     updateDashboardStatsFromClients(data);
+    if (!options?.fromPluginDashboard) {
+      refreshDashboardPluginContributions(data?.items || []);
+    }
   });
   initDashboardStats();
   setupDashboardThumbnailLoader();

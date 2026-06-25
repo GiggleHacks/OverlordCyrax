@@ -96,6 +96,39 @@ describe("loadPluginBundle", () => {
     expect(bundle.binaryPath).toBe(join(root, "plink", "plink-windows-amd64.dll"));
   });
 
+  test("preserves dashboard badge metadata from config", async () => {
+    const root = await createTempRoot();
+    const AdmZip = require("adm-zip");
+    const zip = new AdmZip();
+    zip.addFile("config.json", Buffer.from(JSON.stringify({
+      name: "Dashboard Demo",
+      apiVersion: 2,
+      runtime: "server",
+      serverEntry: "src/server.ts",
+      dashboard: {
+        clientBadges: [{
+          id: "phone-link",
+          label: "Phone Link",
+          icon: "fa-solid fa-mobile-screen-button",
+          imageUrl: "/plugins/demo/assets/icon.png",
+          tone: "good",
+          priority: 90,
+        }],
+      },
+    })));
+    zip.addFile("dashboard-demo.html", Buffer.from("<main id=\"dashboard-demo\"></main>"));
+    zip.addFile("dashboard-demo.css", Buffer.from("#dashboard-demo { display: block; }"));
+    zip.addFile("src/ui.ts", Buffer.from("document.body.dataset.dashboardDemo = '1';"));
+    zip.addFile("src/server.ts", Buffer.from("export default { rpc: {} };"));
+    zip.writeZip(join(root, "dashboard-demo.zip"));
+
+    await ensurePluginExtracted(root, "dashboard-demo", (name) => name);
+    const manifest = JSON.parse(await readFile(join(root, "dashboard-demo", "manifest.json"), "utf-8"));
+
+    expect(manifest.dashboard.clientBadges[0].id).toBe("phone-link");
+    expect(manifest.dashboard.clientBadges[0].imageUrl).toBe("/plugins/demo/assets/icon.png");
+  });
+
   test("computes stable need hashes and invalidates changed approvals", () => {
     const state: PluginState = {
       enabled: {},

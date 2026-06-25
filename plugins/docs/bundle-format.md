@@ -67,6 +67,68 @@ Server-only plugins are not sent to clients and do not use auto-load.
 
 `navbar.icon` accepts a Font Awesome 6 solid icon class such as `fa-cube`, `fa-key`, or `fa-network-wired`. If the plugin is enabled, navbar plugins appear in the Plugin Apps group and open at `/plugins/<id>`.
 
+## Dashboard Badges
+
+Plugins can contribute compact badges to client cards on the main dashboard. Declare the dashboard integration in `config.json`:
+
+```json
+{
+  "dashboard": {
+    "clientBadges": [
+      {
+        "id": "phone-link",
+        "label": "Phone Link",
+        "title": "Phone Link detected",
+        "icon": "fa-solid fa-mobile-screen-button",
+        "imageUrl": "/plugins/example/assets/phone-link.png",
+        "tone": "good",
+        "priority": 90
+      }
+    ]
+  }
+}
+```
+
+Badge fields:
+
+| Field | Description |
+|-------|-------------|
+| `id` | Stable badge id within the plugin. |
+| `label` | Short text shown beside the icon when space allows. |
+| `title` | Hover text. Defaults to `label`. |
+| `icon` | Font Awesome class, used when `imageUrl` is omitted. |
+| `imageUrl` | Optional image URL or data URL. Rendered as a small dashboard icon. |
+| `href` | Optional link. `{clientId}` and `{pluginId}` are URL-encoded before rendering. Defaults to `/plugins/<id>?clientId=<clientId>`. |
+| `tone` | Visual tone: `info`, `good`, `warn`, or `danger`. |
+| `priority` | Higher numbers render first when multiple plugin badges exist. |
+
+For per-client state, implement a server plugin RPC named `dashboardContributions`. The dashboard calls it with the visible client IDs:
+
+```ts
+export default {
+  rpc: {
+    async dashboardContributions(ctx, params: { clientIds: string[] }) {
+      return {
+        contributions: params.clientIds.map((clientId) => ({
+          clientId,
+          badges: [{
+            id: "phone-link",
+            label: "Phone Link",
+            title: "Phone Link detected",
+            icon: "fa-solid fa-mobile-screen-button",
+            tone: "good",
+            href: "/plugins/example?clientId={clientId}",
+            priority: 90
+          }]
+        }))
+      };
+    }
+  }
+};
+```
+
+Return no contribution for clients that should not show a badge. Server plugins usually update their own plugin database from `onEvent` and have `dashboardContributions` read that state.
+
 ## TypeScript UI And Server Logic
 
 Plugin bundles can ship source-oriented browser and server logic. The server compiles these during extraction:

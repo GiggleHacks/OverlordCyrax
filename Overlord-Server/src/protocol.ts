@@ -352,8 +352,24 @@ export type PluginManifest = {
     label?: string;
     icon?: string;
   };
+  dashboard?: PluginDashboardIntegration;
   build?: PluginBuildIntegration;
   hasServer?: boolean;
+};
+
+export type PluginDashboardIntegration = {
+  clientBadges?: PluginDashboardBadgeDefinition[];
+};
+
+export type PluginDashboardBadgeDefinition = {
+  id: string;
+  label?: string;
+  title?: string;
+  icon?: string;
+  imageUrl?: string;
+  href?: string;
+  tone?: "info" | "good" | "warn" | "danger" | string;
+  priority?: number;
 };
 
 export type PluginBuildIntegration = {

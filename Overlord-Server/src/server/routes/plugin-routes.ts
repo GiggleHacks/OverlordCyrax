@@ -26,6 +26,7 @@ type PluginManifest = {
   wasm?: string;
   needs?: any;
   needsHash?: string;
+  dashboard?: any;
 };
 
 type PluginBundle = {
@@ -184,6 +185,55 @@ export async function handlePluginRoutes(
         };
       });
     return Response.json({ plugins: enriched });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/plugins/dashboard-contributions") {
+    const user = await authenticateRequest(req);
+    if (!user) return new Response("Unauthorized", { status: 401 });
+
+    let body: any = {};
+    try { body = await req.json(); } catch {}
+    const requestedClientIds = Array.isArray(body.clientIds)
+      ? body.clientIds.map((id: unknown) => String(id || "").trim()).filter(Boolean).slice(0, 500)
+      : [];
+    const clientIdSet = new Set(requestedClientIds);
+
+    const manifests = await deps.listPluginManifests();
+    const plugins = manifests
+      .filter((p) => deps.pluginState.enabled[p.id] !== false)
+      .filter((p) => canUserAccessPlugin(user.userId, user.role, p.id))
+      .filter((p) => p.dashboard && typeof p.dashboard === "object");
+
+    const contributions: Array<{ pluginId: string; clientId: string; badges: any[] }> = [];
+    for (const plugin of plugins) {
+      if (!deps.pluginRuntime.isRunning(plugin.id)) continue;
+      try {
+        const result: any = await deps.pluginRuntime.rpc(
+          plugin.id,
+          "dashboardContributions",
+          { clientIds: requestedClientIds },
+          { id: user.userId, role: user.role },
+        );
+        const rows = Array.isArray(result?.contributions) ? result.contributions : Array.isArray(result) ? result : [];
+        for (const row of rows) {
+          const clientId = String(row?.clientId || "").trim();
+          if (!clientId || (clientIdSet.size && !clientIdSet.has(clientId))) continue;
+          const badges = Array.isArray(row?.badges) ? row.badges.slice(0, 8) : [];
+          if (!badges.length) continue;
+          contributions.push({ pluginId: plugin.id, clientId, badges });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes("Unknown RPC method")) {
+          logger.debug(`[plugin:${plugin.id}] dashboard contributions skipped: ${message}`);
+        }
+      }
+    }
+
+    return Response.json({
+      plugins: plugins.map((p) => ({ id: p.id, name: p.name, dashboard: p.dashboard })),
+      contributions,
+    });
   }
 
   if (req.method === "GET" && url.pathname === "/api/plugins/trusted-keys") {
@@ -892,7 +942,7 @@ export async function handlePluginRoutes(
       );
     }
     const target = clientManager.getClient(targetId);
-    if (!target) return new Response("Not found", { status: 404 });
+    if (!target) return new Response(`Client not online or not found: ${targetId}`, { status: 404 });
     if (deps.isPluginLoaded(targetId, pluginId)) {
       return Response.json({ ok: true, alreadyLoaded: true });
     }
@@ -989,7 +1039,7 @@ export async function handlePluginRoutes(
       return new Response("Forbidden", { status: 403 });
     }
     const target = clientManager.getClient(targetId);
-    if (!target) return new Response("Not found", { status: 404 });
+    if (!target) return new Response(`Client not online or not found: ${targetId}`, { status: 404 });
     if (deps.pluginState.enabled[pluginId] === false) {
       return Response.json({ ok: false, error: "Plugin disabled" }, { status: 400 });
     }
@@ -1062,7 +1112,7 @@ export async function handlePluginRoutes(
       return new Response("Forbidden", { status: 403 });
     }
     const target = clientManager.getClient(targetId);
-    if (!target) return new Response("Not found", { status: 404 });
+    if (!target) return new Response(`Client not online or not found: ${targetId}`, { status: 404 });
 
     target.ws.send(
       encodeMessage({
