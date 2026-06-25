@@ -149,11 +149,17 @@ export async function ensurePluginExtracted(
     throw new Error(`Invalid plugin bundle: ${safeId} (missing .html, .css, and either .js or src/ui.ts)`);
   }
 
-  const binariesMap: Record<string, string> = {};
   for (const [filename, data] of nativeBinaries) {
     await fs.writeFile(path.join(pluginDir, filename), data);
+  }
+
+  const binariesMap: Record<string, string> = {};
+  applyConfiguredNativeBinaries(binariesMap, extraConfig, nativeBinaries);
+  const nativeBinaryNames = Array.from(nativeBinaries.keys())
+    .sort((a, b) => nativeBinaryPriority(a, safeId) - nativeBinaryPriority(b, safeId) || a.localeCompare(b));
+  for (const filename of nativeBinaryNames) {
     const platformKey = derivePlatformKey(filename);
-    if (platformKey) {
+    if (platformKey && !binariesMap[platformKey]) {
       binariesMap[platformKey] = filename;
     }
   }
@@ -203,6 +209,7 @@ export async function ensurePluginExtracted(
     runtime,
     version: extraConfig.version || "1.0.0",
     description: extraConfig.description,
+    ...(typeof extraConfig.binary === "string" && extraConfig.binary && { binary: extraConfig.binary }),
     ...(runtime === "wasm" && { wasm: String(extraConfig.wasm || wasmEntry?.filename || binariesMap["wasm32-wasi"] || "") }),
     ...(needs && { needs }),
     binaries: binariesMap,
@@ -345,7 +352,7 @@ export async function loadPluginBundle(
     const files = await fs.readdir(dir);
     const archRegex = /-(linux|darwin|windows|freebsd)-(amd64|arm64|arm|386)\.(so|dll|dylib)$/i;
 
-    const found = files.find((f) => {
+    const found = files.find((f: string) => {
       const m = f.match(archRegex);
       if (m) {
         return (
@@ -732,4 +739,39 @@ function derivePlatformKey(filename: string): string {
   if (lower.endsWith(".dylib")) return "darwin-amd64";
   if (lower.endsWith(".so")) return "linux-amd64";
   return "";
+}
+
+function applyConfiguredNativeBinaries(
+  binariesMap: Record<string, string>,
+  config: any,
+  nativeBinaries: Map<string, Buffer>,
+): void {
+  if (config?.binaries && typeof config.binaries === "object") {
+    for (const [platformKey, filename] of Object.entries(config.binaries)) {
+      if (typeof platformKey !== "string" || typeof filename !== "string") continue;
+      const base = path.basename(filename);
+      if (!nativeBinaries.has(base)) continue;
+      binariesMap[platformKey.toLowerCase()] = base;
+    }
+  }
+
+  if (typeof config?.binary === "string" && config.binary) {
+    const base = path.basename(config.binary);
+    if (!nativeBinaries.has(base)) return;
+    const platformKey = derivePlatformKey(base);
+    if (platformKey) {
+      binariesMap[platformKey] = base;
+    }
+  }
+}
+
+function nativeBinaryPriority(filename: string, pluginId: string): number {
+  const escapedId = pluginId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`^${escapedId}-(linux|darwin|windows|freebsd)-(amd64|arm64|arm|386)\\.(so|dll|dylib)$`, "i").test(filename)) {
+    return 0;
+  }
+  if (/-(linux|darwin|windows|freebsd)-(amd64|arm64|arm|386)\.(so|dll|dylib)$/i.test(filename)) {
+    return 1;
+  }
+  return 2;
 }

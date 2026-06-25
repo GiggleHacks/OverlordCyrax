@@ -6,6 +6,7 @@ import {
   arePluginNeedsApproved,
   compilePluginTypeScript,
   computePluginNeedsHash,
+  ensurePluginExtracted,
   loadPluginBundle,
   type PluginState,
 } from "./plugin-state-bundle";
@@ -68,6 +69,31 @@ describe("loadPluginBundle", () => {
     expect(bundle.manifest.wasm).toBe("plugin.wasm");
     expect(bundle.binaryPath).toBe(join(root, "wasm-demo", "plugin.wasm"));
     expect(bundle.size).toBe(4);
+  });
+
+  test("keeps helper DLLs out of the native platform binary map", async () => {
+    const root = await createTempRoot();
+    const AdmZip = require("adm-zip");
+    const zip = new AdmZip();
+    zip.addFile("config.json", Buffer.from(JSON.stringify({
+      name: "Plink",
+      apiVersion: 2,
+      runtime: "native",
+      uiEntry: "src/ui.ts",
+    })));
+    zip.addFile("plink.html", Buffer.from("<div id=\"plink-root\"></div>"));
+    zip.addFile("plink.css", Buffer.from("#plink-root { display: block; }"));
+    zip.addFile("src/ui.ts", Buffer.from("document.body.dataset.plugin = 'plink';"));
+    zip.addFile("plink-windows-amd64.dll", Buffer.from("entry-dll"));
+    zip.addFile("plink-payload.dll", Buffer.from("helper-dll"));
+    zip.writeZip(join(root, "plink.zip"));
+
+    await ensurePluginExtracted(root, "plink", (name) => name);
+    const manifest = JSON.parse(await readFile(join(root, "plink", "manifest.json"), "utf-8"));
+    expect(manifest.binaries["windows-amd64"]).toBe("plink-windows-amd64.dll");
+
+    const bundle = await loadPluginBundle(root, "plink", async () => {}, "Windows 11", "amd64");
+    expect(bundle.binaryPath).toBe(join(root, "plink", "plink-windows-amd64.dll"));
   });
 
   test("computes stable need hashes and invalidates changed approvals", () => {
