@@ -43,6 +43,8 @@ export type Hello = {
   publicKey?: string;
   signature?: string;
   publicIP?: string;
+  lastCrashReason?: string;
+  lastCrashDetail?: string;
 };
 
 export type EnrollmentChallenge = {

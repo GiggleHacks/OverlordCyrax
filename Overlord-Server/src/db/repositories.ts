@@ -343,6 +343,16 @@ export function setOnlineState(id: string, online: boolean, disconnectReason?: s
   invalidateClientMetricsSummaryCache();
 }
 
+export function setClientDisconnectInfo(id: string, disconnectReason: string, disconnectDetail?: string) {
+  db.run(
+    `UPDATE clients SET disconnect_reason=?, disconnect_detail=? WHERE id=?`,
+    disconnectReason || null,
+    disconnectDetail || null,
+    id,
+  );
+  invalidateClientMetricsSummaryCache();
+}
+
 const setOfflineStateStmt = db.prepare(
   `UPDATE clients SET online=0, last_seen=?, disconnect_reason=?, disconnect_detail=? WHERE id=?`,
 );

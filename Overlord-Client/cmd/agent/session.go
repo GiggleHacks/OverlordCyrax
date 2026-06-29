@@ -667,6 +667,10 @@ func runSession(ctx context.Context, cancel context.CancelFunc, conn *websocket.
 	if cfg.FetchPublicIP {
 		hello.PublicIP = config.FetchPublicIPAddress()
 	}
+	if report, ok := loadPendingCrashReport(); ok {
+		hello.LastCrashReason = report.Reason
+		hello.LastCrashDetail = truncateStr(fmt.Sprintf("%s at %s", report.Detail, report.At), 1200)
+	}
 
 	if err := wire.WriteMsg(ctx, env.Conn, hello); err != nil {
 		return fmt.Errorf("send hello: %w", err)
@@ -711,6 +715,9 @@ func runSession(ctx context.Context, cancel context.CancelFunc, conn *websocket.
 		log.Printf("ping: failed to send initial ping: %v", err)
 		cancel()
 		return fmt.Errorf("send initial ping: %w", err)
+	}
+	if hello.LastCrashReason != "" {
+		clearPendingCrashReport()
 	}
 
 	if interval := getPingInterval(); interval > 0 {

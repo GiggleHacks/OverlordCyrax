@@ -26,6 +26,8 @@ type Hello struct {
 	Elevation       string          `msgpack:"elevation,omitempty"`
 	Permissions     map[string]bool `msgpack:"permissions,omitempty"`
 	PublicIP        string          `msgpack:"publicIP,omitempty"`
+	LastCrashReason string          `msgpack:"lastCrashReason,omitempty"`
+	LastCrashDetail string          `msgpack:"lastCrashDetail,omitempty"`
 }
 
 type EnrollmentChallenge struct {

@@ -16,7 +16,8 @@ import {
   requestThumbnailRegen,
 } from "./thumbnails";
 import { metrics } from "./metrics";
-import { markClientDbSynced, queueClientDbUpdate, shouldSyncClientToDb } from "./client-db-sync";
+import { flushQueuedClientDbUpdates, markClientDbSynced, queueClientDbUpdate, shouldSyncClientToDb } from "./client-db-sync";
+import { setClientDisconnectInfo } from "./db";
 
 export { clearClientSyncState } from "./client-db-sync";
 
@@ -122,6 +123,8 @@ export async function handleHello(
   info.country = country;
   info.lastSeen = Date.now();
   info.online = true;
+  const lastCrashReason = sanitizeInfoString((payload as any).lastCrashReason, 64);
+  const lastCrashDetail = sanitizeInfoString((payload as any).lastCrashDetail, 1200);
 
   queueClientDbUpdate({
     id: info.id,
@@ -146,6 +149,10 @@ export async function handleHello(
     lastSeen: info.lastSeen,
     online: 1,
   });
+  if (lastCrashReason) {
+    flushQueuedClientDbUpdates();
+    setClientDisconnectInfo(info.id, lastCrashReason, lastCrashDetail);
+  }
 
   sendPingRequest(info, ws, "hello");
 

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,6 +14,14 @@ import (
 )
 
 const crashLogFileName = "crashlogC.log"
+const pendingCrashFileName = "last-crash.json"
+
+type pendingCrashReport struct {
+	At     string `json:"at"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail,omitempty"`
+	Log    string `json:"log,omitempty"`
+}
 
 func handleFatalPanic() {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
@@ -19,6 +29,7 @@ func handleFatalPanic() {
 		reason := fmt.Sprintf("panic: %v", r)
 		stack := debug.Stack()
 		path := writeCrashLog(reason, stack)
+		writePendingCrashReport("panic", reason, path)
 		log.Printf("[fatal] %s (see %s)", reason, path)
 		os.Exit(1)
 	}
@@ -33,6 +44,7 @@ func fatalExit(reason string, err error) {
 	}
 	stack := debug.Stack()
 	path := writeCrashLog(reason, stack)
+	writePendingCrashReport("fatal", reason, path)
 	log.Printf("[fatal] %s (see %s)", reason, path)
 	os.Exit(1)
 }
@@ -49,6 +61,7 @@ func recoverAndLog(label string, cancel context.CancelFunc) {
 		reason := fmt.Sprintf("%s panic: %v", label, r)
 		stack := debug.Stack()
 		path := writeCrashLog(reason, stack)
+		writePendingCrashReport("panic", reason, path)
 		log.Printf("[panic] %s (see %s)", reason, path)
 		if cancel != nil {
 			cancel()
@@ -81,4 +94,46 @@ func writeCrashLog(reason string, stack []byte) string {
 
 func crashLogDir() string {
 	return os.TempDir()
+}
+
+func pendingCrashPath() string {
+	return filepath.Join(crashLogDir(), pendingCrashFileName)
+}
+
+func writePendingCrashReport(reason, detail, logPath string) {
+	report := pendingCrashReport{
+		At:     time.Now().UTC().Format(time.RFC3339),
+		Reason: reason,
+		Detail: detail,
+		Log:    logPath,
+	}
+	_ = os.MkdirAll(crashLogDir(), 0700)
+	data, err := json.Marshal(report)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(pendingCrashPath(), data, 0600)
+}
+
+func loadPendingCrashReport() (pendingCrashReport, bool) {
+	data, err := os.ReadFile(pendingCrashPath())
+	if err != nil {
+		return pendingCrashReport{}, false
+	}
+	var report pendingCrashReport
+	if json.Unmarshal(data, &report) != nil || report.Reason == "" {
+		return pendingCrashReport{}, false
+	}
+	if report.Detail == "" && report.Log != "" {
+		if f, err := os.Open(report.Log); err == nil {
+			defer f.Close()
+			buf, _ := io.ReadAll(io.LimitReader(f, 4096))
+			report.Detail = string(buf)
+		}
+	}
+	return report, true
+}
+
+func clearPendingCrashReport() {
+	_ = os.Remove(pendingCrashPath())
 }
