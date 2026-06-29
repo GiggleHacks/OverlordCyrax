@@ -54,7 +54,7 @@ func (m *Manager) Load(ctx context.Context, manifest PluginManifest, binary []by
 	if manifest.RuntimeKind == "wasm" || manifest.WASM != "" {
 		np, err = loadWASMPlugin(ctx, manifest, binary)
 	} else {
-		np, err = loadNativePlugin(binary)
+		np, err = loadNativePlugin(manifest, binary)
 	}
 	if err != nil {
 		return err

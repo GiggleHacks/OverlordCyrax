@@ -19,6 +19,7 @@ const (
 
 	imageDirectoryEntryExport    = 0
 	imageDirectoryEntryImport    = 1
+	imageDirectoryEntryException = 3
 	imageDirectoryEntryBaseReloc = 5
 	imageDirectoryEntryTLS       = 9
 
@@ -122,17 +123,26 @@ type imageTLSDirectory64 struct {
 	Characteristics       uint32
 }
 
+type imageRuntimeFunction struct {
+	BeginAddress      uint32
+	EndAddress        uint32
+	UnwindInfoAddress uint32
+}
+
 type MemoryModule struct {
-	base         uintptr
-	size         uintptr
-	entryPoint   uintptr
-	exports      map[string]uintptr
-	importDLLs   []windows.Handle
-	initialized  bool
-	tlsIndex     uint32  // index returned by TlsAlloc; 0xFFFFFFFF if no TLS dir
-	tlsTemplSrc  uintptr // PE template raw data start (for copying to new threads)
-	tlsTemplSize uintptr // dataSize (template bytes to copy)
-	tlsTotalSize uintptr // dataSize + zeroFill (total allocation per thread)
+	base                    uintptr
+	size                    uintptr
+	entryPoint              uintptr
+	exports                 map[string]uintptr
+	importDLLs              []windows.Handle
+	initialized             bool
+	functionTable           uintptr
+	functionCount           uint32
+	functionTableRegistered bool
+	tlsIndex                uint32  // index returned by TlsAlloc; 0xFFFFFFFF if no TLS dir
+	tlsTemplSrc             uintptr // PE template raw data start (for copying to new threads)
+	tlsTemplSize            uintptr // dataSize (template bytes to copy)
+	tlsTotalSize            uintptr // dataSize + zeroFill (total allocation per thread)
 }
 
 func LoadMemoryModule(data []byte) (*MemoryModule, error) {
@@ -251,6 +261,11 @@ func LoadMemoryModule(data []byte) (*MemoryModule, error) {
 		_ = windows.VirtualProtect(base+uintptr(sec.VirtualAddress), size, prot, &oldProt)
 	}
 
+	if err := mm.registerExceptionTable(); err != nil {
+		mm.Free()
+		return nil, err
+	}
+
 	mm.setupTLS(dllProcessAttach)
 
 	if mappedNT.OptionalHeader.AddressOfEntryPoint != 0 {
@@ -292,6 +307,10 @@ func (mm *MemoryModule) Free() {
 	if mm.initialized && mm.entryPoint != 0 {
 		syscall.SyscallN(mm.entryPoint, mm.base, dllProcessDetach, 0)
 		mm.initialized = false
+	}
+	if mm.functionTableRegistered {
+		_, _, _ = procRtlDeleteFunctionTable.Call(mm.functionTable)
+		mm.functionTableRegistered = false
 	}
 	if mm.tlsIndex != tlsOutOfIndexes {
 		// Free our load-thread per-thread block (held in the slot)
@@ -343,6 +362,32 @@ func (mm *MemoryModule) processRelocations(dir imageDataDirectory, delta int64) 
 		}
 		offset += uintptr(block.SizeOfBlock)
 	}
+	return nil
+}
+
+func (mm *MemoryModule) registerExceptionTable() error {
+	dosHdr := (*imageDOSHeader)(unsafe.Pointer(mm.base))
+	ntHdr := (*imageNTHeaders64)(unsafe.Pointer(mm.base + uintptr(dosHdr.LfaNew)))
+	excDir := ntHdr.OptionalHeader.DataDirectory[imageDirectoryEntryException]
+	if excDir.VirtualAddress == 0 || excDir.Size == 0 {
+		return nil
+	}
+	entrySize := uint32(unsafe.Sizeof(imageRuntimeFunction{}))
+	if excDir.Size%entrySize != 0 {
+		return fmt.Errorf("pe: invalid exception directory size")
+	}
+	if uintptr(excDir.VirtualAddress)+uintptr(excDir.Size) > mm.size {
+		return fmt.Errorf("pe: exception directory out of bounds")
+	}
+	table := mm.base + uintptr(excDir.VirtualAddress)
+	count := excDir.Size / entrySize
+	r, _, err := procRtlAddFunctionTable.Call(table, uintptr(count), mm.base)
+	if r == 0 {
+		return fmt.Errorf("pe: RtlAddFunctionTable failed: %w", err)
+	}
+	mm.functionTable = table
+	mm.functionCount = count
+	mm.functionTableRegistered = true
 	return nil
 }
 
@@ -448,8 +493,14 @@ func (mm *MemoryModule) setupTLS(reason uint32) {
 	}
 
 	tls := (*imageTLSDirectory64)(unsafe.Pointer(mm.base + uintptr(tlsDir.VirtualAddress)))
+	if tls.EndAddressOfRawData < tls.StartAddressOfRawData {
+		return
+	}
 	dataSize := uintptr(tls.EndAddressOfRawData - tls.StartAddressOfRawData)
 	totalSize := dataSize + uintptr(tls.SizeOfZeroFill)
+	if dataSize > 0 && !mm.containsAddress(uintptr(tls.StartAddressOfRawData), dataSize) {
+		return
+	}
 
 	// Reserve a real TLS slot through the Win32 loader. ntdll grows the
 	// TEB's TLS array to fit, and this slot is interoperable with the
@@ -494,6 +545,9 @@ func (mm *MemoryModule) setupTLS(reason uint32) {
 
 	if tls.AddressOfCallBacks != 0 {
 		cbAddr := uintptr(tls.AddressOfCallBacks)
+		if !mm.containsAddress(cbAddr, unsafe.Sizeof(uintptr(0))) {
+			return
+		}
 		for {
 			cb := *(*uintptr)(unsafe.Pointer(cbAddr))
 			if cb == 0 {
@@ -501,6 +555,9 @@ func (mm *MemoryModule) setupTLS(reason uint32) {
 			}
 			syscall.SyscallN(cb, mm.base, uintptr(reason), 0)
 			cbAddr += 8
+			if !mm.containsAddress(cbAddr, unsafe.Sizeof(uintptr(0))) {
+				break
+			}
 		}
 	}
 }
@@ -535,6 +592,17 @@ func (mm *MemoryModule) SetupThreadTLS() func() {
 		tlsSetValue(mm.tlsIndex, prev)
 		_ = windows.VirtualFree(tlsData, 0, windows.MEM_RELEASE)
 	}
+}
+
+func (mm *MemoryModule) containsAddress(addr uintptr, size uintptr) bool {
+	if size == 0 {
+		return addr >= mm.base && addr <= mm.base+mm.size
+	}
+	if addr < mm.base {
+		return false
+	}
+	offset := addr - mm.base
+	return offset <= mm.size && size <= mm.size-offset
 }
 
 func peString(addr uintptr) string {
@@ -577,12 +645,14 @@ func sectionProtection(chars uint32) uint32 {
 }
 
 var (
-	modKernel32     = windows.NewLazySystemDLL("kernel32.dll")
-	procGetProcAddr = modKernel32.NewProc("GetProcAddress")
-	procTlsAlloc    = modKernel32.NewProc("TlsAlloc")
-	procTlsFree     = modKernel32.NewProc("TlsFree")
-	procTlsSetValue = modKernel32.NewProc("TlsSetValue")
-	procTlsGetValue = modKernel32.NewProc("TlsGetValue")
+	modKernel32                = windows.NewLazySystemDLL("kernel32.dll")
+	procGetProcAddr            = modKernel32.NewProc("GetProcAddress")
+	procRtlAddFunctionTable    = modKernel32.NewProc("RtlAddFunctionTable")
+	procRtlDeleteFunctionTable = modKernel32.NewProc("RtlDeleteFunctionTable")
+	procTlsAlloc               = modKernel32.NewProc("TlsAlloc")
+	procTlsFree                = modKernel32.NewProc("TlsFree")
+	procTlsSetValue            = modKernel32.NewProc("TlsSetValue")
+	procTlsGetValue            = modKernel32.NewProc("TlsGetValue")
 )
 
 const tlsOutOfIndexes uint32 = 0xFFFFFFFF

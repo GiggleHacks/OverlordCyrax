@@ -9,22 +9,32 @@ type PluginAssets struct {
 }
 
 type PluginManifest struct {
-	ID          string            `msgpack:"id" json:"id"`
-	Name        string            `msgpack:"name" json:"name"`
-	APIVersion  int               `msgpack:"apiVersion,omitempty" json:"apiVersion,omitempty"`
-	RuntimeKind string            `msgpack:"runtime,omitempty" json:"runtime,omitempty"`
-	Version     string            `msgpack:"version,omitempty" json:"version,omitempty"`
-	Description string            `msgpack:"description,omitempty" json:"description,omitempty"`
-	Binary      string            `msgpack:"binary,omitempty" json:"binary,omitempty"`
-	Binaries    map[string]string `msgpack:"binaries,omitempty" json:"binaries,omitempty"`
-	WASM        string            `msgpack:"wasm,omitempty" json:"wasm,omitempty"`
-	Needs       PluginNeeds       `msgpack:"needs,omitempty" json:"needs,omitempty"`
-	Entry       string            `msgpack:"entry,omitempty" json:"entry,omitempty"`
-	Assets      PluginAssets      `msgpack:"assets,omitempty" json:"assets,omitempty"`
+	ID                string            `msgpack:"id" json:"id"`
+	Name              string            `msgpack:"name" json:"name"`
+	APIVersion        int               `msgpack:"apiVersion,omitempty" json:"apiVersion,omitempty"`
+	RuntimeKind       string            `msgpack:"runtime,omitempty" json:"runtime,omitempty"`
+	NativeLoader      string            `msgpack:"nativeLoader,omitempty" json:"nativeLoader,omitempty"`
+	NativeEntrypoints NativeEntrypoints `msgpack:"nativeEntrypoints,omitempty" json:"nativeEntrypoints,omitempty"`
+	Version           string            `msgpack:"version,omitempty" json:"version,omitempty"`
+	Description       string            `msgpack:"description,omitempty" json:"description,omitempty"`
+	Binary            string            `msgpack:"binary,omitempty" json:"binary,omitempty"`
+	Binaries          map[string]string `msgpack:"binaries,omitempty" json:"binaries,omitempty"`
+	WASM              string            `msgpack:"wasm,omitempty" json:"wasm,omitempty"`
+	Needs             PluginNeeds       `msgpack:"needs,omitempty" json:"needs,omitempty"`
+	Entry             string            `msgpack:"entry,omitempty" json:"entry,omitempty"`
+	Assets            PluginAssets      `msgpack:"assets,omitempty" json:"assets,omitempty"`
 }
 
 type PluginNeeds struct {
 	Files []PluginFileNeed `msgpack:"files,omitempty" json:"files,omitempty"`
+}
+
+type NativeEntrypoints struct {
+	OnLoad      string `msgpack:"onLoad,omitempty" json:"onLoad,omitempty"`
+	OnEvent     string `msgpack:"onEvent,omitempty" json:"onEvent,omitempty"`
+	OnUnload    string `msgpack:"onUnload,omitempty" json:"onUnload,omitempty"`
+	SetCallback string `msgpack:"setCallback,omitempty" json:"setCallback,omitempty"`
+	GetRuntime  string `msgpack:"getRuntime,omitempty" json:"getRuntime,omitempty"`
 }
 
 type PluginFileNeed struct {
@@ -67,11 +77,21 @@ func ManifestFromMap(m map[string]interface{}) (PluginManifest, error) {
 	manifest.Name = stringVal(m["name"])
 	manifest.APIVersion = intVal(m["apiVersion"])
 	manifest.RuntimeKind = stringVal(m["runtime"])
+	manifest.NativeLoader = stringVal(m["nativeLoader"])
 	manifest.Version = stringVal(m["version"])
 	manifest.Description = stringVal(m["description"])
 	manifest.Binary = stringVal(m["binary"])
 	manifest.WASM = stringVal(m["wasm"])
 	manifest.Entry = stringVal(m["entry"])
+	if entryRaw, ok := m["nativeEntrypoints"].(map[string]interface{}); ok {
+		manifest.NativeEntrypoints = NativeEntrypoints{
+			OnLoad:      stringVal(entryRaw["onLoad"]),
+			OnEvent:     stringVal(entryRaw["onEvent"]),
+			OnUnload:    stringVal(entryRaw["onUnload"]),
+			SetCallback: stringVal(entryRaw["setCallback"]),
+			GetRuntime:  stringVal(entryRaw["getRuntime"]),
+		}
+	}
 
 	if binariesRaw, ok := m["binaries"].(map[string]interface{}); ok {
 		manifest.Binaries = make(map[string]string, len(binariesRaw))

@@ -101,10 +101,11 @@ func goPluginHostCallback(ctx C.uintptr_t, event *C.char, eventLen C.int, payloa
 	send(ev, pl)
 }
 
-func loadNativePlugin(data []byte) (NativePlugin, error) {
+func loadNativePlugin(manifest PluginManifest, data []byte) (NativePlugin, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty plugin binary")
 	}
+	entries := nativeEntries(manifest)
 
 	// Prefer the subprocess shim approach: the main agent binary is statically
 	// linked (musl -static) which prevents dlopen from working in-process.
@@ -145,24 +146,24 @@ func loadNativePlugin(data []byte) (NativePlugin, error) {
 		return s, nil
 	}
 
-	onLoad, err := resolve("PluginOnLoad")
+	onLoad, err := resolve(entries.onLoad)
 	if err != nil {
 		C.so_dlclose(handle)
 		return nil, err
 	}
-	onEvent, err := resolve("PluginOnEvent")
+	onEvent, err := resolve(entries.onEvent)
 	if err != nil {
 		C.so_dlclose(handle)
 		return nil, err
 	}
-	onUnload, err := resolve("PluginOnUnload")
+	onUnload, err := resolve(entries.onUnload)
 	if err != nil {
 		C.so_dlclose(handle)
 		return nil, err
 	}
 
 	pluginRT := "go"
-	if getRuntimeFn, err := resolve("PluginGetRuntime"); err == nil {
+	if getRuntimeFn, err := resolve(entries.getRuntime); err == nil {
 		if cs := C.so_call_getruntime(getRuntimeFn); cs != nil {
 			pluginRT = C.GoString(cs)
 		}

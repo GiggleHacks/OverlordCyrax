@@ -172,11 +172,48 @@ Go shared libraries cannot be fully unloaded safely because the Go runtime owns 
 
 | Platform | Loading behavior |
 |----------|------------------|
-| Windows | DLLs are loaded from memory through the custom PE loader. |
+| Windows | DLLs default to the custom in-memory PE loader. Plugins can set `nativeLoader: "os"` to stage the DLL in the agent cache and load it with `LoadLibraryExW`. |
 | Linux | Shared libraries are loaded through the static-agent subprocess shim when needed. |
 | macOS | Dynamic libraries are loaded through the platform loader. |
 
 Because Windows uses an in-memory PE loader, some runtime primitives that assume normal `LoadLibrary` initialization can be fragile. The Rust sample avoids `std::sync::Mutex` for this reason and uses C-style globals; the host serializes plugin calls.
+
+### Windows Loader Selection
+
+Set `nativeLoader` in `config.json`:
+
+```json
+{
+  "runtime": "native",
+  "nativeLoader": "memory"
+}
+```
+
+| Value | Behavior |
+|-------|----------|
+| `memory` | Default. Loads the PE image from bytes without staging the plugin DLL on disk. |
+| `os` | Writes a content-addressed copy to the agent cache and loads it with `LoadLibraryExW`. Prefer this for Go DLLs or other runtimes that rely on the normal Windows loader. |
+
+The OS loader path reuses the cached DLL when the SHA-256 hash matches, so repeated loads do not rewrite the same plugin. Windows keeps loaded images locked; old cached plugin versions are left for later cleanup.
+
+### Custom Export Names
+
+Native plugins may override the exported ABI names in `config.json`:
+
+```json
+{
+  "runtime": "native",
+  "nativeEntrypoints": {
+    "onLoad": "StartPlugin",
+    "onEvent": "HandlePluginEvent",
+    "onUnload": "StopPlugin",
+    "setCallback": "SetHostCallback",
+    "getRuntime": "RuntimeName"
+  }
+}
+```
+
+Omitted fields use the standard names. The signatures must stay ABI-compatible with `PluginOnLoad`, `PluginOnEvent`, `PluginOnUnload`, `PluginSetCallback`, and `PluginGetRuntime`; only the exported symbol names change. Custom names are honored by the Windows loader and direct `dlopen`/`dlsym` paths. The Linux static-agent subprocess shim still expects the standard names.
 
 ## Static Linux Agent Shim
 

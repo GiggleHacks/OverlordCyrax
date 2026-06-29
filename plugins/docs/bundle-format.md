@@ -40,6 +40,24 @@ Use:
 
 Server-only plugins are not sent to clients and do not use auto-load.
 
+Native plugins can choose the Windows loader mode and exported ABI names:
+
+```json
+{
+  "runtime": "native",
+  "nativeLoader": "os",
+  "nativeEntrypoints": {
+    "onLoad": "MyLoad",
+    "onEvent": "MyEvent",
+    "onUnload": "MyUnload",
+    "setCallback": "MySetCallback",
+    "getRuntime": "MyRuntime"
+  }
+}
+```
+
+`nativeLoader` accepts `memory` for the in-memory PE loader or `os` for the platform loader. On Windows, `os` stages the DLL in the agent cache and loads it with `LoadLibraryExW`, which is more compatible with runtimes that expect normal loader initialization. Omit `nativeEntrypoints` to use the standard `PluginOnLoad`, `PluginOnEvent`, `PluginOnUnload`, `PluginSetCallback`, and `PluginGetRuntime` exports.
+
 ## Manifest Fields
 
 `config.json` is merged into the generated `manifest.json`.

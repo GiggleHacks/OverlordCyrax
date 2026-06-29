@@ -200,6 +200,8 @@ export async function ensurePluginExtracted(
   }
 
   const runtime = normalizePluginRuntime(extraConfig.runtime, wasmEntry !== null);
+  const nativeLoader = normalizeNativeLoader(extraConfig.nativeLoader);
+  const nativeEntrypoints = normalizeNativeEntrypoints(extraConfig.nativeEntrypoints);
   const needs = normalizePluginNeeds(extraConfig.needs);
   const build = normalizePluginBuildIntegration(extraConfig.build);
   const manifest: PluginManifest = {
@@ -207,6 +209,8 @@ export async function ensurePluginExtracted(
     name: extraConfig.name || safeId,
     apiVersion: Number(extraConfig.apiVersion) === 2 || runtime === "wasm" ? 2 : 1,
     runtime,
+    ...(nativeLoader && { nativeLoader }),
+    ...(nativeEntrypoints && { nativeEntrypoints }),
     version: extraConfig.version || "1.0.0",
     description: extraConfig.description,
     ...(typeof extraConfig.binary === "string" && extraConfig.binary && { binary: extraConfig.binary }),
@@ -632,6 +636,26 @@ function normalizePluginRuntime(runtime: any, hasWasm: boolean): "native" | "was
   if (value === "wasm" || hasWasm) return "wasm";
   if (value === "server") return "server";
   return "native";
+}
+
+function normalizeNativeLoader(loader: any): "memory" | "os" | undefined {
+  const value = typeof loader === "string" ? loader.trim().toLowerCase() : "";
+  if (["memory", "mem", "reflective", "manual"].includes(value)) return "memory";
+  if (["os", "disk", "file", "loadlibrary", "loadlibraryex"].includes(value)) return "os";
+  return undefined;
+}
+
+function normalizeNativeEntrypoints(raw: any): any | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: any = {};
+  for (const key of ["onLoad", "onEvent", "onUnload", "setCallback", "getRuntime"]) {
+    const value = raw[key];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_@$?.-]{0,127}$/.test(trimmed)) continue;
+    out[key] = trimmed;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function normalizePluginBuildIntegration(raw: any): any | undefined {

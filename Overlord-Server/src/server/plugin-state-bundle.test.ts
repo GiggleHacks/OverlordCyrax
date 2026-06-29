@@ -96,6 +96,40 @@ describe("loadPluginBundle", () => {
     expect(bundle.binaryPath).toBe(join(root, "plink", "plink-windows-amd64.dll"));
   });
 
+  test("preserves native loader and custom entrypoint metadata from config", async () => {
+    const root = await createTempRoot();
+    const AdmZip = require("adm-zip");
+    const zip = new AdmZip();
+    zip.addFile("config.json", Buffer.from(JSON.stringify({
+      name: "Native Loader Demo",
+      apiVersion: 2,
+      runtime: "native",
+      nativeLoader: "loadlibraryex",
+      nativeEntrypoints: {
+        onLoad: "StartPlugin",
+        onEvent: "HandlePluginEvent",
+        onUnload: "StopPlugin",
+        setCallback: "SetHostCallback",
+        getRuntime: "RuntimeName",
+      },
+    })));
+    zip.addFile("native-loader-demo.html", Buffer.from("<div id=\"native-loader-demo\"></div>"));
+    zip.addFile("native-loader-demo.css", Buffer.from("#native-loader-demo { display: block; }"));
+    zip.addFile("native-loader-demo.js", Buffer.from("document.body.dataset.nativeLoaderDemo = '1';"));
+    zip.addFile("native-loader-demo-windows-amd64.dll", Buffer.from("native-dll"));
+    zip.writeZip(join(root, "native-loader-demo.zip"));
+
+    await ensurePluginExtracted(root, "native-loader-demo", (name) => name);
+    const manifest = JSON.parse(await readFile(join(root, "native-loader-demo", "manifest.json"), "utf-8"));
+
+    expect(manifest.nativeLoader).toBe("os");
+    expect(manifest.nativeEntrypoints.onLoad).toBe("StartPlugin");
+    expect(manifest.nativeEntrypoints.onEvent).toBe("HandlePluginEvent");
+    expect(manifest.nativeEntrypoints.onUnload).toBe("StopPlugin");
+    expect(manifest.nativeEntrypoints.setCallback).toBe("SetHostCallback");
+    expect(manifest.nativeEntrypoints.getRuntime).toBe("RuntimeName");
+  });
+
   test("preserves dashboard badge metadata from config", async () => {
     const root = await createTempRoot();
     const AdmZip = require("adm-zip");

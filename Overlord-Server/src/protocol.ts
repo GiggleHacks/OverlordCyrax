@@ -357,6 +357,8 @@ export type PluginManifest = {
   name: string;
   apiVersion?: number;
   runtime?: "native" | "wasm" | "server" | string;
+  nativeLoader?: "memory" | "os" | string;
+  nativeEntrypoints?: PluginNativeEntrypoints;
   version?: string;
   description?: string;
   binary?: string;
@@ -376,6 +378,14 @@ export type PluginManifest = {
   dashboard?: PluginDashboardIntegration;
   build?: PluginBuildIntegration;
   hasServer?: boolean;
+};
+
+export type PluginNativeEntrypoints = {
+  onLoad?: string;
+  onEvent?: string;
+  onUnload?: string;
+  setCallback?: string;
+  getRuntime?: string;
 };
 
 export type PluginDashboardIntegration = {
