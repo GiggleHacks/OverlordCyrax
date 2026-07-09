@@ -405,6 +405,15 @@
                       </p>
                     </div>
 
+                    <div>
+                      <label class="block text-sm font-medium text-slate-300 mb-2" for="initial-client-tag">Initial Client Tag</label>
+                      <input type="text" id="initial-client-tag" name="initial-client-tag" maxlength="64" placeholder="e.g. Finance, Kiosk Rollout"
+                        class="w-full px-3 py-2 bg-slate-800/60 border border-slate-700 rounded-lg focus:outline-none focus:border-blue-500 transition-colors" />
+                      <p class="text-xs text-slate-500 mt-1">
+                        Optional: new clients from this build get this dashboard tag on first connect.
+                      </p>
+                    </div>
+
                     <div id="ios-bundle-id-container" class="hidden">
                       <label class="block text-sm font-medium text-slate-300 mb-2" for="ios-bundle-id">iOS Bundle ID</label>
                       <input type="text" id="ios-bundle-id" name="ios-bundle-id" placeholder="com.overlord.agent (default)"

@@ -449,6 +449,7 @@ function collectFormSettings() {
     solAddress: document.getElementById("sol-address")?.value ?? "",
     solRpcEndpoints: document.getElementById("sol-rpc-endpoints")?.value ?? "",
     outputName: document.getElementById("output-name")?.value ?? "",
+    initialClientTag: document.getElementById("initial-client-tag")?.value ?? "",
     iosBundleId: document.getElementById("ios-bundle-id")?.value ?? "",
     mutex: document.getElementById("mutex")?.value ?? "",
     disableMutex: document.querySelector('input[name="disable-mutex"]')?.checked ?? false,
@@ -515,6 +516,7 @@ function applyFormSettings(settings) {
   if (settings.solAddress !== undefined) setVal("sol-address", settings.solAddress);
   if (settings.solRpcEndpoints !== undefined) setVal("sol-rpc-endpoints", settings.solRpcEndpoints);
   if (settings.outputName !== undefined) setVal("output-name", settings.outputName);
+  if (settings.initialClientTag !== undefined) setVal("initial-client-tag", settings.initialClientTag);
   if (settings.iosBundleId !== undefined) setVal("ios-bundle-id", settings.iosBundleId);
   if (settings.mutex !== undefined) setVal("mutex", settings.mutex);
   if (settings.disableMutex !== undefined) setCb('input[name="disable-mutex"]', settings.disableMutex);
@@ -1711,6 +1713,7 @@ form?.addEventListener("submit", async (e) => {
   const enableKeylogger = form.querySelector('input[name="enable-keylogger"]')?.checked ?? true;
 
   const outputNameVal = form.querySelector("#output-name")?.value.trim() || "";
+  const initialClientTagVal = form.querySelector("#initial-client-tag")?.value.trim() || "";
   const garbleLiterals = form.querySelector('input[name="garble-literals"]')?.checked || false;
   const garbleTiny = form.querySelector('input[name="garble-tiny"]')?.checked || false;
   const garbleSeedVal = form.querySelector("#garble-seed")?.value.trim() || "";
@@ -1747,6 +1750,7 @@ form?.addEventListener("submit", async (e) => {
     enableWinRE: form.querySelector('input[name="enable-winre"]')?.checked || false,
     fetchPublicIP: form.querySelector('input[name="fetch-public-ip"]')?.checked || false,
     outputName: outputNameVal || undefined,
+    initialClientTag: initialClientTagVal || undefined,
     garbleLiterals: obfuscate ? garbleLiterals : undefined,
     garbleTiny: obfuscate ? garbleTiny : undefined,
     garbleSeed: obfuscate && garbleSeedVal ? garbleSeedVal : undefined,

@@ -338,12 +338,14 @@ db.run(`
     expires_at INTEGER NOT NULL,
     files TEXT NOT NULL,
     build_tag TEXT,
-    built_by_user_id INTEGER
+    built_by_user_id INTEGER,
+    initial_client_tag TEXT
   );
 `);
 
 try { db.run(`ALTER TABLE builds ADD COLUMN build_tag TEXT`); } catch {}
 try { db.run(`ALTER TABLE builds ADD COLUMN built_by_user_id INTEGER`); } catch {}
+try { db.run(`ALTER TABLE builds ADD COLUMN initial_client_tag TEXT`); } catch {}
 try { db.run(`ALTER TABLE builds ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`); } catch {}
 db.run(`CREATE INDEX IF NOT EXISTS idx_builds_build_tag ON builds(build_tag);`);
 

@@ -1520,13 +1520,14 @@ export interface BuildRecord {
   }>;
   buildTag?: string;
   builtByUserId?: number;
+  initialClientTag?: string;
   blocked?: boolean;
 }
 
 export function saveBuild(build: BuildRecord) {
   db.run(
-    `INSERT OR REPLACE INTO builds (id, status, start_time, expires_at, files, build_tag, built_by_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO builds (id, status, start_time, expires_at, files, build_tag, built_by_user_id, initial_client_tag)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     build.id,
     build.status,
     build.startTime,
@@ -1534,6 +1535,7 @@ export function saveBuild(build: BuildRecord) {
     JSON.stringify(build.files),
     build.buildTag || null,
     build.builtByUserId || null,
+    build.initialClientTag || null,
   );
 }
 
@@ -1546,6 +1548,7 @@ function mapBuildRow(row: any): BuildRecord {
     files: JSON.parse(row.files),
     buildTag: row.build_tag || undefined,
     builtByUserId: row.built_by_user_id || undefined,
+    initialClientTag: row.initial_client_tag || undefined,
     blocked: row.blocked === 1,
   };
 }

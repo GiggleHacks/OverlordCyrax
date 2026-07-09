@@ -16,6 +16,7 @@ import {
   listUserClientAccessRules,
   setUserClientAccessScope,
 } from "./users";
+import { sanitizeInitialClientTag } from "./server/build-config-sanitize";
 
 const createdUserIds: number[] = [];
 const createdBuildIds: string[] = [];
@@ -68,18 +69,29 @@ afterAll(() => {
 });
 
 describe("build tag DB operations", () => {
+  test("initial client tag sanitizer removes XSS metacharacters", () => {
+    const payload = `  <img src=x onerror="alert(1)"> & 'bad' \`tag\` = ok  `;
+    expect(sanitizeInitialClientTag(payload)).toBe("img srcx onerroralert(1) bad tag ok");
+    expect(sanitizeInitialClientTag("\u0000 Finance\nTeam \u007f")).toBe("Finance Team");
+    expect(sanitizeInitialClientTag("x".repeat(80))).toHaveLength(64);
+    expect(sanitizeInitialClientTag("   ")).toBeUndefined();
+    expect(sanitizeInitialClientTag({ tag: "nope" })).toBeUndefined();
+  });
+
   test("saveBuild stores buildTag and builtByUserId", async () => {
     try {
       const operator = await createTempUser("operator");
       const build = saveTempBuild({
         buildTag: "test-tag-abc123",
         builtByUserId: operator.id,
+        initialClientTag: "Finance",
       });
 
       const retrieved = getBuild(build.id);
       expect(retrieved).not.toBeNull();
       expect(retrieved!.buildTag).toBe("test-tag-abc123");
       expect(retrieved!.builtByUserId).toBe(operator.id);
+      expect(retrieved!.initialClientTag).toBe("Finance");
     } finally {
       cleanupCreatedBuilds();
       cleanupCreatedUsers();
@@ -117,6 +129,7 @@ describe("build tag DB operations", () => {
       const build = saveTempBuild({
         buildTag: tag,
         builtByUserId: operator.id,
+        initialClientTag: "Kiosk Rollout",
       });
 
       const all = getAllBuilds();
@@ -124,6 +137,7 @@ describe("build tag DB operations", () => {
       expect(found).not.toBeNull();
       expect(found!.buildTag).toBe(tag);
       expect(found!.builtByUserId).toBe(operator.id);
+      expect(found!.initialClientTag).toBe("Kiosk Rollout");
     } finally {
       cleanupCreatedBuilds();
       cleanupCreatedUsers();
@@ -136,6 +150,7 @@ describe("build tag DB operations", () => {
     expect(retrieved).not.toBeNull();
     expect(retrieved!.buildTag).toBeUndefined();
     expect(retrieved!.builtByUserId).toBeUndefined();
+    expect(retrieved!.initialClientTag).toBeUndefined();
     cleanupCreatedBuilds();
   });
 });

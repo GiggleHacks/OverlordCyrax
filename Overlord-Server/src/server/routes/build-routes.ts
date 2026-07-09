@@ -28,6 +28,7 @@ import fs from "fs";
 import { resolveRuntimeRoot } from "../runtime-paths";
 import { createUploadPull } from "../file-transfer-state";
 import { handleBuildProfileRoutes } from "./build-profile-routes";
+import { sanitizeInitialClientTag } from "../build-config-sanitize";
 
 type RequestIpProvider = {
   requestIP: (req: Request) => { address?: string } | null | undefined;
@@ -205,6 +206,7 @@ export async function handleBuildRoutes(
         outputSgnTxt,
         fetchPublicIP,
         uploadToFileShare,
+        initialClientTag,
         buildPlugins,
       } = body;
 
@@ -460,6 +462,8 @@ export async function handleBuildRoutes(
         );
       }
 
+      const safeInitialClientTag = sanitizeInitialClientTag(initialClientTag);
+
       const rateLimitActive = getConfig().registration.mode !== "off";
       if (rateLimitActive) recordBuildStart(user.userId);
 
@@ -481,6 +485,7 @@ export async function handleBuildRoutes(
         hideConsole: !!hideConsole,
         noPrinting: safeNoPrinting,
         builtByUserId: user.userId,
+        initialClientTag: safeInitialClientTag,
         outputName: safeOutputName,
         garbleLiterals: !!garbleLiterals,
         garbleTiny: !!garbleTiny,

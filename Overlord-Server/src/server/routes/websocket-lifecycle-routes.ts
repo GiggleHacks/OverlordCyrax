@@ -9,7 +9,7 @@ async function getGeoip() {
 }
 import { logAudit, AuditAction } from "../../auditLog";
 import * as clientManager from "../../clientManager";
-import { clientExists, setOnlineState, setOfflineStates, upsertClientRow, getClientEnrollmentStatus, setClientEnrollmentStatus, lookupClientByPublicKey, getClientPublicKeyById, getBuildByTag, computeClientSuspiciousFlags, type OfflineStateUpdate } from "../../db";
+import { clientExists, setOnlineState, setOfflineStates, upsertClientRow, getClientEnrollmentStatus, setClientEnrollmentStatus, lookupClientByPublicKey, getClientPublicKeyById, getBuild, getBuildByTag, computeClientSuspiciousFlags, type OfflineStateUpdate } from "../../db";
 import { getConfig } from "../../config";
 import { logger } from "../../logger";
 import { metrics } from "../../metrics";
@@ -467,6 +467,7 @@ export async function handleWebSocketMessage(
 
         let resolvedBuildId: string | null = null;
         let builtByUserId: number | undefined;
+        let initialClientTag: string | undefined;
         let isRevoked = false;
 
         if (buildTag) {
@@ -474,12 +475,20 @@ export async function handleWebSocketMessage(
           if (verified) {
             resolvedBuildId = verified.bid;
             builtByUserId = verified.uid ?? undefined;
-            isRevoked = isBuildBanned(verified.bid);
+            const build = getBuild(verified.bid);
+            if (build) {
+              builtByUserId = build.builtByUserId ?? builtByUserId;
+              initialClientTag = build.initialClientTag;
+              isRevoked = !!build.blocked || isBuildBanned(verified.bid);
+            } else {
+              isRevoked = isBuildBanned(verified.bid);
+            }
           } else {
             const build = getBuildByTag(buildTag);
             if (build) {
               resolvedBuildId = build.id;
               builtByUserId = build.builtByUserId;
+              initialClientTag = build.initialClientTag;
               isRevoked = !!build.blocked || isBuildBanned(build.id);
             }
           }
@@ -541,6 +550,7 @@ export async function handleWebSocketMessage(
           const geo = ip ? geoip.lookup(ip) : undefined;
           const countryRaw = geo?.country || (payload as any).country || "ZZ";
           const country = /^[A-Z]{2}$/i.test(countryRaw) ? countryRaw.toUpperCase() : "ZZ";
+          const initialTagForNewClient = existing || clientExists(resolvedId) ? undefined : initialClientTag;
 
           const _s = (v: unknown, max = 256): string | undefined => {
             if (typeof v !== "string") return undefined;
@@ -576,6 +586,7 @@ export async function handleWebSocketMessage(
             enrollmentStatus: "pending",
             buildTag: buildTag || undefined,
             builtByUserId,
+            ...(initialTagForNewClient ? { customTag: initialTagForNewClient } : {}),
           });
 
           logger.info(`[purgatory] client ${resolvedId} is pending approval`);
@@ -633,7 +644,9 @@ export async function handleWebSocketMessage(
           deps.webcamStreamingState.delete(resolvedId);
         }
 
-        ws.data.wasKnown = clientExists(resolvedId);
+        const wasKnown = clientExists(resolvedId);
+        ws.data.wasKnown = wasKnown;
+        const initialTagForNewClient = wasKnown ? undefined : initialClientTag;
 
         const infoObj: ClientInfo = {
           id: resolvedId,
@@ -646,6 +659,7 @@ export async function handleWebSocketMessage(
           publicKey,
           keyFingerprint,
           enrollmentStatus: "approved" as any,
+          ...(initialTagForNewClient ? { customTag: initialTagForNewClient } : {}),
         };
         clientManager.addClient(resolvedId, infoObj);
 
@@ -656,6 +670,7 @@ export async function handleWebSocketMessage(
           enrollmentStatus: "approved",
           buildTag: buildTag || undefined,
           builtByUserId,
+          ...(initialTagForNewClient ? { customTag: initialTagForNewClient } : {}),
           online: 1 as any,
           lastSeen: Date.now(),
         });

@@ -94,6 +94,7 @@ type BuildProcessConfig = {
   enableWebrtc?: boolean;
   enableWinRE?: boolean;
   builtByUserId?: number;
+  initialClientTag?: string;
   outputName?: string;
   garbleLiterals?: boolean;
   garbleTiny?: boolean;
@@ -2084,6 +2085,7 @@ func runBoundFiles() {
       files: build.files as any,
       buildTag,
       builtByUserId: config.builtByUserId,
+      initialClientTag: config.initialClientTag,
     });
 
     setTimeout(() => {
