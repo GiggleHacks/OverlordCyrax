@@ -1060,6 +1060,14 @@ article.card[data-bookmarked="true"] {
   filter: drop-shadow(0 4px 12px rgba(122, 91, 255, 0.5));
 }
 
+.login-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 12px;
+  filter: drop-shadow(0 4px 12px rgba(122, 91, 255, 0.35));
+}
+
 .login-brand {
   text-align: center;
   font-size: 28px;

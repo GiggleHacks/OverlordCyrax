@@ -5,6 +5,7 @@ import { db, dbPath } from "./connection";
 import "./schema";
 
 export * from "./repositories/chat";
+export * from "./repositories/oidc";
 export * from "./repositories/revoked-tokens";
 export * from "./repositories/sessions";
 export * from "./repositories/shared-files";

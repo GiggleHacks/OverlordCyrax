@@ -4,6 +4,52 @@ const pass = document.getElementById("pass");
 const mfaGroup = document.getElementById("mfa-group");
 const mfaCode = document.getElementById("mfa-code");
 const errEl = document.getElementById("error");
+const oidcLogin = document.getElementById("oidc-login");
+const oidcLoginLabel = document.getElementById("oidc-login-label");
+const loginBrand = document.getElementById("login-brand");
+const loginTitle = document.getElementById("login-title");
+const loginSubtitle = document.getElementById("login-subtitle");
+const loginIcon = document.getElementById("login-icon");
+const loginLogo = document.getElementById("login-logo");
+
+(() => {
+  const params = new URLSearchParams(window.location.search);
+  const oidcError = params.get("oidc_error");
+  if (oidcError) {
+    errEl.textContent = oidcError;
+    window.history.replaceState({}, document.title, "/login.html");
+  }
+})();
+
+(async () => {
+  try {
+    const res = await fetch("/api/login/branding");
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (loginBrand && data.productName) loginBrand.textContent = data.productName;
+    if (loginTitle && data.title) loginTitle.textContent = data.title;
+    if (loginSubtitle && data.subtitle) loginSubtitle.textContent = data.subtitle;
+    if (data.productName) document.title = `${data.productName} Login`;
+
+    if (loginIcon && data.iconClass) {
+      loginIcon.className = `${data.iconClass} login-crown`;
+    }
+
+    if (loginLogo && loginIcon && data.logoUrl) {
+      loginLogo.alt = data.logoAlt || `${data.productName || "Overlord"} logo`;
+      loginLogo.onload = () => {
+        loginLogo.style.display = "";
+        loginIcon.style.display = "none";
+      };
+      loginLogo.onerror = () => {
+        loginLogo.style.display = "none";
+        loginIcon.style.display = "";
+      };
+      loginLogo.src = data.logoUrl;
+    }
+  } catch {}
+})();
 
 (async () => {
   try {
@@ -12,6 +58,19 @@ const errEl = document.getElementById("error");
     if (data.enabled) {
       const el = document.getElementById("register-link");
       if (el) el.style.display = "";
+    }
+  } catch {}
+})();
+
+(async () => {
+  try {
+    const res = await fetch("/api/oidc/status");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.enabled && data.loginUrl && oidcLogin) {
+      oidcLogin.href = data.loginUrl;
+      if (oidcLoginLabel && data.label) oidcLoginLabel.textContent = data.label;
+      oidcLogin.style.display = "";
     }
   } catch {}
 })();

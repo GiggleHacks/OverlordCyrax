@@ -21,6 +21,8 @@ Docker is the easiest way to run it.
 - [No Docker (.bat / .sh)](#no-docker-bat--sh)
 - [Production Package Scripts](#production-package-scripts)
 - [WebRTC Streaming](#webrtc-streaming)
+- [OIDC / SSO Login](#oidc--sso-login)
+- [Login Branding](#login-branding)
 - [Docker Notes (TLS, reverse proxy, cache)](#docker-notes-tls-reverse-proxy-cache)
 
 ---
@@ -399,6 +401,53 @@ The compose file passes a minimal set of `MTX_*` environment variables to MediaM
   ```
 
   Make sure the file exists on the host *before* the container starts — Docker will otherwise auto-create an empty directory at that path and fail with "not a directory".
+
+---
+
+## OIDC / SSO Login
+
+Overlord supports generic OIDC login for homelab identity providers such as Authentik, Authelia, Keycloak, Zitadel, and Dex. Local username/password login stays enabled as a fallback.
+
+Configure your OIDC provider with this redirect URI:
+
+```text
+https://YOUR_OVERLORD_HOST/api/oidc/callback
+```
+
+Then set the relevant environment variables:
+
+```env
+OVERLORD_OIDC_ENABLED=true
+OVERLORD_OIDC_LABEL=Sign in with SSO
+OVERLORD_OIDC_ISSUER=https://auth.example.com/application/o/overlord/
+OVERLORD_OIDC_CLIENT_ID=overlord
+OVERLORD_OIDC_CLIENT_SECRET=change-me
+OVERLORD_OIDC_REDIRECT_URI=https://overlord.example.com/api/oidc/callback
+OVERLORD_OIDC_DEFAULT_ROLE=viewer
+OVERLORD_OIDC_ALLOWED_DOMAINS=example.com
+OVERLORD_OIDC_ADMIN_GROUPS=overlord-admins
+OVERLORD_OIDC_OPERATOR_GROUPS=overlord-operators
+OVERLORD_OIDC_VIEWER_GROUPS=overlord-viewers
+```
+
+New OIDC users are linked by the provider's `issuer + sub` identity. Email/username linking to an existing local account is disabled by default; enable `OVERLORD_OIDC_ALLOW_EMAIL_LINK=true` only if you trust your provider's verified email claims.
+
+---
+
+## Login Branding
+
+Self-hosted and enterprise deployments can brand the login screen with environment variables:
+
+```env
+OVERLORD_LOGIN_BRAND_NAME=Acme SOC
+OVERLORD_LOGIN_TITLE=Welcome to Acme Overlord
+OVERLORD_LOGIN_SUBTITLE=Sign in with your Acme identity
+OVERLORD_LOGIN_LOGO_URL=/assets/acme-logo.png
+OVERLORD_LOGIN_LOGO_ALT=Acme logo
+OVERLORD_LOGIN_ICON_CLASS=fa-solid fa-shield-halved
+```
+
+`OVERLORD_LOGIN_LOGO_URL` accepts absolute `http(s)` URLs or root-relative paths. If no logo URL is set, the login screen uses `OVERLORD_LOGIN_ICON_CLASS`.
 
 ---
 

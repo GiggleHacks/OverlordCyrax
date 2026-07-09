@@ -1,7 +1,7 @@
 import { authenticateRequest } from "../../auth";
 import { AuditAction, getAuditLogs, logAudit } from "../../auditLog";
 import { logger } from "../../logger";
-import { getConfig, updateSecurityConfig, updateTlsConfig, updateAppearanceConfig, updateChatConfig, getExportableConfig, importFullConfig, updateRegistrationConfig, updateBuildRateLimitConfig, updateThumbnailsConfig, updateInputArchiveConfig } from "../../config";
+import { getConfig, updateSecurityConfig, updateTlsConfig, updateOidcConfig, updateAppearanceConfig, updateChatConfig, getExportableConfig, importFullConfig, updateRegistrationConfig, updateBuildRateLimitConfig, updateThumbnailsConfig, updateInputArchiveConfig } from "../../config";
 import {
   getClientMetricsSummary,
   getClientMetricsSummaryForUser,
@@ -38,6 +38,15 @@ type MiscRouteDeps = {
   tlsCertPath?: string;
   tlsSource?: "certbot" | "configured" | "self-signed";
 };
+
+function maskOidcSettings() {
+  const oidc = getConfig().oidc;
+  return {
+    ...oidc,
+    clientSecret: "",
+    clientSecretSet: Boolean(oidc.clientSecret),
+  };
+}
 
 function clampProfileDuration(value: unknown): number {
   const parsed = Number(value);
@@ -686,6 +695,63 @@ export async function handleMiscRoutes(
     }
   }
 
+  if (url.pathname === "/api/settings/oidc") {
+    const user = await authenticateRequest(req);
+    if (!user) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    try {
+      requirePermission(user, "system:oidc");
+    } catch (error) {
+      if (error instanceof Response) return error;
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    if (req.method === "GET") {
+      return Response.json({ oidc: maskOidcSettings() }, { headers: deps.CORS_HEADERS });
+    }
+
+    if (req.method === "PUT") {
+      let body: any = {};
+      try {
+        body = await req.json();
+      } catch {
+        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+      }
+
+      const updated = await updateOidcConfig({
+        enabled: Boolean(body?.enabled),
+        label: typeof body?.label === "string" ? body.label : undefined,
+        issuer: typeof body?.issuer === "string" ? body.issuer : undefined,
+        clientId: typeof body?.clientId === "string" ? body.clientId : undefined,
+        clientSecret: typeof body?.clientSecret === "string" && body.clientSecret.length > 0 ? body.clientSecret : undefined,
+        redirectUri: typeof body?.redirectUri === "string" ? body.redirectUri : undefined,
+        scopes: body?.scopes,
+        clientAuthMethod: body?.clientAuthMethod,
+        autoProvision: Boolean(body?.autoProvision),
+        allowEmailLink: Boolean(body?.allowEmailLink),
+        defaultRole: body?.defaultRole,
+        allowedEmails: body?.allowedEmails,
+        allowedDomains: body?.allowedDomains,
+        groupClaim: typeof body?.groupClaim === "string" ? body.groupClaim : undefined,
+        adminGroups: body?.adminGroups,
+        operatorGroups: body?.operatorGroups,
+        viewerGroups: body?.viewerGroups,
+      });
+
+      logAudit({
+        timestamp: Date.now(),
+        username: user.username,
+        ip: deps.requestIP?.(req)?.address || "unknown",
+        action: AuditAction.COMMAND,
+        details: `Updated OIDC settings (enabled=${updated.enabled})`,
+        success: true,
+      });
+
+      return Response.json({ ok: true, oidc: maskOidcSettings() }, { headers: deps.CORS_HEADERS });
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/api/settings/tls/certbot/setup") {
     const user = await authenticateRequest(req);
     if (!user) {
@@ -1135,8 +1201,12 @@ export async function handleMiscRoutes(
     }
 
     if (req.method === "GET") {
+      const appearance = getConfig().appearance;
       return Response.json(
-        { customCSS: getConfig().appearance?.customCSS || "" },
+        {
+          customCSS: appearance?.customCSS || "",
+          loginBranding: appearance.loginBranding,
+        },
         { headers: deps.CORS_HEADERS },
       );
     }
@@ -1153,8 +1223,12 @@ export async function handleMiscRoutes(
       if (customCSS.length > 51200) {
         return Response.json({ error: "CSS exceeds 50 KB limit" }, { status: 400 });
       }
+      const loginBranding =
+        body?.loginBranding && typeof body.loginBranding === "object"
+          ? body.loginBranding
+          : undefined;
 
-      const updated = await updateAppearanceConfig(customCSS);
+      const updated = await updateAppearanceConfig(customCSS, loginBranding);
 
       logAudit({
         timestamp: Date.now(),
@@ -1165,7 +1239,10 @@ export async function handleMiscRoutes(
         success: true,
       });
 
-      return Response.json({ ok: true, customCSS: updated.customCSS }, { headers: deps.CORS_HEADERS });
+      return Response.json(
+        { ok: true, customCSS: updated.customCSS, loginBranding: updated.loginBranding },
+        { headers: deps.CORS_HEADERS },
+      );
     }
   }
 

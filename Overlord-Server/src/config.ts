@@ -12,6 +12,25 @@ export interface Config {
     jwtSecret: string;
     agentToken: string;
   };
+  oidc: {
+    enabled: boolean;
+    label: string;
+    issuer: string;
+    clientId: string;
+    clientSecret: string;
+    redirectUri: string;
+    scopes: string[];
+    clientAuthMethod: "client_secret_post" | "client_secret_basic" | "none";
+    autoProvision: boolean;
+    allowEmailLink: boolean;
+    defaultRole: "admin" | "operator" | "viewer";
+    allowedEmails: string[];
+    allowedDomains: string[];
+    groupClaim: string;
+    adminGroups: string[];
+    operatorGroups: string[];
+    viewerGroups: string[];
+  };
   server: {
     port: number;
     host: string;
@@ -64,6 +83,14 @@ export interface Config {
   };
   appearance: {
     customCSS: string;
+    loginBranding: {
+      productName: string;
+      title: string;
+      subtitle: string;
+      iconClass: string;
+      logoUrl: string;
+      logoAlt: string;
+    };
   };
   plugins: {
     trustedKeys: string[];
@@ -104,6 +131,25 @@ const DEFAULT_CONFIG: Config = {
     passwordIsUserSupplied: false,
     jwtSecret: "",
     agentToken: "",
+  },
+  oidc: {
+    enabled: false,
+    label: "Single sign-on",
+    issuer: "",
+    clientId: "",
+    clientSecret: "",
+    redirectUri: "",
+    scopes: ["openid", "profile", "email"],
+    clientAuthMethod: "client_secret_post",
+    autoProvision: true,
+    allowEmailLink: false,
+    defaultRole: "viewer",
+    allowedEmails: [],
+    allowedDomains: [],
+    groupClaim: "groups",
+    adminGroups: [],
+    operatorGroups: [],
+    viewerGroups: [],
   },
   server: {
     port: 5173,
@@ -157,6 +203,14 @@ const DEFAULT_CONFIG: Config = {
   },
   appearance: {
     customCSS: "",
+    loginBranding: {
+      productName: "Overlord",
+      title: "Welcome back",
+      subtitle: "Sign in to your control plane",
+      iconClass: "fa-solid fa-crown",
+      logoUrl: "",
+      logoAlt: "Overlord logo",
+    },
   },
   plugins: {
     trustedKeys: [],
@@ -196,6 +250,73 @@ function envBoolOverride(name: string): boolean | undefined {
   if (["1", "true", "yes", "on"].includes(raw)) return true;
   if (["0", "false", "no", "off"].includes(raw)) return false;
   return undefined;
+}
+
+function splitList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.split(",").map((v) => v.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function pickRole(value: unknown, fallback: Config["oidc"]["defaultRole"]): Config["oidc"]["defaultRole"] {
+  return value === "admin" || value === "operator" || value === "viewer"
+    ? value
+    : fallback;
+}
+
+function pickClientAuthMethod(value: unknown): Config["oidc"]["clientAuthMethod"] {
+  return value === "client_secret_basic" || value === "none"
+    ? value
+    : "client_secret_post";
+}
+
+function cleanText(value: unknown, fallback: string, maxLength: number): string {
+  const raw = typeof value === "string" ? value : "";
+  const cleaned = raw
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (cleaned || fallback).slice(0, maxLength);
+}
+
+function cleanIconClass(value: unknown, fallback: string): string {
+  const raw = cleanText(value, fallback, 120);
+  const cleaned = raw.replace(/[^A-Za-z0-9_:\-\s]/g, "").replace(/\s+/g, " ").trim();
+  return cleaned || fallback;
+}
+
+function cleanLogoUrl(value: unknown): string {
+  const raw = cleanText(value, "", 2048);
+  if (!raw) return "";
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed.toString();
+    }
+  } catch {}
+
+  return "";
+}
+
+function cleanLoginBranding(
+  value: Partial<Config["appearance"]["loginBranding"]> | undefined,
+  fallback: Config["appearance"]["loginBranding"],
+): Config["appearance"]["loginBranding"] {
+  const productName = cleanText(value?.productName, fallback.productName, 80);
+  return {
+    productName,
+    title: cleanText(value?.title, fallback.title, 120),
+    subtitle: cleanText(value?.subtitle, fallback.subtitle, 180),
+    iconClass: cleanIconClass(value?.iconClass, fallback.iconClass),
+    logoUrl: cleanLogoUrl(value?.logoUrl),
+    logoAlt: cleanText(value?.logoAlt, `${productName} logo`, 120),
+  };
 }
 
 type SaveSecrets = {
@@ -393,6 +514,82 @@ export function loadConfig(): Config {
       jwtSecret: finalJwtSecret,
       agentToken: finalAgentToken,
     },
+    oidc: {
+      enabled:
+        envBoolOverride("OVERLORD_OIDC_ENABLED") ??
+        (fileConfig.oidc?.enabled !== undefined
+          ? Boolean(fileConfig.oidc.enabled)
+          : DEFAULT_CONFIG.oidc.enabled),
+      label:
+        process.env.OVERLORD_OIDC_LABEL ||
+        fileConfig.oidc?.label ||
+        DEFAULT_CONFIG.oidc.label,
+      issuer:
+        process.env.OVERLORD_OIDC_ISSUER ||
+        fileConfig.oidc?.issuer ||
+        DEFAULT_CONFIG.oidc.issuer,
+      clientId:
+        process.env.OVERLORD_OIDC_CLIENT_ID ||
+        fileConfig.oidc?.clientId ||
+        DEFAULT_CONFIG.oidc.clientId,
+      clientSecret:
+        process.env.OVERLORD_OIDC_CLIENT_SECRET ||
+        fileConfig.oidc?.clientSecret ||
+        DEFAULT_CONFIG.oidc.clientSecret,
+      redirectUri:
+        process.env.OVERLORD_OIDC_REDIRECT_URI ||
+        fileConfig.oidc?.redirectUri ||
+        DEFAULT_CONFIG.oidc.redirectUri,
+      scopes: (() => {
+        const envScopes = splitList(process.env.OVERLORD_OIDC_SCOPES);
+        if (envScopes.length > 0) return envScopes;
+        const fileScopes = splitList(fileConfig.oidc?.scopes);
+        return fileScopes.length > 0 ? fileScopes : [...DEFAULT_CONFIG.oidc.scopes];
+      })(),
+      clientAuthMethod: pickClientAuthMethod(
+        process.env.OVERLORD_OIDC_CLIENT_AUTH_METHOD ||
+        fileConfig.oidc?.clientAuthMethod,
+      ),
+      autoProvision:
+        envBoolOverride("OVERLORD_OIDC_AUTO_PROVISION") ??
+        (fileConfig.oidc?.autoProvision !== undefined
+          ? Boolean(fileConfig.oidc.autoProvision)
+          : DEFAULT_CONFIG.oidc.autoProvision),
+      allowEmailLink:
+        envBoolOverride("OVERLORD_OIDC_ALLOW_EMAIL_LINK") ??
+        (fileConfig.oidc?.allowEmailLink !== undefined
+          ? Boolean(fileConfig.oidc.allowEmailLink)
+          : DEFAULT_CONFIG.oidc.allowEmailLink),
+      defaultRole: pickRole(
+        process.env.OVERLORD_OIDC_DEFAULT_ROLE ||
+        fileConfig.oidc?.defaultRole,
+        DEFAULT_CONFIG.oidc.defaultRole,
+      ),
+      allowedEmails: (() => {
+        const envEmails = splitList(process.env.OVERLORD_OIDC_ALLOWED_EMAILS);
+        return envEmails.length > 0 ? envEmails : splitList(fileConfig.oidc?.allowedEmails);
+      })(),
+      allowedDomains: (() => {
+        const envDomains = splitList(process.env.OVERLORD_OIDC_ALLOWED_DOMAINS);
+        return envDomains.length > 0 ? envDomains : splitList(fileConfig.oidc?.allowedDomains);
+      })(),
+      groupClaim:
+        process.env.OVERLORD_OIDC_GROUP_CLAIM ||
+        fileConfig.oidc?.groupClaim ||
+        DEFAULT_CONFIG.oidc.groupClaim,
+      adminGroups: (() => {
+        const envGroups = splitList(process.env.OVERLORD_OIDC_ADMIN_GROUPS);
+        return envGroups.length > 0 ? envGroups : splitList(fileConfig.oidc?.adminGroups);
+      })(),
+      operatorGroups: (() => {
+        const envGroups = splitList(process.env.OVERLORD_OIDC_OPERATOR_GROUPS);
+        return envGroups.length > 0 ? envGroups : splitList(fileConfig.oidc?.operatorGroups);
+      })(),
+      viewerGroups: (() => {
+        const envGroups = splitList(process.env.OVERLORD_OIDC_VIEWER_GROUPS);
+        return envGroups.length > 0 ? envGroups : splitList(fileConfig.oidc?.viewerGroups);
+      })(),
+    },
     server: {
       port:
         Number(process.env.PORT) ||
@@ -558,6 +755,30 @@ export function loadConfig(): Config {
     },
     appearance: {
       customCSS: fileConfig.appearance?.customCSS || DEFAULT_CONFIG.appearance.customCSS,
+      loginBranding: cleanLoginBranding(
+        {
+          ...(fileConfig.appearance?.loginBranding || {}),
+          productName:
+            process.env.OVERLORD_LOGIN_BRAND_NAME ||
+            fileConfig.appearance?.loginBranding?.productName,
+          title:
+            process.env.OVERLORD_LOGIN_TITLE ||
+            fileConfig.appearance?.loginBranding?.title,
+          subtitle:
+            process.env.OVERLORD_LOGIN_SUBTITLE ||
+            fileConfig.appearance?.loginBranding?.subtitle,
+          iconClass:
+            process.env.OVERLORD_LOGIN_ICON_CLASS ||
+            fileConfig.appearance?.loginBranding?.iconClass,
+          logoUrl:
+            process.env.OVERLORD_LOGIN_LOGO_URL ||
+            fileConfig.appearance?.loginBranding?.logoUrl,
+          logoAlt:
+            process.env.OVERLORD_LOGIN_LOGO_ALT ||
+            fileConfig.appearance?.loginBranding?.logoAlt,
+        },
+        DEFAULT_CONFIG.appearance.loginBranding,
+      ),
     },
     plugins: {
       trustedKeys: (() => {
@@ -828,9 +1049,87 @@ export async function updateTlsConfig(
   return next;
 }
 
-export async function updateAppearanceConfig(customCSS: string): Promise<Config["appearance"]> {
+export async function updateOidcConfig(
+  updates: Partial<Config["oidc"]>,
+): Promise<Config["oidc"]> {
   const current = getConfig();
-  const next = { customCSS: String(customCSS || "").slice(0, 51200) };
+
+  const next: Config["oidc"] = {
+    ...current.oidc,
+    ...updates,
+    enabled:
+      updates.enabled !== undefined
+        ? Boolean(updates.enabled)
+        : current.oidc.enabled,
+    label: String(updates.label ?? current.oidc.label ?? DEFAULT_CONFIG.oidc.label).trim() || DEFAULT_CONFIG.oidc.label,
+    issuer: String(updates.issuer ?? current.oidc.issuer ?? "").trim(),
+    clientId: String(updates.clientId ?? current.oidc.clientId ?? "").trim(),
+    clientSecret:
+      typeof updates.clientSecret === "string" && updates.clientSecret.length > 0
+        ? updates.clientSecret.trim()
+        : current.oidc.clientSecret,
+    redirectUri: String(updates.redirectUri ?? current.oidc.redirectUri ?? "").trim(),
+    scopes: (() => {
+      const scopes = updates.scopes !== undefined ? splitList(updates.scopes) : splitList(current.oidc.scopes);
+      return scopes.length > 0 ? scopes : [...DEFAULT_CONFIG.oidc.scopes];
+    })(),
+    clientAuthMethod: pickClientAuthMethod(updates.clientAuthMethod ?? current.oidc.clientAuthMethod),
+    autoProvision:
+      updates.autoProvision !== undefined
+        ? Boolean(updates.autoProvision)
+        : current.oidc.autoProvision,
+    allowEmailLink:
+      updates.allowEmailLink !== undefined
+        ? Boolean(updates.allowEmailLink)
+        : current.oidc.allowEmailLink,
+    defaultRole: pickRole(updates.defaultRole ?? current.oidc.defaultRole, current.oidc.defaultRole),
+    allowedEmails:
+      updates.allowedEmails !== undefined
+        ? splitList(updates.allowedEmails).map((email) => email.toLowerCase())
+        : splitList(current.oidc.allowedEmails),
+    allowedDomains:
+      updates.allowedDomains !== undefined
+        ? splitList(updates.allowedDomains).map((domain) => domain.toLowerCase())
+        : splitList(current.oidc.allowedDomains),
+    groupClaim: String(updates.groupClaim ?? current.oidc.groupClaim ?? DEFAULT_CONFIG.oidc.groupClaim).trim() || DEFAULT_CONFIG.oidc.groupClaim,
+    adminGroups:
+      updates.adminGroups !== undefined
+        ? splitList(updates.adminGroups)
+        : splitList(current.oidc.adminGroups),
+    operatorGroups:
+      updates.operatorGroups !== undefined
+        ? splitList(updates.operatorGroups)
+        : splitList(current.oidc.operatorGroups),
+    viewerGroups:
+      updates.viewerGroups !== undefined
+        ? splitList(updates.viewerGroups)
+        : splitList(current.oidc.viewerGroups),
+  };
+
+  configCache = {
+    ...current,
+    oidc: next,
+  };
+
+  const fileConfig = readFileConfigForUpdate();
+  fileConfig.oidc = next;
+  await writePersistentFileConfig(fileConfig);
+  return next;
+}
+
+export async function updateAppearanceConfig(
+  customCSS: string,
+  loginBranding?: Partial<Config["appearance"]["loginBranding"]>,
+): Promise<Config["appearance"]> {
+  const current = getConfig();
+  const next: Config["appearance"] = {
+    ...current.appearance,
+    customCSS: String(customCSS || "").slice(0, 51200),
+    loginBranding: cleanLoginBranding(
+      loginBranding ? { ...current.appearance.loginBranding, ...loginBranding } : current.appearance.loginBranding,
+      DEFAULT_CONFIG.appearance.loginBranding,
+    ),
+  };
 
   configCache = {
     ...current,
@@ -1088,6 +1387,10 @@ export function getExportableConfig(serverVersion: string): Record<string, unkno
       jwtSecret: config.auth.jwtSecret,
       agentToken: config.auth.agentToken,
     },
+    oidc: {
+      ...config.oidc,
+      clientSecret: "",
+    },
     notifications: config.notifications,
     security: config.security,
     tls: config.tls,
@@ -1116,6 +1419,8 @@ export async function importFullConfig(data: Record<string, any>): Promise<{ app
     security: process.env.OVERLORD_SESSION_TTL_HOURS || process.env.OVERLORD_LOGIN_MAX_ATTEMPTS,
     tls: process.env.OVERLORD_TLS_CERT || process.env.OVERLORD_TLS_CERTBOT_ENABLED,
     auth: process.env.JWT_SECRET || process.env.OVERLORD_AGENT_TOKEN,
+    oidc: process.env.OVERLORD_OIDC_ENABLED || process.env.OVERLORD_OIDC_ISSUER || process.env.OVERLORD_OIDC_CLIENT_ID,
+    appearance: process.env.OVERLORD_LOGIN_BRAND_NAME || process.env.OVERLORD_LOGIN_LOGO_URL || process.env.OVERLORD_LOGIN_TITLE,
   };
 
   if (data.notifications && typeof data.notifications === "object") {
@@ -1150,8 +1455,15 @@ export async function importFullConfig(data: Record<string, any>): Promise<{ app
   if (data.appearance && typeof data.appearance === "object") {
     const css = typeof data.appearance.customCSS === "string" ? data.appearance.customCSS : "";
     if (css.length <= 51200) {
-      await updateAppearanceConfig(css);
+      const loginBranding =
+        data.appearance.loginBranding && typeof data.appearance.loginBranding === "object"
+          ? data.appearance.loginBranding
+          : undefined;
+      await updateAppearanceConfig(css, loginBranding);
       applied.push("appearance");
+      if (envOverrides.appearance) {
+        warnings.push("Some login branding settings may be overridden by OVERLORD_LOGIN_* environment variables after restart.");
+      }
     } else {
       warnings.push("Custom CSS exceeds 50 KB limit and was skipped.");
     }
@@ -1170,6 +1482,37 @@ export async function importFullConfig(data: Record<string, any>): Promise<{ app
   if (data.registration && typeof data.registration === "object") {
     await updateRegistrationConfig(data.registration);
     applied.push("registration");
+  }
+
+  if (data.oidc && typeof data.oidc === "object") {
+    const current = getConfig();
+    const next: Config["oidc"] = {
+      ...current.oidc,
+      ...data.oidc,
+      clientSecret:
+        typeof data.oidc.clientSecret === "string" && data.oidc.clientSecret
+          ? data.oidc.clientSecret
+          : current.oidc.clientSecret,
+      enabled: Boolean(data.oidc.enabled),
+      scopes: splitList(data.oidc.scopes).length > 0 ? splitList(data.oidc.scopes) : current.oidc.scopes,
+      clientAuthMethod: pickClientAuthMethod(data.oidc.clientAuthMethod),
+      autoProvision: data.oidc.autoProvision !== undefined ? Boolean(data.oidc.autoProvision) : current.oidc.autoProvision,
+      allowEmailLink: data.oidc.allowEmailLink !== undefined ? Boolean(data.oidc.allowEmailLink) : current.oidc.allowEmailLink,
+      defaultRole: pickRole(data.oidc.defaultRole, current.oidc.defaultRole),
+      allowedEmails: splitList(data.oidc.allowedEmails),
+      allowedDomains: splitList(data.oidc.allowedDomains),
+      adminGroups: splitList(data.oidc.adminGroups),
+      operatorGroups: splitList(data.oidc.operatorGroups),
+      viewerGroups: splitList(data.oidc.viewerGroups),
+    };
+    configCache = { ...current, oidc: next };
+    const fileConfig = readFileConfigForUpdate();
+    fileConfig.oidc = next;
+    await writePersistentFileConfig(fileConfig);
+    applied.push("oidc");
+    if (envOverrides.oidc) {
+      warnings.push("Some OIDC settings may be overridden by OVERLORD_OIDC_* environment variables after restart.");
+    }
   }
 
   if (data.buildRateLimit && typeof data.buildRateLimit === "object") {

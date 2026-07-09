@@ -95,6 +95,10 @@ const PERMISSIONS = {
     description: "Change TLS and certificate settings",
     roles: ["admin"],
   },
+  "system:oidc": {
+    description: "Change OIDC and SSO login settings",
+    roles: ["admin"],
+  },
   "system:registration": {
     description: "Change user registration policy settings",
     roles: ["admin"],

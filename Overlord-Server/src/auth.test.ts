@@ -31,6 +31,19 @@ describe("auth token extraction", () => {
   });
 });
 
+describe("login branding", () => {
+  test("returns default public login branding", async () => {
+    const url = new URL("https://localhost/api/login/branding");
+    const res = await handleAuthRoutes(new Request(url), url, mockServer);
+    expect(res?.status).toBe(200);
+
+    const body = (await res!.json()) as any;
+    expect(body.productName).toBe("Overlord");
+    expect(body.title).toBe("Welcome back");
+    expect(body.logoUrl).toBe("");
+  });
+});
+
 describe("auth MFA login", () => {
   test("MFA-enabled user gets a challenge and can login with TOTP", async () => {
     const username = `mfa_user_${Date.now().toString(36)}`;

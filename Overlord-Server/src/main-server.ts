@@ -34,6 +34,7 @@ import { handleClientRoutes } from "./server/routes/client-routes";
 import { handleMiscRoutes } from "./server/routes/misc-routes";
 import { handleKeylogArchiveRoutes } from "./server/routes/keylog-archive-routes";
 import { handleNotificationsConfigRoutes } from "./server/routes/notifications-config-routes";
+import { handleOidcRoutes } from "./server/routes/oidc-routes";
 import { handlePageRoutes } from "./server/routes/page-routes";
 import { handlePluginRoutes } from "./server/routes/plugin-routes";
 import { handleFileShareRoutes } from "./server/routes/file-share-routes";
@@ -712,6 +713,7 @@ async function startServer() {
           requestIP: (srv as any).requestIP,
         }),
         (req, url, srv) => handleAuthRoutes(req, url, srv as any),
+        (req, url, srv) => handleOidcRoutes(req, url, srv as any),
         (req, url, srv) => handleNotificationsConfigRoutes(req, url, srv as any, routeDeps.notificationsConfig),
         (req, url) => handleAutoScriptsRoutes(req, url),
         (req, url) => handleSavedScriptsRoutes(req, url),

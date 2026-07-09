@@ -82,6 +82,28 @@ const tlsCertbotCertFileInput = document.getElementById("tls-certbot-cert-file")
 const tlsCertbotKeyFileInput = document.getElementById("tls-certbot-key-file");
 const tlsCertbotCaFileInput = document.getElementById("tls-certbot-ca-file");
 
+const oidcForm = document.getElementById("oidc-form");
+const oidcPermissionNote = document.getElementById("oidc-permission-note");
+const oidcSaveBtn = document.getElementById("oidc-save-btn");
+const oidcEnabledInput = document.getElementById("oidc-enabled");
+const oidcLabelInput = document.getElementById("oidc-label");
+const oidcIssuerInput = document.getElementById("oidc-issuer");
+const oidcClientIdInput = document.getElementById("oidc-client-id");
+const oidcClientSecretInput = document.getElementById("oidc-client-secret");
+const oidcSecretHint = document.getElementById("oidc-secret-hint");
+const oidcRedirectUriInput = document.getElementById("oidc-redirect-uri");
+const oidcScopesInput = document.getElementById("oidc-scopes");
+const oidcClientAuthMethodInput = document.getElementById("oidc-client-auth-method");
+const oidcAutoProvisionInput = document.getElementById("oidc-auto-provision");
+const oidcAllowEmailLinkInput = document.getElementById("oidc-allow-email-link");
+const oidcDefaultRoleInput = document.getElementById("oidc-default-role");
+const oidcAllowedDomainsInput = document.getElementById("oidc-allowed-domains");
+const oidcAllowedEmailsInput = document.getElementById("oidc-allowed-emails");
+const oidcGroupClaimInput = document.getElementById("oidc-group-claim");
+const oidcAdminGroupsInput = document.getElementById("oidc-admin-groups");
+const oidcOperatorGroupsInput = document.getElementById("oidc-operator-groups");
+const oidcViewerGroupsInput = document.getElementById("oidc-viewer-groups");
+
 const appearanceForm = document.getElementById("appearance-form");
 const appearancePermissionNote = document.getElementById("appearance-permission-note");
 const appearanceSaveBtn = document.getElementById("appearance-save-btn");
@@ -99,6 +121,7 @@ const wipeOfflineMessage = document.getElementById("wipe-offline-message");
 let currentUser = null;
 let securityConfig = null;
 let tlsConfig = null;
+let oidcConfig = null;
 
 function showMessage(text, type = "ok") {
   if (!messageEl) return;
@@ -212,6 +235,7 @@ async function renderPermissionsOverview() {
       perms: [
         "system:security",
         "system:tls",
+        "system:oidc",
         "system:registration",
         "system:notifications",
         "system:chat",
@@ -423,6 +447,94 @@ async function loadTlsSettings() {
   tlsConfig = data.tls || null;
   applyTlsForm();
   setTlsFormDisabled(false);
+}
+
+function listToCsv(value) {
+  return Array.isArray(value) ? value.join(", ") : "";
+}
+
+function csvToList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function setOidcFormDisabled(disabled) {
+  const controls = [
+    oidcEnabledInput,
+    oidcLabelInput,
+    oidcIssuerInput,
+    oidcClientIdInput,
+    oidcClientSecretInput,
+    oidcRedirectUriInput,
+    oidcScopesInput,
+    oidcClientAuthMethodInput,
+    oidcAutoProvisionInput,
+    oidcAllowEmailLinkInput,
+    oidcDefaultRoleInput,
+    oidcAllowedDomainsInput,
+    oidcAllowedEmailsInput,
+    oidcGroupClaimInput,
+    oidcAdminGroupsInput,
+    oidcOperatorGroupsInput,
+    oidcViewerGroupsInput,
+    oidcSaveBtn,
+  ];
+
+  for (const control of controls) {
+    if (!control) continue;
+    control.disabled = disabled;
+  }
+}
+
+function applyOidcForm() {
+  const cfg = oidcConfig || {};
+  if (oidcEnabledInput) oidcEnabledInput.checked = Boolean(cfg.enabled);
+  if (oidcLabelInput) oidcLabelInput.value = cfg.label || "Single sign-on";
+  if (oidcIssuerInput) oidcIssuerInput.value = cfg.issuer || "";
+  if (oidcClientIdInput) oidcClientIdInput.value = cfg.clientId || "";
+  if (oidcClientSecretInput) oidcClientSecretInput.value = "";
+  if (oidcSecretHint) {
+    oidcSecretHint.textContent = cfg.clientSecretSet
+      ? "A client secret is saved. Leave this blank to keep it."
+      : "No client secret is currently saved.";
+  }
+  if (oidcRedirectUriInput) oidcRedirectUriInput.value = cfg.redirectUri || "";
+  if (oidcScopesInput) oidcScopesInput.value = listToCsv(cfg.scopes || ["openid", "profile", "email"]);
+  if (oidcClientAuthMethodInput) oidcClientAuthMethodInput.value = cfg.clientAuthMethod || "client_secret_post";
+  if (oidcAutoProvisionInput) oidcAutoProvisionInput.checked = cfg.autoProvision !== false;
+  if (oidcAllowEmailLinkInput) oidcAllowEmailLinkInput.checked = Boolean(cfg.allowEmailLink);
+  if (oidcDefaultRoleInput) oidcDefaultRoleInput.value = cfg.defaultRole || "viewer";
+  if (oidcAllowedDomainsInput) oidcAllowedDomainsInput.value = listToCsv(cfg.allowedDomains);
+  if (oidcAllowedEmailsInput) oidcAllowedEmailsInput.value = listToCsv(cfg.allowedEmails);
+  if (oidcGroupClaimInput) oidcGroupClaimInput.value = cfg.groupClaim || "groups";
+  if (oidcAdminGroupsInput) oidcAdminGroupsInput.value = listToCsv(cfg.adminGroups);
+  if (oidcOperatorGroupsInput) oidcOperatorGroupsInput.value = listToCsv(cfg.operatorGroups);
+  if (oidcViewerGroupsInput) oidcViewerGroupsInput.value = listToCsv(cfg.viewerGroups);
+}
+
+async function loadOidcSettings() {
+  if (!currentUser) return;
+
+  if (!userHas("system:oidc")) {
+    if (oidcPermissionNote) oidcPermissionNote.classList.remove("hidden");
+    setOidcFormDisabled(true);
+    return;
+  }
+
+  if (oidcPermissionNote) oidcPermissionNote.classList.add("hidden");
+  const res = await fetch("/api/settings/oidc", { credentials: "include" });
+  if (!res.ok) {
+    showMessage("Failed to load OIDC settings.", "error");
+    setOidcFormDisabled(true);
+    return;
+  }
+
+  const data = await res.json().catch(() => ({}));
+  oidcConfig = data.oidc || null;
+  applyOidcForm();
+  setOidcFormDisabled(false);
 }
 
 function updateNavLayoutButtons(mode, sidebarBtn, topbarBtn) {
@@ -721,6 +833,82 @@ async function saveTlsSettings(event) {
   tlsConfig = data.tls || payload;
   applyTlsForm();
   showMessage("TLS settings updated. Restart server to apply.");
+}
+
+async function saveOidcSettings(event) {
+  event.preventDefault();
+  if (!requireUiPermission("system:oidc", "OIDC settings permission required.")) {
+    return;
+  }
+
+  const payload = {
+    enabled: !!oidcEnabledInput?.checked,
+    label: String(oidcLabelInput?.value || "").trim(),
+    issuer: String(oidcIssuerInput?.value || "").trim(),
+    clientId: String(oidcClientIdInput?.value || "").trim(),
+    redirectUri: String(oidcRedirectUriInput?.value || "").trim(),
+    scopes: csvToList(oidcScopesInput?.value),
+    clientAuthMethod: oidcClientAuthMethodInput?.value || "client_secret_post",
+    autoProvision: !!oidcAutoProvisionInput?.checked,
+    allowEmailLink: !!oidcAllowEmailLinkInput?.checked,
+    defaultRole: oidcDefaultRoleInput?.value || "viewer",
+    allowedDomains: csvToList(oidcAllowedDomainsInput?.value),
+    allowedEmails: csvToList(oidcAllowedEmailsInput?.value),
+    groupClaim: String(oidcGroupClaimInput?.value || "").trim(),
+    adminGroups: csvToList(oidcAdminGroupsInput?.value),
+    operatorGroups: csvToList(oidcOperatorGroupsInput?.value),
+    viewerGroups: csvToList(oidcViewerGroupsInput?.value),
+  };
+
+  const clientSecret = String(oidcClientSecretInput?.value || "");
+  if (clientSecret) {
+    payload.clientSecret = clientSecret;
+  }
+
+  if (payload.enabled) {
+    if (!payload.issuer) {
+      showMessage("OIDC issuer URL is required when OIDC is enabled.", "error");
+      oidcIssuerInput?.focus();
+      return;
+    }
+    if (!payload.redirectUri) {
+      showMessage("OIDC redirect URI is required when OIDC is enabled.", "error");
+      oidcRedirectUriInput?.focus();
+      return;
+    }
+    if (!payload.clientId) {
+      showMessage("OIDC client ID is required when OIDC is enabled.", "error");
+      oidcClientIdInput?.focus();
+      return;
+    }
+    if (!payload.scopes.length || !payload.scopes.includes("openid")) {
+      showMessage("OIDC scopes must include openid.", "error");
+      oidcScopesInput?.focus();
+      return;
+    }
+    if (payload.clientAuthMethod !== "none" && !clientSecret && !oidcConfig?.clientSecretSet) {
+      showMessage("OIDC client secret is required for the selected client auth method.", "error");
+      oidcClientSecretInput?.focus();
+      return;
+    }
+  }
+
+  const res = await fetch("/api/settings/oidc", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showMessage(data.error || "Failed to save OIDC settings.", "error");
+    return;
+  }
+
+  oidcConfig = data.oidc || payload;
+  applyOidcForm();
+  showMessage("OIDC settings saved. Environment variables still take priority after restart.");
 }
 
 async function runCertbotAutoSetup() {
@@ -1448,6 +1636,7 @@ async function importSettings(event) {
 
     await loadSecurityPolicy();
     await loadTlsSettings();
+    await loadOidcSettings();
     await loadAppearanceSettings();
   } catch (error) {
     showExportImportMessage(`Import failed: ${String(error?.message || error)}`, "error");
@@ -2429,6 +2618,7 @@ async function init() {
     securityForm.addEventListener("submit", saveSecurityPolicy);
     tlsForm.addEventListener("submit", saveTlsSettings);
     tlsCertbotAutoBtn.addEventListener("click", runCertbotAutoSetup);
+    if (oidcForm) oidcForm.addEventListener("submit", saveOidcSettings);
     if (appearanceForm) appearanceForm.addEventListener("submit", saveAppearanceSettings);
     if (chatSettingsForm) chatSettingsForm.addEventListener("submit", saveChatSettings);
     if (inputArchiveUserForm) inputArchiveUserForm.addEventListener("submit", saveInputArchivePreference);

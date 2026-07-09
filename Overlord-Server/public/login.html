@@ -23,11 +23,12 @@
     </div>
     <div class="login-card">
       <div class="login-crown-wrapper">
-        <i class="fa-solid fa-crown login-crown"></i>
+        <img id="login-logo" class="login-logo" alt="Overlord logo" style="display: none" />
+        <i id="login-icon" class="fa-solid fa-crown login-crown"></i>
       </div>
-      <div class="brand login-brand">Overlord</div>
-      <h2 class="login-title">Welcome back</h2>
-      <p class="muted login-subtitle">Sign in to your control plane</p>
+      <div id="login-brand" class="brand login-brand">Overlord</div>
+      <h2 id="login-title" class="login-title">Welcome back</h2>
+      <p id="login-subtitle" class="muted login-subtitle">Sign in to your control plane</p>
       <form id="login-form">
         <div class="form-group">
           <label class="label">Username</label>
@@ -79,6 +80,10 @@
         </button>
         <div id="error" class="error" aria-live="polite"></div>
       </form>
+      <a id="oidc-login" href="/api/oidc/login" class="button secondary full login-btn" style="display: none; margin-top: 0.75rem">
+        <span id="oidc-login-label">Single sign-on</span>
+        <i class="fa-solid fa-right-to-bracket btn-icon"></i>
+      </a>
       <div id="register-link" class="login-footer" style="display: none">
         Don't have an account?
         <a href="/register.html">Create one</a>

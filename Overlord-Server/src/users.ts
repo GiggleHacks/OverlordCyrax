@@ -713,6 +713,63 @@ export async function createUser(
   }
 }
 
+export async function createExternalUser(
+  username: string,
+  role: UserRole,
+  createdBy: string,
+  registeredVia: string,
+): Promise<{ success: boolean; error?: string; userId?: number }> {
+  if (!username || username.length < 3 || username.length > 32) {
+    return {
+      success: false,
+      error: "Username must be between 3 and 32 characters",
+    };
+  }
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return {
+      success: false,
+      error: "Username can only contain letters, numbers, hyphens, and underscores",
+    };
+  }
+
+  const existing = getUserByUsername(username);
+  if (existing) {
+    return { success: false, error: "Username already exists" };
+  }
+
+  try {
+    const passwordHash = await Bun.password.hash(crypto.randomUUID() + crypto.randomUUID(), {
+      algorithm: "bcrypt",
+      cost: 10,
+    });
+
+    const result = db
+      .prepare(
+        "INSERT INTO users (username, password_hash, role, created_at, created_by, must_change_password, client_scope, plugin_scope, can_build, can_upload_files, registered_via) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        username,
+        passwordHash,
+        role,
+        Date.now(),
+        createdBy,
+        role === "admin" ? "all" : "none",
+        role === "admin" ? "all" : "none",
+        role === "admin" || role === "operator" ? 1 : 0,
+        role === "admin" ? 1 : 0,
+        registeredVia,
+      );
+
+    invalidateNotificationDeliveryCache();
+
+    return { success: true, userId: result.lastInsertRowid as number };
+  } catch (err: any) {
+    logger.error("[users] Create external user error:", err);
+    return { success: false, error: err.message || "Failed to create external user" };
+  }
+}
+
 export async function updateUserPassword(
   userId: number,
   newPassword: string,

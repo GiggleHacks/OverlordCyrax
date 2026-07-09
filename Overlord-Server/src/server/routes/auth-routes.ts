@@ -8,6 +8,7 @@ import {
   revokeToken,
 } from "../../auth";
 import { AuditAction, logAudit } from "../../auditLog";
+import { getConfig } from "../../config";
 import { buildTotpUri, generateMfaSecret, verifyTotpCode } from "../../mfa";
 import { createQrSvg } from "../../qr";
 import {
@@ -50,6 +51,10 @@ export async function handleAuthRoutes(
   url: URL,
   server: RequestIpProvider,
 ): Promise<Response | null> {
+  if (req.method === "GET" && url.pathname === "/api/login/branding") {
+    return Response.json(getConfig().appearance.loginBranding);
+  }
+
   if (req.method === "POST" && url.pathname === "/api/login") {
     const ip = server.requestIP(req)?.address || "unknown";
 

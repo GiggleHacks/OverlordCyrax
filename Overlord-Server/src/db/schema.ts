@@ -303,6 +303,34 @@ db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_has
 db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);`);
 
 db.run(`
+  CREATE TABLE IF NOT EXISTS oidc_auth_states (
+    state TEXT PRIMARY KEY,
+    nonce TEXT NOT NULL,
+    code_verifier TEXT NOT NULL,
+    return_to TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_oidc_auth_states_expires_at ON oidc_auth_states(expires_at);`);
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS oidc_identities (
+    issuer TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    email TEXT,
+    username TEXT,
+    created_at INTEGER NOT NULL,
+    last_login INTEGER NOT NULL,
+    PRIMARY KEY (issuer, subject),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_oidc_identities_user_id ON oidc_identities(user_id);`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_oidc_identities_email ON oidc_identities(email);`);
+
+db.run(`
   CREATE TABLE IF NOT EXISTS builds (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL,

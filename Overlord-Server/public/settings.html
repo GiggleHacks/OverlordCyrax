@@ -94,6 +94,7 @@
             <a data-target="section-permissions-overview" class="settings-nav-link" data-permission="users:manage" style="--accent: 167 139 250"><i class="fa-solid fa-user-shield w-4 text-violet-400"></i><span>Access Overview</span></a>
             <a data-target="section-security"         class="settings-nav-link" data-permission="system:security" style="--accent: 129 140 248"><i class="fa-solid fa-shield-halved w-4 text-indigo-400"></i><span>Security Policy</span></a>
             <a data-target="section-tls"              class="settings-nav-link" data-permission="system:tls" style="--accent: 34 211 238"><i class="fa-solid fa-certificate w-4 text-cyan-400"></i><span>TLS Certificates</span></a>
+            <a data-target="section-oidc"             class="settings-nav-link" data-permission="system:oidc" style="--accent: 20 184 166"><i class="fa-solid fa-right-to-bracket w-4 text-teal-400"></i><span>OIDC / SSO</span></a>
             <a data-target="chat-settings-section"    class="settings-nav-link" data-permission="system:chat" style="--accent: 56 189 248"><i class="fa-solid fa-comments w-4 text-sky-400"></i><span>Team Chat</span></a>
             <a data-target="registration-section"     class="settings-nav-link" data-permission="system:registration" style="--accent: 52 211 153"><i class="fa-solid fa-user-plus w-4 text-emerald-400"></i><span>Registration</span></a>
             <a data-target="thumbnails-section"       class="settings-nav-link" data-permission="system:thumbnails" style="--accent: 56 189 248"><i class="fa-solid fa-images w-4 text-sky-400"></i><span>Screenshot Thumbnails</span></a>
@@ -824,6 +825,137 @@
             class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 transition-colors text-white text-sm font-medium"
           >
             <i class="fa-solid fa-certificate"></i>Save TLS Settings
+          </button>
+        </form>
+      </section>
+
+      <!-- OIDC / SSO -->
+      <section id="section-oidc" data-permission="system:oidc" class="hidden bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-4 settings-section">
+        <div class="flex items-center gap-3">
+          <div class="flex items-center justify-center w-9 h-9 rounded-lg bg-teal-500/10 border border-teal-500/30">
+            <i class="fa-solid fa-right-to-bracket text-teal-400"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold">OIDC / SSO</h2>
+            <p class="text-sm text-slate-400">Configure generic OIDC login for self-hosted identity providers.</p>
+          </div>
+        </div>
+
+        <form id="oidc-form" class="space-y-4">
+          <div id="oidc-permission-note" class="hidden rounded-lg border border-amber-800 bg-amber-900/20 text-amber-200 px-3 py-2 text-sm">
+            Your permissions do not allow OIDC setting changes.
+          </div>
+
+          <label class="flex items-center gap-2 text-sm">
+            <input id="oidc-enabled" type="checkbox" class="h-4 w-4 accent-teal-500" />
+            <span>Enable OIDC login button</span>
+          </label>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="block">
+              <span class="text-sm text-slate-300">Login button label</span>
+              <input id="oidc-label" type="text" placeholder="Sign in with SSO" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            </label>
+            <label class="block">
+              <span class="text-sm text-slate-300">Default role for new users</span>
+              <select id="oidc-default-role" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                <option value="viewer">Viewer</option>
+                <option value="operator">Operator</option>
+                <option value="admin">Admin</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid grid-cols-1 gap-3">
+            <label class="block">
+              <span class="text-sm text-slate-300">Issuer URL <span class="text-rose-400" aria-hidden="true">*</span><span class="sr-only">required</span></span>
+              <input id="oidc-issuer" type="url" placeholder="https://auth.example.com/application/o/overlord/" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            </label>
+            <label class="block">
+              <span class="text-sm text-slate-300">Redirect URI <span class="text-rose-400" aria-hidden="true">*</span><span class="sr-only">required</span></span>
+              <input id="oidc-redirect-uri" type="url" placeholder="https://overlord.example.com/api/oidc/callback" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            </label>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="block">
+              <span class="text-sm text-slate-300">Client ID <span class="text-rose-400" aria-hidden="true">*</span><span class="sr-only">required</span></span>
+              <input id="oidc-client-id" type="text" autocomplete="off" placeholder="overlord" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            </label>
+            <label class="block">
+              <span class="text-sm text-slate-300">Client secret <span class="text-rose-400" aria-hidden="true">*</span><span class="sr-only">required unless client auth method is none</span></span>
+              <input id="oidc-client-secret" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing secret" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              <p id="oidc-secret-hint" class="text-xs text-slate-500 mt-1">No client secret is currently saved.</p>
+            </label>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="block">
+              <span class="text-sm text-slate-300">Scopes <span class="text-rose-400" aria-hidden="true">*</span><span class="sr-only">required</span></span>
+              <input id="oidc-scopes" type="text" placeholder="openid, profile, email" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            </label>
+            <label class="block">
+              <span class="text-sm text-slate-300">Client auth method</span>
+              <select id="oidc-client-auth-method" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                <option value="client_secret_post">Client secret POST</option>
+                <option value="client_secret_basic">Client secret basic</option>
+                <option value="none">None / PKCE only</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-3 text-sm">
+              <input id="oidc-auto-provision" type="checkbox" class="mt-1 h-4 w-4 accent-teal-500" />
+              <span>
+                <span class="block text-slate-200">Auto-provision allowed users</span>
+                <span class="block text-xs text-slate-500">Create local users after a successful provider login.</span>
+              </span>
+            </label>
+            <label class="flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-3 text-sm">
+              <input id="oidc-allow-email-link" type="checkbox" class="mt-1 h-4 w-4 accent-teal-500" />
+              <span>
+                <span class="block text-slate-200">Allow email linking</span>
+                <span class="block text-xs text-slate-500">Link to existing users only when you trust verified email claims.</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="block">
+              <span class="text-sm text-slate-300">Allowed email domains</span>
+              <input id="oidc-allowed-domains" type="text" placeholder="example.com, example.org" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            </label>
+            <label class="block">
+              <span class="text-sm text-slate-300">Allowed email addresses</span>
+              <input id="oidc-allowed-emails" type="text" placeholder="admin@example.com" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            </label>
+          </div>
+
+          <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-4 space-y-3">
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Group Role Mapping</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label class="block">
+                <span class="text-sm text-slate-300">Group claim</span>
+                <input id="oidc-group-claim" type="text" placeholder="groups" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </label>
+              <label class="block">
+                <span class="text-sm text-slate-300">Admin groups</span>
+                <input id="oidc-admin-groups" type="text" placeholder="overlord-admins" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </label>
+              <label class="block">
+                <span class="text-sm text-slate-300">Operator groups</span>
+                <input id="oidc-operator-groups" type="text" placeholder="overlord-operators" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </label>
+              <label class="block">
+                <span class="text-sm text-slate-300">Viewer groups</span>
+                <input id="oidc-viewer-groups" type="text" placeholder="overlord-viewers" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </label>
+            </div>
+          </div>
+
+          <button type="submit" id="oidc-save-btn" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-600 transition-colors text-white text-sm font-medium">
+            <i class="fa-solid fa-floppy-disk"></i>Save OIDC Settings
           </button>
         </form>
       </section>
