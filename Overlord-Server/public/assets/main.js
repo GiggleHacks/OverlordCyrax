@@ -1466,7 +1466,7 @@ bulkMuteBtn?.addEventListener("click", () => bulkSetMuted(true));
 bulkUnmuteBtn?.addEventListener("click", () => bulkSetMuted(false));
 
 bulkWebcamsBtn?.addEventListener("click", () => {
-  const ids = [...selectedClients].filter((id) => document.querySelector(`[data-client-row][data-id="${CSS.escape(id)}"]`)?.dataset.hasWebcam === "true").slice(0, 6);
+  const ids = [...selectedClients].filter((id) => document.querySelector(`[data-client-row][data-id="${CSS.escape(id)}"]`)?.dataset.hasWebcam === "true").slice(0, 12);
   if (!ids.length) return alert("Select one or more online clients with webcams first.");
   const overlay = document.createElement("div");
   overlay.className = "webcam-bulk-confirm";

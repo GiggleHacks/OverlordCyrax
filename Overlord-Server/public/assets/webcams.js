@@ -1,4 +1,4 @@
-const ids = [...new Set((new URLSearchParams(location.search).get("clientIds") || "").split(",").filter(Boolean))].slice(0, 6);
+const ids = [...new Set((new URLSearchParams(location.search).get("clientIds") || "").split(",").filter(Boolean))].slice(0, 12);
 const grid = document.getElementById("webcamTiles");
 const count = document.getElementById("tileCount");
 const stopAll = document.getElementById("stopAll");
