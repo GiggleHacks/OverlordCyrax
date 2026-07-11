@@ -739,8 +739,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       applyFpsSettings();
       pushQuality(qualitySlider ? qualitySlider.value : 90);
       if (desiredStreaming) {
-        send("webcam_start");
-        setStreamState("starting", "Starting");
+        startStreaming(false);
       } else {
         setStreamState("idle", "Stopped");
       }
@@ -778,11 +777,11 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     return isWindows && !clientIsAdmin;
   }
 
-  startBtn.addEventListener("click", () => {
+  function startStreaming(confirmFirewall = true) {
     const mode = getWebrtcMode();
-    if (needsWebrtcFirewallWarning(mode)) {
+    if (confirmFirewall && needsWebrtcFirewallWarning(mode)) {
       if (!confirm("This agent is not elevated. Starting WebRTC will trigger a Windows Defender Firewall prompt on the target machine.\n\nContinue?")) {
-        return;
+        return false;
       }
       firewallWarningAcked = true;
     }
@@ -801,6 +800,11 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       connectAudio();
     }
     setStreamState("starting", "Starting");
+    return true;
+  }
+
+  startBtn.addEventListener("click", () => {
+    startStreaming();
   });
 
   stopBtn.addEventListener("click", () => {
