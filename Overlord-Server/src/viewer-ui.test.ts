@@ -33,10 +33,12 @@ describe("unified viewer UI", () => {
 });
 
 describe("retro login", () => {
-  test("renders boot console framing and a tiny runtime version", async () => {
+  test("keeps restrained retro styling without fake system messages", async () => {
     const html = await publicFile("login.html");
-    expect(html).toContain('class="login-boot-log"');
     expect(html).toContain('id="login-version"');
-    expect(html).toContain("AUTHENTICATION TERMINAL");
+    expect(html).not.toContain('class="login-boot-log"');
+    expect(html).not.toContain("encrypted channel");
+    expect(html).not.toContain("AUTHENTICATION TERMINAL");
+    expect(html).toContain('<span class="btn-text">Sign in</span>');
   });
 });

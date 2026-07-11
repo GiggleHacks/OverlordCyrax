@@ -1746,28 +1746,21 @@ body.webcam-embedded .webcam-workspace { width: 100% !important; max-width: none
 
 /* Retro authentication terminal */
 .login-body { background: #03070b !important; font-family: "JetBrains Mono", Consolas, monospace !important; }
-.login-body::before { background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(80,240,220,.025) 3px 4px), radial-gradient(circle at 50% 45%, rgba(30,100,120,.16), transparent 55%) !important; animation: crtDrift 8s linear infinite; }
-.login-particles { opacity: .28; }
-.login-card { width: min(92vw, 520px) !important; padding: 0 30px 28px !important; border: 1px solid #1c6370 !important; border-radius: 2px !important; background: rgba(3,10,15,.94) !important; box-shadow: 0 0 0 1px #07181f, 0 0 50px rgba(53,213,230,.1), inset 0 0 35px rgba(0,0,0,.6) !important; }
+.login-body::before { background: radial-gradient(circle at 50% 45%, rgba(30,100,120,.1), transparent 58%) !important; animation: none !important; }
+.login-particles { opacity: .12; }
+.login-card { width: min(92vw, 500px) !important; padding: 30px !important; border: 1px solid #264753 !important; border-radius: 3px !important; background: rgba(5,12,17,.95) !important; box-shadow: 0 18px 55px rgba(0,0,0,.32) !important; }
 .login-card::before { display: none !important; }
-.login-terminal-head { margin: 0 -30px 20px; padding: 8px 11px; display: flex; justify-content: space-between; border-bottom: 1px solid #174956; background: #07141c; color: #57dff2; font-size: 10px; letter-spacing: .1em; }
-.login-terminal-lights { color: #ff54cf; letter-spacing: .35em; }
-.login-boot-log { display: grid; gap: 3px; margin-bottom: 18px; color: #68f59b; font-size: 10px; text-transform: uppercase; }
-.login-boot-cursor { color: #55dff4; animation: terminalBlink 1s steps(2,end) infinite; }
-.login-crown { color: #ff54cf !important; filter: drop-shadow(0 0 12px rgba(255,84,207,.45)); }
+.login-crown { color: #b06de8 !important; filter: none; }
 .login-brand { color: #dffcff !important; font-family: inherit !important; letter-spacing: .08em; text-transform: uppercase; }
 .login-version { margin-top: -4px; color: #4a7c84; font-size: 8px; letter-spacing: .12em; }
-.login-title { color: #67e5f5 !important; font-family: inherit !important; font-size: 15px !important; letter-spacing: .08em; text-transform: uppercase; }
+.login-title { color: #d6edf0 !important; font-family: inherit !important; font-size: 17px !important; letter-spacing: .02em; text-transform: none; }
 .login-subtitle { color: #66838d !important; font-size: 11px !important; }
-.login-card .label { color: #62dce8 !important; font-size: 10px; letter-spacing: .12em; }
+.login-card .label { color: #8baab2 !important; font-size: 11px; letter-spacing: .03em; }
 .login-card .input-row { border-radius: 1px !important; border-color: #1b4e5b !important; background: #02070c !important; }
-.login-card .input-row:focus-within { border-color: #63e7f4 !important; box-shadow: inset 3px 0 #ff54cf, 0 0 14px rgba(99,231,244,.12) !important; }
+.login-card .input-row:focus-within { border-color: #5bb7c2 !important; box-shadow: inset 2px 0 #8c63d8 !important; }
 .login-card input { color: #caffe8 !important; font-family: inherit !important; }
 .login-btn.primary { border-radius: 1px !important; background: #0b2830 !important; border: 1px solid #4bd7e5 !important; color: #bffaff !important; font-family: inherit !important; letter-spacing: .1em; box-shadow: none !important; }
-.login-btn.primary:hover { background: #54deed !important; color: #031015 !important; box-shadow: 0 0 24px rgba(84,222,237,.24) !important; }
-@keyframes terminalBlink { 50% { opacity: .35; } }
-@keyframes crtDrift { 50% { transform: translateY(2px); } }
-@media (prefers-reduced-motion: reduce) { .login-body::before, .login-boot-cursor { animation: none !important; } }
+.login-btn.primary:hover { background: #326d76 !important; color: #efffff !important; box-shadow: none !important; }
 
 .ripple {
   position: relative;
