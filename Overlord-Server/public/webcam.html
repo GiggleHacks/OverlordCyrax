@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script src="/assets/nav-prelude.js"></script>
     <link rel="modulepreload" href="/assets/nav.js" />
-    <title>Overlord Webcam Viewer</title>
+    <title>Overlord 2.0 Webcam</title>
     <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
     <link rel="stylesheet" href="/vendor/inter/400.css" />
     <link rel="stylesheet" href="/vendor/inter/600.css" />
@@ -18,22 +18,21 @@
     <script defer src="/assets/logout.js"></script>
   </head>
   <body class="min-h-screen bg-slate-950 text-slate-100">
-    <header id="top-nav"></header>
-
-    <main class="px-5 py-6 flex-1 flex flex-col">
-      <div class="flex-1 flex flex-col gap-4" style="max-width: 100%">
+    <main class="webcam-focus">
+      <div id="webcamWorkspace" class="webcam-workspace webcam-workspace--60">
         <div class="flex flex-wrap gap-2 items-center">
           <div class="flex items-center gap-2">
-            <button id="startBtn" class="button primary">
-              <i class="fa-solid fa-play"></i><span>Start</span>
+            <button id="startBtn" class="button primary webcam-control" title="Start stream" aria-label="Start stream">
+              <i class="fa-solid fa-play"></i>
             </button>
-            <button id="stopBtn" class="button ghost">
-              <i class="fa-solid fa-stop"></i><span>Stop</span>
+            <button id="stopBtn" class="button ghost webcam-control" title="Stop stream" aria-label="Stop stream">
+              <i class="fa-solid fa-stop"></i>
             </button>
-            <button id="screenshotBtn" class="button ghost" title="Download current frame as JPG">
-              <i class="fa-solid fa-camera"></i><span>Screenshot</span>
+            <button id="screenshotBtn" class="button ghost webcam-control" title="Download current frame as JPG" aria-label="Screenshot">
+              <i class="fa-solid fa-camera"></i>
             </button>
           </div>
+          <button id="viewerScaleBtn" class="button ghost webcam-scale" type="button" aria-pressed="false" title="Toggle viewer size">60%</button>
           <div
             id="streamStatus"
             class="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-sm"
@@ -172,7 +171,6 @@
 
     <script defer src="/vendor/msgpackr/msgpackr.js"></script>
     <script defer src="/assets/remotedesktop-settings-menu.js"></script>
-    <script type="module" src="/assets/nav.js"></script>
     <script type="module" src="/assets/webcam.js"></script>
   </body>
 </html>

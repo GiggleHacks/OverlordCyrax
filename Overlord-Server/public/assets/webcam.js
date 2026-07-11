@@ -35,6 +35,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const audioCtrl = document.getElementById("audioCtrl");
   const audioTransport = document.getElementById("audioTransport");
   const webrtcAudio = document.getElementById("webrtcAudio");
+  const viewerScaleBtn = document.getElementById("viewerScaleBtn");
+  const webcamWorkspace = document.getElementById("webcamWorkspace");
   let whepClient = null;
   let p2pClient = null;
   function getWebrtcMode() {
@@ -48,7 +50,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   clientLabel.textContent = clientId;
 
   let ws = null;
-  let desiredStreaming = false;
+  let desiredStreaming = true;
+  let viewerScale = 60;
   let streamState = "connecting";
   let renderCount = 0;
   let renderWindowStart = performance.now();
@@ -293,7 +296,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (typeof settings.preferH264 === "boolean") {
       prefersH264 = settings.preferH264 && typeof VideoDecoder === "function";
     }
+    if (Number(settings.viewerScale) === 100) viewerScale = 100;
     applySavedCamera();
+    applyViewerScale();
   }
 
   function readSharedSettings() {
@@ -305,11 +310,17 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       webrtcMode: getWebrtcMode(),
       audio: !!audioCtrl?.checked,
       audioTransport: getAudioTransport(),
+      viewerScale,
     };
   }
 
   applySharedSettings(await loadSharedUiSettings("webcam"));
   const sharedSettingsSaver = createSharedUiSettingsSaver("webcam", readSharedSettings);
+
+  function applyViewerScale() {
+    if (webcamWorkspace) webcamWorkspace.classList.toggle("webcam-workspace--100", viewerScale === 100);
+    if (viewerScaleBtn) { viewerScaleBtn.textContent = `${viewerScale}%`; viewerScaleBtn.setAttribute("aria-pressed", String(viewerScale === 100)); }
+  }
 
   if (codecH264) {
     codecH264.checked = prefersH264;
@@ -890,6 +901,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   screenshotBtn.addEventListener("click", () => {
     downloadScreenshot();
   });
+
+  viewerScaleBtn?.addEventListener("click", () => { viewerScale = viewerScale === 60 ? 100 : 60; applyViewerScale(); sharedSettingsSaver.scheduleSave(); });
 
   connect();
 })();

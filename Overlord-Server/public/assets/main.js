@@ -13,7 +13,6 @@ import {
   markManualDisconnect,
 } from "./data.js";
 import { ThumbnailLoader } from "./thumbnail-loader.js";
-import { initDashboardStats, updateDashboardStatsFromClients } from "./dashboard-stats.js";
 
 const grid = document.getElementById("grid");
 const totalPill = document.getElementById("total-pill");
@@ -50,6 +49,7 @@ const bulkGroupBtn = document.getElementById("bulk-group");
 const bulkMuteBtn = document.getElementById("bulk-mute");
 const bulkUnmuteBtn = document.getElementById("bulk-unmute");
 const serverVersionText = document.getElementById("server-version-text");
+const onlineAsciiStatus = document.getElementById("online-ascii-status");
 const selectedClients = new Set();
 let lastNonOnlineStatus = "all";
 const PREF_FILTER_STATUS_KEY = "overlord_filter_status";
@@ -1119,12 +1119,11 @@ function initializeRenderer() {
   rendererSetLayout = rSetLayout;
   registerRenderer((data, options) => {
     renderMerge(data, options);
-    updateDashboardStatsFromClients(data);
+    if (onlineAsciiStatus) onlineAsciiStatus.textContent = `[ ONLINE: ${String(Number(data?.online) || 0).padStart(3, "0")} ]`;
     if (!options?.fromPluginDashboard) {
       refreshDashboardPluginContributions(data?.items || []);
     }
   });
-  initDashboardStats();
   setupDashboardThumbnailLoader();
   refreshGroupFilter();
   loadWithOptions();

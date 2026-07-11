@@ -21,8 +21,25 @@ const mockServer = {
 let originalAppearance: Config["appearance"];
 const uploadPublicRoot = path.resolve(".test-data", "branding-upload-public");
 
-beforeAll(() => {
+beforeAll(async () => {
   originalAppearance = JSON.parse(JSON.stringify(getConfig().appearance));
+  await updateAppearanceConfig("", {
+    productName: "Overlord 2.0",
+    navName: "Overlord 2.0",
+    title: "Welcome back",
+    subtitle: "Sign in to your control plane",
+    iconClass: "fa-solid fa-skull",
+    logoUrl: "",
+    logoAlt: "Overlord 2.0 logo",
+    navLogoUrl: "",
+    navLogoAlt: "Overlord 2.0 logo",
+    heroImageUrl: "",
+    heroImageAlt: "Overlord 2.0 sign-in background",
+    accentColor: "#7a5bff",
+    footerText: "",
+    supportText: "",
+    supportUrl: "",
+  });
 });
 
 afterAll(async () => {
@@ -55,8 +72,9 @@ describe("login branding", () => {
     expect(res?.status).toBe(200);
 
     const body = (await res!.json()) as any;
-    expect(body.productName).toBe("Overlord");
-    expect(body.navName).toBe("Overlord");
+    expect(body.productName).toBe("Overlord 2.0");
+    expect(body.navName).toBe("Overlord 2.0");
+    expect(body.iconClass).toBe("fa-solid fa-skull");
     expect(body.title).toBe("Welcome back");
     expect(body.logoUrl).toBe("");
     expect(body.navLogoUrl).toBe("");

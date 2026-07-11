@@ -257,12 +257,12 @@ async function applyBranding() {
       document.documentElement.style.setProperty("--brand-accent", brand.accentColor);
     }
 
-    const navName = brand.navName || brand.productName || "Overlord";
+    const navName = brand.navName || brand.productName || "Overlord 2.0";
     for (const el of document.querySelectorAll("#nav-brand-name, #nav-mobile-brand-name")) {
       el.textContent = navName;
     }
 
-    const iconClass = brand.iconClass || "fa-solid fa-crown";
+    const iconClass = brand.iconClass || "fa-solid fa-skull";
     for (const icon of document.querySelectorAll("#nav-brand-icon, #nav-mobile-brand-icon")) {
       const sidebarIcon = Boolean(icon.closest(".sb-logo"));
       icon.className = `${iconClass} header-crown${sidebarIcon ? " sb-icon" : ""}`;

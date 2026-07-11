@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script src="/assets/nav-prelude.js"></script>
     <link rel="modulepreload" href="/assets/nav.js" />
-    <title>Overlord Dashboard</title>
+    <title>Overlord 2.0 Dashboard</title>
     <link rel="stylesheet" href="/vendor/inter/400.css" />
     <link rel="stylesheet" href="/vendor/inter/600.css" />
     <link rel="stylesheet" href="/vendor/inter/700.css" />
@@ -28,7 +28,7 @@
     <main class="px-5 py-6">
       <div id="clients-shell" class="w-full flex flex-col gap-5">
         <span id="total-pill" class="hidden">0 online</span>
-        <section id="dashboard-stats" class="dashboard-stats-shell" aria-label="Dashboard status">
+        <section id="dashboard-stats" class="dashboard-stats-shell" aria-label="Dashboard status" hidden>
           <div class="dashboard-stats-bar">
             <div class="dashboard-stats-title">
               <i class="fa-solid fa-chart-simple"></i>
@@ -164,6 +164,7 @@
               placeholder="Search by nickname, host, user, id"
             />
           </label>
+          <output id="online-ascii-status" class="online-ascii-status" aria-live="polite">[ ONLINE: 000 ]</output>
           <div class="dashboard-toolbar-actions">
             <label class="dashboard-toggle" title="Show offline clients">
               <input id="toggle-offline" type="checkbox" checked />

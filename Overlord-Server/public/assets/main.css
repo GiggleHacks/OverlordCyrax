@@ -3007,6 +3007,18 @@ tbody tr:hover {
 .cv-pill-webcam { background: rgba(20, 184, 166, 0.12); color: #99f6e4; border-color: rgba(20, 184, 166, 0.3); }
 .cv-mini-pill.cv-webcam-btn { padding: 0; cursor: pointer; }
 .cv-mini-pill.cv-webcam-btn:hover { background: rgba(20, 184, 166, 0.20); border-color: rgba(20, 184, 166, 0.5); }
+.online-ascii-status { align-self:center; color:#75f59a; font:700 11px/1 "JetBrains Mono", monospace; letter-spacing:.08em; text-shadow:0 0 10px rgba(117,245,154,.35); white-space:nowrap; }
+.webcam-focus { min-height:100vh; display:flex; justify-content:center; padding:18px; overflow:auto; }
+.webcam-workspace { width:100%; display:flex; flex-direction:column; gap:12px; transform-origin:top center; transition:width .2s ease; }
+.webcam-workspace--60 { width:min(60vw, 1100px); min-width:640px; }
+.webcam-workspace--100 { width:100%; }
+.webcam-control { min-width:34px !important; min-height:34px !important; padding:0 !important; justify-content:center; }
+.webcam-scale { margin-left:auto; font-family:"JetBrains Mono", monospace; font-size:11px; }
+.cv-row, .cv-card, .dashboard-icon-btn, .layout-toggle-btn { transition:transform .16s ease, border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
+.cv-row:hover, .cv-card:hover { transform:translateY(-2px); }
+.dashboard-icon-btn:active, .layout-toggle-btn:active, .cv-webcam-btn:active { transform:scale(.92); }
+@media (prefers-reduced-motion: reduce) { .cv-row, .cv-card, .dashboard-icon-btn, .layout-toggle-btn, .webcam-workspace { transition:none !important; transform:none !important; } }
+@media (max-width: 900px) { .webcam-focus { padding:10px; } .webcam-workspace--60 { width:100%; min-width:0; } }
 .cv-pill-muted { background: rgba(245, 158, 11, 0.12); color: #fcd34d; border-color: rgba(245, 158, 11, 0.3); }
 .cv-pill-macperm.is-ok { background: rgba(16, 185, 129, 0.12); color: #86efac; border-color: rgba(16, 185, 129, 0.3); }
 .cv-pill-macperm.is-warn { background: rgba(245, 158, 11, 0.12); color: #fcd34d; border-color: rgba(245, 158, 11, 0.3); }
