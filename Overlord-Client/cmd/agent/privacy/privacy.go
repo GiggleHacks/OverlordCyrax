@@ -5,7 +5,10 @@ import (
 	"sync/atomic"
 )
 
-const inputMarker uintptr = 0x00D5E7B00B5
+// Keep the full marker on 64-bit builds and let the runtime conversion retain
+// its low 32 bits on 32-bit builds. dwExtraInfo is pointer-sized, so the sender
+// and the low-level hooks observe the same value on either architecture.
+var inputMarkerValue uint64 = 0x00D5E7B00B5
 
 type Manager struct {
 	mu      sync.Mutex
@@ -51,4 +54,4 @@ func (m *Manager) Disable() {
 func Start() error         { return Get().Enable() }
 func Stop()                { Get().Disable() }
 func IsEnabled() bool      { return Get().IsEnabled() }
-func InputMarker() uintptr { return inputMarker }
+func InputMarker() uintptr { return uintptr(inputMarkerValue) }

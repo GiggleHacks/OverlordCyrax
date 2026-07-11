@@ -48,6 +48,15 @@ export function dispatchPingBulk(target: ClientInfo, countValue: unknown): numbe
   return count;
 }
 
+async function waitForManualPing(target: ClientInfo, sentAt: number, timeoutMs = 1500): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((target.lastPongAt ?? 0) >= sentAt && target.lastPingNonce === undefined) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
 export async function handleClientCommandRoute(
   req: Request,
   url: URL,
@@ -87,8 +96,13 @@ export async function handleClientCommandRoute(
     let success = true;
 
     if (action === "ping") {
-      sendPingRequest(target, target.ws, "manual", 0);
+      const sentAt = Date.now();
+      const sent = sendPingRequest(target, target.ws, "manual", 0);
       metrics.recordCommand("ping");
+      if (body?.waitForResult === true) {
+        const updated = sent ? await waitForManualPing(target, sentAt) : false;
+        return Response.json({ ok: true, sent, updated, pingMs: target.pingMs ?? null }, { headers: deps.CORS_HEADERS });
+      }
     } else if (action === "ping_bulk") {
       const count = dispatchPingBulk(target, body?.count);
       metrics.recordCommand("ping_bulk");

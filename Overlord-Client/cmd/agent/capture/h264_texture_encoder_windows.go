@@ -53,6 +53,12 @@ var d3d11H264TextureRegistry = struct {
 	backends: []h264D3D11TextureBackend{nvencD3D11TextureBackend{}},
 }
 
+func init() {
+	if backend := newAMFD3D11TextureBackend(); backend != nil {
+		d3d11H264TextureRegistry.backends = append(d3d11H264TextureRegistry.backends, backend)
+	}
+}
+
 func encodeH264D3D11Texture(req h264D3D11TextureRequest) ([]byte, string, error) {
 	if req.Device == nil || req.Texture == nil {
 		return nil, "", fmt.Errorf("nil D3D11 device or texture")

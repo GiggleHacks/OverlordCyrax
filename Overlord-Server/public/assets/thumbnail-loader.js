@@ -157,11 +157,14 @@ export class ThumbnailLoader {
   }
 
   refreshNow(clientId) {
+    let touched = false;
     for (const rec of this.records.values()) {
       if (clientId && rec.clientId !== clientId) continue;
       rec.lastTriggerAt = 0;
+      touched = true;
     }
     this.tick();
+    return touched;
   }
 
   applyVersion(element, rec) {

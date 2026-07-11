@@ -247,6 +247,31 @@ export function handlePong(info: ClientInfo, payload: WireMessage) {
   }
 }
 
+export function handleScreenshotThumbnailResult(info: ClientInfo, payload: any): boolean {
+  const requested = isThumbnailRequested(info.id);
+  if (!requested || payload?.error) return false;
+
+  let bytes: Uint8Array | null = null;
+  if (payload?.data instanceof Uint8Array) {
+    bytes = payload.data;
+  } else if (payload?.data instanceof ArrayBuffer) {
+    bytes = new Uint8Array(payload.data);
+  } else if (ArrayBuffer.isView(payload?.data)) {
+    bytes = new Uint8Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength);
+  }
+  if (!bytes?.byteLength) return false;
+
+  const rawFormat = String(payload?.format || "jpeg").toLowerCase();
+  const format = rawFormat === "jpg" ? "jpeg" : rawFormat;
+  if (format !== "jpeg" && format !== "webp") return false;
+
+  setLatestFrame(info.id, bytes, format);
+  void requestThumbnailRegen(info.id).then((ok) => {
+    if (ok) notifyThumbnailGenerated(info.id);
+  });
+  return true;
+}
+
 export function handleFrame(info: ClientInfo, payload: any): boolean {
   const bytes = payload.data as unknown as Uint8Array;
   const header = (payload as any).header;

@@ -17,6 +17,8 @@ export type BuildConfig = {
   disableMutex?: boolean;
   stripDebug?: boolean;
   disableCgo?: boolean;
+  enableNvenc?: boolean;
+  enableAmf?: boolean;
   obfuscate?: boolean;
   enablePersistence?: boolean;
   persistenceMethods?: string[];

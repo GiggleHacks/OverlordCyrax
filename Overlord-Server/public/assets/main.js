@@ -8,6 +8,7 @@ import {
   renderCachedClients,
   startAutoRefresh,
   sendCommand,
+  pingClientNow,
   requestPreview,
   requestThumbnail,
   markManualDisconnect,
@@ -1032,6 +1033,15 @@ document.querySelectorAll(".dashboard-menu").forEach((details) => {
 
 let dashboardThumbnailLoader = null;
 
+function refreshDashboardThumbnail(clientId) {
+  if (dashboardThumbnailLoader?.refreshNow(clientId)) {
+    return;
+  }
+  // The loader initializes asynchronously; preserve manual refreshes made
+  // before it is ready.
+  requestThumbnail(clientId);
+}
+
 async function isDashboardThumbnailEnabled() {
   try {
     const res = await fetch("/api/settings/thumbnails", { credentials: "include" });
@@ -1105,8 +1115,8 @@ function initializeRenderer() {
     },
     openModal,
     requestPreview,
-    requestThumbnail,
-    pingClient: (id) => sendCommand(id, "ping"),
+    requestThumbnail: refreshDashboardThumbnail,
+    pingClient: pingClientNow,
     onOpenWebcam: (id) => window.open(`/webcam?clientId=${encodeURIComponent(id)}`, "_blank", "noopener"),
     onMacPermissionRequest: (id, _card, permissionKey) => requestMacPermissions(id, permissionKey),
     onMacPermissionRefresh: (id) => requestMacPermissions(id, "", { refreshOnly: true }),

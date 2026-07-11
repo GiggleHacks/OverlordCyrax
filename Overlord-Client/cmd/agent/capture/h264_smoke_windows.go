@@ -53,6 +53,16 @@ type H264MFTFinding struct {
 	Error        string `json:"error,omitempty"`
 }
 
+type AMFSmokeResult struct {
+	Available bool   `json:"available"`
+	Detail    string `json:"detail"`
+}
+
+func RunAMFSmoke() AMFSmokeResult {
+	ok, detail := probeAMFD3D11()
+	return AMFSmokeResult{Available: ok, Detail: detail}
+}
+
 func FindH264HardwareMFTs() ([]H264MFTFinding, error) {
 	if err := ensureMFStartup(); err != nil {
 		return nil, err

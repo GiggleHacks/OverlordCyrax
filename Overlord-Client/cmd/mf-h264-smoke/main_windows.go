@@ -34,6 +34,7 @@ type smokeReport struct {
 	H264         []capture.H264SmokeResult       `json:"h264"`
 	Capture      []capture.CaptureSmokeResult    `json:"capture,omitempty"`
 	NVENC        *capture.NVENCSmokeResult       `json:"nvenc,omitempty"`
+	AMF          capture.AMFSmokeResult          `json:"amf"`
 	NVENCD3D11   []capture.NVENCD3D11SmokeResult `json:"nvenc_d3d11,omitempty"`
 	Nvidia       []string                        `json:"nvidia_smi,omitempty"`
 }
@@ -70,6 +71,7 @@ func main() {
 	system := sysinfo.Collect()
 	machine := machineInfo{Hostname: hostname, OS: sysinfo.OSName(), Arch: runtime.GOARCH, CPU: system.CPU, GPU: system.GPU, RAM: system.RAM, GeneratedAt: time.Now().Format(time.RFC3339)}
 	findings, findingErr := capture.FindH264HardwareMFTs()
+	amfResult := capture.RunAMFSmoke()
 
 	opts := capture.DefaultH264SmokeOptions()
 	opts.Frames = frames
@@ -96,7 +98,7 @@ func main() {
 			nvidiaSMI = queryNvidiaSMI()
 		}
 	}
-	report := smokeReport{Machine: machine, Findings: findings, H264: results, Capture: captureResults, NVENC: nvencResult, NVENCD3D11: nvencD3D11Results, Nvidia: nvidiaSMI}
+	report := smokeReport{Machine: machine, Findings: findings, H264: results, Capture: captureResults, NVENC: nvencResult, AMF: amfResult, NVENCD3D11: nvencD3D11Results, Nvidia: nvidiaSMI}
 	if findingErr != nil {
 		report.FindingError = findingErr.Error()
 	}
@@ -117,6 +119,11 @@ func main() {
 	}
 	printMachine(machine)
 	printMFTFindings(findings, findingErr)
+	status := "unavailable"
+	if amfResult.Available {
+		status = "available"
+	}
+	fmt.Printf("AMD AMF runtime: %s (%s)\n", status, amfResult.Detail)
 	fmt.Println()
 	printTable(results)
 	if includeCapture {
