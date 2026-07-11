@@ -9,7 +9,7 @@ const idLabel = document.getElementById("viewerClientId");
 const capability = document.getElementById("viewerCapability");
 
 idLabel.textContent = clientId.slice(0, 12) || "unknown";
-const webcamUrl = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1`;
+const webcamUrl = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&controls=1`;
 const desktopUrl = `/remotedesktop?clientId=${encodeURIComponent(clientId)}&embedded=1`;
 
 function ensureFrame(frame, url) {

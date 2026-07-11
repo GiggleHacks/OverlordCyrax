@@ -351,10 +351,15 @@
                 <i class="fa-solid fa-triangle-exclamation mr-1"></i>
                 Browser permission was denied. Reset notification permissions for this site in your browser settings, then try again.
               </p>
-              <label class="flex items-center gap-2 text-sm">
-                <input id="pref-sound-effects" type="checkbox" class="h-4 w-4 accent-violet-500" />
-                <span>Enable sound effects</span>
-              </label>
+              <div class="flex items-center gap-2 text-sm">
+                <label class="flex items-center gap-2">
+                  <input id="pref-sound-effects" type="checkbox" class="h-4 w-4 accent-violet-500" />
+                  <span>Enable sound effects</span>
+                </label>
+                <button type="button" id="pref-sound-test" class="px-2 py-0.5 rounded text-xs bg-violet-600/20 text-violet-300 border border-violet-500/30 hover:bg-violet-600/40 transition-colors" title="Preview the purgatory chime">
+                  <i class="fa-solid fa-volume-high mr-1"></i>Test
+                </button>
+              </div>
               <p class="text-xs text-slate-500 pl-6">Plays a short chime when a client enters Purgatory.</p>
             </div>
 

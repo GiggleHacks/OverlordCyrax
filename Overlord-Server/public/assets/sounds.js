@@ -59,8 +59,8 @@ const effects = {
   },
 };
 
-export function playSoundEffect(name) {
-  if (!isSoundEffectsEnabled()) return;
+export function playSoundEffect(name, force) {
+  if (!force && !isSoundEffectsEnabled()) return;
   const fn = effects[name];
   if (!fn) return;
   try {

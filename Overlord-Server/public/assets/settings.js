@@ -5,7 +5,7 @@ import {
   setDesktopNotificationsEnabled,
   requestDesktopNotificationPermission,
 } from "./notify-client.js";
-import { isSoundEffectsEnabled, setSoundEffectsEnabled } from "./sounds.js";
+import { isSoundEffectsEnabled, setSoundEffectsEnabled, playSoundEffect } from "./sounds.js";
 import { escapeHtml, formatBytes as formatSharedBytes, formatDate as formatSharedDate } from "./format.js";
 
 const PREF_REFRESH_KEY = "overlord_refresh_interval_seconds";
@@ -40,6 +40,7 @@ const prefNotificationsInput = document.getElementById("pref-notifications");
 const prefDesktopNotificationsInput = document.getElementById("pref-desktop-notifications");
 const prefDesktopNotificationsHint = document.getElementById("pref-desktop-notifications-hint");
 const prefSoundEffectsInput = document.getElementById("pref-sound-effects");
+const prefSoundTestBtn = document.getElementById("pref-sound-test");
 const prefRefreshSecondsInput = document.getElementById("pref-refresh-seconds");
 
 const inputArchiveUserForm = document.getElementById("input-archive-user-form");
@@ -2760,6 +2761,7 @@ async function init() {
     if (mfaEnableBtn) mfaEnableBtn.addEventListener("click", enableMfa);
     if (mfaDisableBtn) mfaDisableBtn.addEventListener("click", disableMfa);
     prefsForm.addEventListener("submit", savePrefs);
+    if (prefSoundTestBtn) prefSoundTestBtn.addEventListener("click", () => playSoundEffect("purgatory", true));
 
     const sidebarBtn = document.getElementById("pref-nav-sidebar");
     const topbarBtn = document.getElementById("pref-nav-topbar");
