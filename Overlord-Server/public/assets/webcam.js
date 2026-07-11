@@ -6,6 +6,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
+  const embedded = new URLSearchParams(location.search).get("embedded") === "1";
   if (!clientId) {
     alert("Missing clientId");
     return;
@@ -13,6 +14,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
   const allowed = await checkFeatureAccess("webcam", clientId);
   if (!allowed) return;
+  if (embedded) document.body.classList.add("webcam-embedded");
 
   const clientLabel = document.getElementById("clientLabel");
   const startBtn = document.getElementById("startBtn");
