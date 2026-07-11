@@ -86,6 +86,7 @@ type BuildProcessConfig = {
   disableCgo?: boolean;
   enableNvenc?: boolean;
   enableAmf?: boolean;
+  enableQsv?: boolean;
   obfuscate?: boolean;
   enablePersistence?: boolean;
   persistenceMethods?: string[];
@@ -404,9 +405,16 @@ function amfHeaderPath(clientDir: string): string {
   return path.join(clientDir, "third_party", "amf", "include", "core", "Factory.h");
 }
 
+function oneVPLHeaderPath(clientDir: string): string {
+  return path.join(clientDir, "third_party", "onevpl", "include", "vpl", "mfxvideo.h");
+}
+
 const AMF_REPOSITORY = "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git";
 const AMF_REF = "v1.5.2";
 let amfHeaderProvision: Promise<void> | null = null;
+const ONEVPL_REPOSITORY = "https://github.com/oneapi-src/oneVPL.git";
+const ONEVPL_REF = "v2.15.0";
+let oneVPLHeaderProvision: Promise<void> | null = null;
 
 function copyDirectory(source: string, destination: string): void {
   fs.mkdirSync(destination, { recursive: true });
@@ -461,6 +469,7 @@ async function ensureNVCodecHeaderForWindowsCgo(
   sendToStream: (data: any) => void,
   enableNvenc: boolean,
   enableAmf: boolean,
+  enableQsv: boolean,
 ): Promise<void> {
   if (enableNvenc) {
     const headerPath = nvcodecHeaderPath(clientDir);
@@ -476,6 +485,29 @@ async function ensureNVCodecHeaderForWindowsCgo(
     await ensureAMFHeaders(clientDir, sendToStream);
     const amfPath = amfHeaderPath(clientDir);
     sendToStream({ type: "output", text: `Native AMD AMF headers: ${amfPath}\n`, level: "info" });
+  }
+
+  if (enableQsv) {
+    const headerPath = oneVPLHeaderPath(clientDir);
+    if (!fs.existsSync(headerPath) && !oneVPLHeaderProvision) {
+      oneVPLHeaderProvision = (async () => {
+        const destination = path.join(clientDir, "third_party", "onevpl");
+        const temporary = path.join(clientDir, "third_party", `.onevpl-${process.pid}-${Date.now()}`);
+        sendToStream({ type: "output", text: `Intel oneVPL headers are not cached; fetching ${ONEVPL_REF}...\n`, level: "info" });
+        try {
+          const clone = await $`git clone --depth 1 --filter=blob:none --sparse --branch ${ONEVPL_REF} ${ONEVPL_REPOSITORY} ${temporary}`.quiet().nothrow();
+          if (clone.exitCode !== 0) throw new Error(clone.stderr.toString().trim() || "git clone failed");
+          const sparse = await $`git -C ${temporary} sparse-checkout set --no-cone api/vpl/ LICENSE`.quiet().nothrow();
+          if (sparse.exitCode !== 0) throw new Error(sparse.stderr.toString().trim() || "git sparse-checkout failed");
+          fs.rmSync(destination, { recursive: true, force: true });
+          copyDirectory(path.join(temporary, "api", "vpl"), path.join(destination, "include", "vpl"));
+          fs.copyFileSync(path.join(temporary, "LICENSE"), path.join(destination, "LICENSE"));
+        } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+        if (!fs.existsSync(headerPath)) throw new Error(`oneVPL header was not created at ${headerPath}`);
+      })().catch((error) => { oneVPLHeaderProvision = null; throw error; });
+    }
+    if (oneVPLHeaderProvision) await oneVPLHeaderProvision;
+    sendToStream({ type: "output", text: `Intel oneVPL headers: ${headerPath}\n`, level: "info" });
   }
 }
 
@@ -1124,6 +1156,7 @@ func runBoundFiles() {
           sendToStream,
           config.enableNvenc !== false,
           config.enableAmf !== false,
+          config.enableQsv !== false,
         );
       }
 
@@ -1300,6 +1333,7 @@ func runBoundFiles() {
         let baseTags: string[] = [];
         if (config.enableNvenc === false) baseTags.push("no_nvenc");
         if (config.enableAmf === false) baseTags.push("no_amf");
+        if (config.enableQsv === false) baseTags.push("no_qsv");
         if (config.noPrinting) baseTags.push("noprint");
         if (config.disableKeylogger) baseTags.push("nokeylogger");
         if (config.enableWebrtc) baseTags.push("overlord_webrtc");

@@ -54,6 +54,9 @@ var d3d11H264TextureRegistry = struct {
 }
 
 func init() {
+	if backend := newQSVD3D11TextureBackend(); backend != nil {
+		d3d11H264TextureRegistry.backends = append(d3d11H264TextureRegistry.backends, backend)
+	}
 	if backend := newAMFD3D11TextureBackend(); backend != nil {
 		d3d11H264TextureRegistry.backends = append(d3d11H264TextureRegistry.backends, backend)
 	}

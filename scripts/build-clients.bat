@@ -98,6 +98,11 @@ if /I "%DISABLE_CGO%"=="true" (
         call "%ROOT%scripts\vendor-amf-headers.bat"
         if errorlevel 1 goto :err
     )
+    if not exist "%CLIENT_DIR%\third_party\onevpl\include\vpl\mfxvideo.h" (
+        echo Intel oneVPL headers are not cached; fetching them now...
+        call "%ROOT%scripts\vendor-onevpl-headers.bat"
+        if errorlevel 1 goto :err
+    )
 )
 %BUILD_CMD% %BUILD_TAGS% -ldflags="%LDFLAGS% %WIN_LDFLAGS%" -o "%OUT_DIR%\agent-windows-amd64.exe" ./cmd/agent
 if errorlevel 1 goto :err
