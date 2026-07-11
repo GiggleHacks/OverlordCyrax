@@ -3,6 +3,7 @@
 ## Dashboard
 
 - The online display moves to the far-left edge of the toolbar and renders only a zero-padded monospace number.
+- The navigation and login brand render the current server version as a tiny `vX.Y.Z` label directly beneath `Overlord 2.0`; custom branding remains able to override the product name and icon, but not the version value.
 - When the webcam filter is active, Select All selects every visible webcam-capable client. The bulk toolbar removes Disconnect, Uninstall, and Set Group and adds View Webcams.
 - View Webcams shows a confirmation modal with the selected count, an animated six-cell tile preview, and a six-stream concurrency limit. Confirming opens a dedicated tiled viewer.
 
