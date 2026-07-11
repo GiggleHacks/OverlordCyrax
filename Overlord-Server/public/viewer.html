@@ -13,8 +13,16 @@
       <nav aria-label="Viewer mode">
         <button data-mode="webcam"><i class="fa-solid fa-camera"></i> Webcam</button>
         <button data-mode="desktop"><i class="fa-solid fa-display"></i> Desktop</button>
-        <button data-mode="split"><i class="fa-solid fa-table-columns"></i> Split</button>
+        <button data-mode="split"><i class="fa-solid fa-table-columns"></i> Split H</button>
+        <button data-mode="split-v"><i class="fa-solid fa-table-rows"></i> Split V</button>
+        <button data-mode="pip" id="pipBtn"><i class="fa-solid fa-clone"></i> PiP</button>
       </nav>
+      <div id="pipCornerPicker" class="pip-corner-picker" style="display:none">
+        <button data-corner="tl" class="pip-corner" title="Top left"><i class="fa-solid fa-arrow-up-left"></i></button>
+        <button data-corner="tr" class="pip-corner" title="Top right"><i class="fa-solid fa-arrow-up-right"></i></button>
+        <button data-corner="bl" class="pip-corner" title="Bottom left"><i class="fa-solid fa-arrow-down-left"></i></button>
+        <button data-corner="br" class="pip-corner is-active" title="Bottom right"><i class="fa-solid fa-arrow-down-right"></i></button>
+      </div>
       <span id="viewerCapability" class="viewer-capability"><i class="fa-solid fa-video-slash"></i> checking camera</span>
     </header>
     <main id="viewerPanels" class="viewer-panels" data-mode="webcam">
