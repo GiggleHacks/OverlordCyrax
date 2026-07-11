@@ -24,8 +24,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const refreshCameras = document.getElementById("refreshCameras");
   const fpsInput = document.getElementById("fpsInput");
   const applyFps = document.getElementById("applyFps");
-  const qualitySlider = document.getElementById("qualitySlider");
-  const qualityValue = document.getElementById("qualityValue");
+  const resolutionSelect = document.getElementById("resolutionSelect");
   const codecH264 = document.getElementById("codecH264");
   const codecMode = document.getElementById("codecMode");
   const viewerFps = document.getElementById("viewerFps");
@@ -66,6 +65,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   let clientOs = "";
   let clientIsAdmin = false;
   let firewallWarningAcked = false;
+  let firstFrameTimer = null;
+  let startRetryCount = 0;
 
   let prefersH264 = typeof VideoDecoder === "function";
   let savedCameraIndex = null;
@@ -291,7 +292,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       savedCameraIndex = Number(settings.camera);
     }
     if (fpsInput && settings.fps !== undefined) fpsInput.value = String(settings.fps);
-    if (qualitySlider && settings.quality !== undefined) qualitySlider.value = String(settings.quality);
+    if (resolutionSelect && settings.resolution !== undefined) setSelectValue(resolutionSelect, settings.resolution);
     setSelectValue(webrtcMode, settings.webrtcMode);
     setSelectValue(audioTransport, settings.audioTransport);
     if (audioCtrl && typeof settings.audio === "boolean") audioCtrl.checked = settings.audio;
@@ -307,7 +308,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     return {
       camera: Number(cameraSelect?.value ?? savedCameraIndex ?? 0),
       fps: Number(fpsInput?.value || 30),
-      quality: Number(qualitySlider?.value || 90),
+      resolution: Number(resolutionSelect?.value || 720),
       preferH264: !!prefersH264,
       webrtcMode: getWebrtcMode(),
       audio: !!audioCtrl?.checked,
@@ -337,18 +338,12 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
   setCodecModeLabel(prefersH264 ? "h264" : "jpeg", "preferred");
 
-  function updateQualityLabel(val) {
-    if (qualityValue) {
-      qualityValue.textContent = `${val}%`;
-    }
-  }
-
-  function pushQuality(val) {
-    const q = Number(val) || 90;
+  function pushVideoSettings() {
+    const maxHeight = Number(resolutionSelect?.value || 720);
     const codec = prefersH264 ? "h264" : "jpeg";
-    console.debug("webcam: pushQuality val=", val, "q=", q, "codec=", codec);
+    console.debug("webcam: pushVideoSettings maxHeight=", maxHeight, "codec=", codec);
     setCodecModeLabel(codec, "requested");
-    send("webcam_set_quality", { quality: q, codec });
+    send("webcam_set_quality", { quality: 90, codec, maxHeight });
   }
 
   function buildScreenshotFilename() {
@@ -489,6 +484,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       videoDecoder = new VideoDecoder({
         output: (frame) => {
           hasRenderedFrame = true;
+          startRetryCount = 0;
+          if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
           const width = frame.displayWidth || frame.codedWidth || canvas.width;
           const height = frame.displayHeight || frame.codedHeight || canvas.height;
           if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
@@ -529,7 +526,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     };
     const label = text ||
       (state === "streaming" ? "Streaming" :
-        state === "starting" ? "Starting" :
+        state === "starting" ? "Waiting for first frame" :
           state === "stopping" ? "Stopping" :
             state === "offline" ? "Client offline" :
               state === "disconnected" ? "Disconnected" :
@@ -552,6 +549,21 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       renderCount = 0;
       renderWindowStart = performance.now();
     }
+  }
+
+  function armFirstFrameWatch() {
+    if (firstFrameTimer) clearTimeout(firstFrameTimer);
+    firstFrameTimer = setTimeout(() => {
+      if (!desiredStreaming || hasRenderedFrame) return;
+      if (startRetryCount < 1) {
+        startRetryCount += 1;
+        setStreamState("starting", "Stalled · retrying camera");
+        send("webcam_stop");
+        setTimeout(() => startStreaming(false), 250);
+      } else {
+        setStreamState("error", "No camera frames received · check camera access");
+      }
+    }, 6000);
   }
 
   function updateViewerFps() {
@@ -577,6 +589,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       }
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       hasRenderedFrame = true;
+      startRetryCount = 0;
+      if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
       bitmap.close();
       updateViewerFps();
       if (desiredStreaming) setStreamState("streaming", "Streaming");
@@ -713,7 +727,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         setStreamState("offline", msg.reason || "Client offline");
       } else if (msg.status === "starting") {
         if (desiredStreaming && streamState !== "streaming") {
-          setStreamState("starting", "Starting");
+          setStreamState("starting", "Opening camera · waiting for response");
         }
       } else if (msg.status === "stopped") {
         desiredStreaming = false;
@@ -739,7 +753,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         send("webcam_select", { index: selectedDeviceIndex });
       }
       applyFpsSettings();
-      pushQuality(qualitySlider ? qualitySlider.value : 90);
+      pushVideoSettings();
       if (desiredStreaming) {
         startStreaming(false);
       } else {
@@ -788,6 +802,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       firewallWarningAcked = true;
     }
     desiredStreaming = true;
+    hasRenderedFrame = false;
     applyFpsSettings();
     if (mode === "relayed") {
       // Server replies with webrtc_ready; startWhep happens then.
@@ -801,7 +816,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (audioCtrl && audioCtrl.checked) {
       connectAudio();
     }
-    setStreamState("starting", "Starting");
+    setStreamState("starting", "Opening camera · waiting for first frame");
+    armFirstFrameWatch();
     return true;
   }
 
@@ -811,6 +827,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
   stopBtn.addEventListener("click", () => {
     desiredStreaming = false;
+    if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
     send("webcam_stop");
     stopAllWebrtc();
     disconnectAudio();
@@ -856,18 +873,14 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       if (!prefersH264) {
         destroyVideoDecoder();
       }
-      if (qualitySlider) {
-        pushQuality(qualitySlider.value);
-      }
+      pushVideoSettings();
       sharedSettingsSaver.scheduleSave();
     });
   }
 
-  if (qualitySlider) {
-    updateQualityLabel(qualitySlider.value);
-    qualitySlider.addEventListener("input", function () {
-      updateQualityLabel(qualitySlider.value);
-      pushQuality(qualitySlider.value);
+  if (resolutionSelect) {
+    resolutionSelect.addEventListener("change", function () {
+      pushVideoSettings();
       sharedSettingsSaver.scheduleSave();
     });
   }

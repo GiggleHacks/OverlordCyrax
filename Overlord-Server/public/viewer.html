@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Overlord 2.0 Viewer</title>
+    <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
+    <link rel="stylesheet" href="/assets/main.css" />
+  </head>
+  <body class="unified-viewer">
+    <header class="viewer-commandbar">
+      <span class="viewer-id">ID <b id="viewerClientId">------------</b></span>
+      <nav aria-label="Viewer mode">
+        <button data-mode="webcam"><i class="fa-solid fa-camera"></i> Webcam</button>
+        <button data-mode="desktop"><i class="fa-solid fa-display"></i> Desktop</button>
+        <button data-mode="split"><i class="fa-solid fa-table-columns"></i> Split</button>
+      </nav>
+      <span id="viewerCapability" class="viewer-capability"><i class="fa-solid fa-video-slash"></i> checking camera</span>
+    </header>
+    <main id="viewerPanels" class="viewer-panels" data-mode="webcam">
+      <section class="viewer-panel viewer-panel-webcam"><iframe id="viewerWebcam" title="Webcam"></iframe></section>
+      <section class="viewer-panel viewer-panel-desktop"><iframe id="viewerDesktop" title="Remote desktop"></iframe></section>
+    </main>
+    <script type="module" src="/assets/viewer.js"></script>
+  </body>
+</html>

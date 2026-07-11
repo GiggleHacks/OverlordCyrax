@@ -79,6 +79,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const viewerFps = document.getElementById("viewerFps");
   const inputLatency = document.getElementById("inputLatency");
   const statusEl = document.getElementById("streamStatus");
+  const rdScaleBtn = document.getElementById("rdScaleBtn");
   const clipboardSyncCtrl = document.getElementById("clipboardSyncCtrl");
   const audioCtrl = document.getElementById("audioCtrl");
   const webrtcMode = document.getElementById("webrtcMode");
@@ -96,7 +97,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   let renderCount = 0;
   let renderWindowStart = performance.now();
   let lastFrameAt = 0;
-  let desiredStreaming = false;
+  let desiredStreaming = true;
+  let viewerScale = 65;
   let streamState = "connecting";
   let frameWatchTimer = null;
   let offlineTimer = null;
@@ -410,14 +412,17 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (typeof settings.preferH264 === "boolean") {
       prefersH264 = settings.preferH264 && typeof VideoDecoder === "function";
     }
+    if (Number(settings.viewerScale) === 100) viewerScale = 100;
+    document.body.classList.toggle("rd-view--100", viewerScale === 100);
+    if (rdScaleBtn) rdScaleBtn.textContent = `${viewerScale}%`;
     applySavedDisplay();
   }
 
   function readSharedSettings() {
     return {
       display: Number(displaySelect?.value || 0),
-      resolution: resolutionSelect?.value || "1080",
-      targetFps: targetFpsSelect?.value || "120",
+      resolution: resolutionSelect?.value || "720",
+      targetFps: targetFpsSelect?.value || "30",
       quality: Number(qualitySlider?.value || 90),
       preferH264: !!prefersH264,
       webrtcMode: getWebrtcMode(),
@@ -432,6 +437,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       smoothing: Number(smoothingSlider?.value || 20),
       recordMode: recordMode?.value || "normal",
       recordFps: recordFps?.value || "",
+      viewerScale,
     };
   }
 
@@ -487,7 +493,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       };
       const label = text ||
         (state === "streaming" ? "Streaming" :
-          state === "starting" ? "Starting" :
+          state === "starting" ? "Waiting for first frame" :
             state === "stopping" ? "Stopping" :
               state === "offline" ? "Client offline" :
                 state === "disconnected" ? "Disconnected" :
@@ -866,7 +872,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (msg.status === "starting") {
       clearOfflineTimer();
       if (desiredStreaming && streamState !== "streaming") {
-        setStreamState("starting", "Starting stream");
+      setStreamState("starting", "Opening display · waiting for first frame");
       }
       return;
     }
@@ -1282,7 +1288,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function selectedTargetFps() {
-    const fps = Number(targetFpsSelect?.value || 120);
+    const fps = Math.min(60, Number(targetFpsSelect?.value || 30));
     return Number.isFinite(fps) ? Math.max(1, Math.min(240, Math.floor(fps))) : 120;
   }
 
@@ -1367,7 +1373,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     lastFrameAt = 0;
     firstFrameLogged = false;
     resetH264SessionState();
-    setStreamState("starting", "Starting stream");
+    setStreamState("starting", "Opening display · waiting for first frame");
     if (mode === "relayed") {
       // Server replies with `webrtc_ready { whepPath }`; startWhep happens then.
       sendCmd("desktop_start", { webrtc: true });
@@ -2148,6 +2154,13 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   canvas.setAttribute("tabindex", "0");
   canvas.addEventListener("click", function () {
     canvas.focus({ preventScroll: true });
+  });
+
+  rdScaleBtn?.addEventListener("click", () => {
+    viewerScale = viewerScale === 65 ? 100 : 65;
+    document.body.classList.toggle("rd-view--100", viewerScale === 100);
+    rdScaleBtn.textContent = `${viewerScale}%`;
+    sharedSettingsSaver.scheduleSave();
   });
 
   function stopOnExit() {

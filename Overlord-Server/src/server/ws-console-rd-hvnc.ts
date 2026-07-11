@@ -205,7 +205,7 @@ function defaultRdStreamingState() {
     softwareH264: false,
     duplication: false,
     maxHeight: 0,
-    maxFps: 120,
+    maxFps: 30,
     lastFps: 0,
     lastFrameAt: 0,
     startedAt: 0,
@@ -213,8 +213,8 @@ function defaultRdStreamingState() {
 }
 
 function clampDesktopFps(value: unknown): number {
-  const fps = Math.floor(Number(value) || 120);
-  return Math.max(1, Math.min(240, fps));
+  const fps = Math.floor(Number(value) || 30);
+  return Math.max(1, Math.min(60, fps));
 }
 
 function recordRdInput(commandId: string, clientId: string, kind: string) {
@@ -787,12 +787,13 @@ type WebcamStreamingState = {
   useMax: boolean;
   quality: number;
   codec: string;
+  maxHeight: number;
   startedAt: number;
   lastFrameAt: number;
 };
 
 function defaultWebcamStreamingState(): WebcamStreamingState {
-  return { isStreaming: false, deviceIndex: 0, fps: 30, useMax: false, quality: 90, codec: "", startedAt: 0, lastFrameAt: 0 };
+  return { isStreaming: false, deviceIndex: 0, fps: 30, useMax: false, quality: 90, codec: "", maxHeight: 720, startedAt: 0, lastFrameAt: 0 };
 }
 
 export const webcamStreamingState = new Map<string, WebcamStreamingState>();
@@ -1021,7 +1022,7 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
       const stalled = state.isStreaming && state.lastFrameAt > 0 && now - state.lastFrameAt >= 5000;
       if (!state.isStreaming || staleWithoutFrames || stalled) {
         sendDesktopCommand(target, "webcam_set_fps", { fps: state.fps, useMax: state.useMax });
-        sendDesktopCommand(target, "webcam_set_quality", { quality: state.quality, codec: state.codec });
+        sendDesktopCommand(target, "webcam_set_quality", { quality: state.quality, codec: state.codec, maxHeight: state.maxHeight });
         if ((payload as any).webrtc === true) {
           const streamPath = webrtcStreamPathFor(clientId, "webcam");
           const token = issueWebrtcPublishToken(clientId);
@@ -1051,10 +1052,13 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
     case "webcam_set_quality": {
       const quality = Math.max(0, Math.min(100, Number(payload.quality) || 0));
       const codec = String(payload.codec || "").toLowerCase();
+      const requestedHeight = Number(payload.maxHeight);
+      const maxHeight = [-1, 360, 480, 720, 1080].includes(requestedHeight) ? requestedHeight : 720;
       state.quality = quality;
       state.codec = codec;
+      state.maxHeight = maxHeight;
       webcamStreamingState.set(clientId, state);
-      sendDesktopCommand(target, "webcam_set_quality", { quality, codec });
+      sendDesktopCommand(target, "webcam_set_quality", { quality, codec, maxHeight });
       break;
     }
     case "webcam_stop": {

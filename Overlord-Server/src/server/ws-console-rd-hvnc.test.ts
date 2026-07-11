@@ -95,6 +95,7 @@ describe("webcam viewer control", () => {
       useMax: false,
       quality: 90,
       codec: "jpeg",
+      maxHeight: 720,
       startedAt: Date.now() - 5000,
       lastFrameAt: 0,
     } as any);
@@ -123,6 +124,7 @@ describe("remote desktop viewer control", () => {
 
     let commands = agentCommands(agentWs);
     expect(commands.filter((msg) => msg.commandType === "desktop_start")).toHaveLength(1);
+    expect(commands.find((msg) => msg.commandType === "desktop_set_fps")?.payload?.fps).toBe(30);
     expect(rdStreamingState.get(clientId)?.isStreaming).toBe(true);
 
     handleRemoteDesktopViewerMessage(firstViewer as any, JSON.stringify({ type: "desktop_stop" }));

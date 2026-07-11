@@ -1721,6 +1721,54 @@ article.card[data-bookmarked="true"] {
   }
 }
 
+/* Unified focused viewer */
+.unified-viewer { margin: 0; min-height: 100vh; overflow: hidden; background: #05080d; color: #d9fff5; font-family: "JetBrains Mono", Consolas, monospace; }
+.viewer-commandbar { height: 42px; display: flex; align-items: center; gap: 16px; padding: 5px 10px; border-bottom: 1px solid #173849; background: #080d14; font-size: 11px; letter-spacing: .06em; }
+.viewer-commandbar nav { display: flex; gap: 5px; }
+.viewer-commandbar button { border: 1px solid #294352; background: #0b1620; color: #9fc8d7; padding: 6px 9px; font: inherit; cursor: pointer; }
+.viewer-commandbar button:hover, .viewer-commandbar button.is-active { color: #061015; background: #5ee7ff; border-color: #5ee7ff; box-shadow: 0 0 14px rgba(94,231,255,.22); }
+.viewer-id b { color: #ff61d7; font-weight: 600; }
+.viewer-capability { margin-left: auto; color: #83939b; }
+.viewer-capability.is-available { color: #70f7a5; }
+.viewer-panels { height: calc(100vh - 42px); display: grid; gap: 2px; background: #173849; }
+.viewer-panels[data-mode="webcam"] { grid-template-columns: 1fr; }
+.viewer-panels[data-mode="desktop"] { grid-template-columns: 1fr; }
+.viewer-panels[data-mode="split"] { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.viewer-panel { min-width: 0; min-height: 0; background: #05080d; }
+.viewer-panel iframe { display: block; width: 100%; height: 100%; border: 0; background: #05080d; }
+.viewer-panels[data-mode="webcam"] .viewer-panel-desktop,
+.viewer-panels[data-mode="desktop"] .viewer-panel-webcam { display: none; }
+.rd-focus-view { width: 65%; margin: 0 auto; transition: width .2s ease; }
+.rd-view--100 .rd-focus-view { width: 100%; }
+body.webcam-embedded .webcam-workspace { width: 100% !important; max-width: none; }
+@media (max-width: 800px) { .viewer-panels[data-mode="split"] { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } .viewer-capability { display: none; } .rd-focus-view { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .viewer-commandbar button, .rd-focus-view { transition: none; } }
+
+/* Retro authentication terminal */
+.login-body { background: #03070b !important; font-family: "JetBrains Mono", Consolas, monospace !important; }
+.login-body::before { background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(80,240,220,.025) 3px 4px), radial-gradient(circle at 50% 45%, rgba(30,100,120,.16), transparent 55%) !important; animation: crtDrift 8s linear infinite; }
+.login-particles { opacity: .28; }
+.login-card { width: min(92vw, 520px) !important; padding: 0 30px 28px !important; border: 1px solid #1c6370 !important; border-radius: 2px !important; background: rgba(3,10,15,.94) !important; box-shadow: 0 0 0 1px #07181f, 0 0 50px rgba(53,213,230,.1), inset 0 0 35px rgba(0,0,0,.6) !important; }
+.login-card::before { display: none !important; }
+.login-terminal-head { margin: 0 -30px 20px; padding: 8px 11px; display: flex; justify-content: space-between; border-bottom: 1px solid #174956; background: #07141c; color: #57dff2; font-size: 10px; letter-spacing: .1em; }
+.login-terminal-lights { color: #ff54cf; letter-spacing: .35em; }
+.login-boot-log { display: grid; gap: 3px; margin-bottom: 18px; color: #68f59b; font-size: 10px; text-transform: uppercase; }
+.login-boot-cursor { color: #55dff4; animation: terminalBlink 1s steps(2,end) infinite; }
+.login-crown { color: #ff54cf !important; filter: drop-shadow(0 0 12px rgba(255,84,207,.45)); }
+.login-brand { color: #dffcff !important; font-family: inherit !important; letter-spacing: .08em; text-transform: uppercase; }
+.login-version { margin-top: -4px; color: #4a7c84; font-size: 8px; letter-spacing: .12em; }
+.login-title { color: #67e5f5 !important; font-family: inherit !important; font-size: 15px !important; letter-spacing: .08em; text-transform: uppercase; }
+.login-subtitle { color: #66838d !important; font-size: 11px !important; }
+.login-card .label { color: #62dce8 !important; font-size: 10px; letter-spacing: .12em; }
+.login-card .input-row { border-radius: 1px !important; border-color: #1b4e5b !important; background: #02070c !important; }
+.login-card .input-row:focus-within { border-color: #63e7f4 !important; box-shadow: inset 3px 0 #ff54cf, 0 0 14px rgba(99,231,244,.12) !important; }
+.login-card input { color: #caffe8 !important; font-family: inherit !important; }
+.login-btn.primary { border-radius: 1px !important; background: #0b2830 !important; border: 1px solid #4bd7e5 !important; color: #bffaff !important; font-family: inherit !important; letter-spacing: .1em; box-shadow: none !important; }
+.login-btn.primary:hover { background: #54deed !important; color: #031015 !important; box-shadow: 0 0 24px rgba(84,222,237,.24) !important; }
+@keyframes terminalBlink { 50% { opacity: .35; } }
+@keyframes crtDrift { 50% { transform: translateY(2px); } }
+@media (prefers-reduced-motion: reduce) { .login-body::before, .login-boot-cursor { animation: none !important; } }
+
 .ripple {
   position: relative;
   overflow: hidden;

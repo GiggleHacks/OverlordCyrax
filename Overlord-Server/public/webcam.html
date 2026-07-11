@@ -81,17 +81,14 @@
               <div class="px-4 py-3 border-b border-slate-800">
                 <div class="text-xs uppercase tracking-wide text-slate-500 mb-2">Video</div>
                 <div class="flex items-center gap-2 mb-2">
-                  <label class="text-sm text-slate-300 w-20" for="qualitySlider">Quality</label>
-                  <input
-                    id="qualitySlider"
-                    type="range"
-                    min="10"
-                    max="100"
-                    step="5"
-                    value="90"
-                    class="flex-1 accent-sky-400"
-                  />
-                  <span id="qualityValue" class="pill pill-ghost text-slate-100 text-xs min-w-[44px] text-center">90%</span>
+                  <label class="text-sm text-slate-300 w-20" for="resolutionSelect">Resolution</label>
+                  <select id="resolutionSelect" class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100">
+                    <option value="360">360p</option>
+                    <option value="480">480p</option>
+                    <option value="720" selected>720p</option>
+                    <option value="1080">1080p</option>
+                    <option value="-1">Native</option>
+                  </select>
                 </div>
                 <div class="flex items-center gap-2 mb-2">
                   <label class="text-sm text-slate-300 w-20" for="webrtcMode">Transport</label>
@@ -103,7 +100,11 @@
                 </div>
                 <div class="flex items-center gap-2 mb-2">
                   <label class="text-sm text-slate-300 w-20" for="fpsInput">Max FPS</label>
-                  <input id="fpsInput" type="number" min="1" max="120" value="30" class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100" />
+                  <select id="fpsInput" class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100">
+                    <option value="15">15 fps</option>
+                    <option value="30" selected>30 fps</option>
+                    <option value="60">60 fps</option>
+                  </select>
                   <button id="applyFps" class="button ghost" title="Apply FPS">
                     <i class="fa-solid fa-check"></i>
                   </button>

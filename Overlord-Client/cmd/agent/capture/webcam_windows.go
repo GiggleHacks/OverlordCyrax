@@ -124,7 +124,21 @@ func NowWebcam(ctx context.Context, env *rt.Env) error {
 
 	quality := env.WebcamQuality
 	codec := env.WebcamCodec
+	maxHeight := env.WebcamMaxHeight
 	outFormat := format
+
+	if outFormat == "jpeg" && maxHeight > 0 {
+		if img, decodeErr := jpeg.Decode(bytes.NewReader(frameBytes)); decodeErr == nil {
+			resized := resizeWebcamImage(img, maxHeight)
+			encodeQuality := quality
+			if encodeQuality <= 0 || encodeQuality > 100 {
+				encodeQuality = 90
+			}
+			if resizedBytes, encodeErr := encodeJPEG(resized, encodeQuality); encodeErr == nil {
+				frameBytes = resizedBytes
+			}
+		}
+	}
 
 	if codec == "h264" && format == "jpeg" && h264Available() {
 		img, err := jpeg.Decode(bytes.NewReader(frameBytes))

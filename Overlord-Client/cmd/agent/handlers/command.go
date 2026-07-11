@@ -124,6 +124,7 @@ func resetForReconnect(env *runtime.Env) {
 	env.WebcamDone = nil
 	env.WebcamDeviceIndex = 0
 	env.WebcamFPS = 30
+	env.WebcamMaxHeight = 720
 	env.WebcamUseMaxFPS = false
 	env.WebcamMu.Unlock()
 
@@ -1931,12 +1932,16 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		payload, _ := envelope["payload"].(map[string]interface{})
 		quality := 0
 		codec := ""
+		maxHeight := env.WebcamMaxHeight
 		if payload != nil {
 			if q, ok := payloadInt(payload, "quality"); ok {
 				quality = q
 			}
 			if v, ok := payload["codec"].(string); ok {
 				codec = v
+			}
+			if h, ok := payloadInt(payload, "maxHeight"); ok {
+				maxHeight = h
 			}
 		}
 		if quality < 0 {
@@ -1953,7 +1958,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		}
 		env.WebcamQuality = quality
 		env.WebcamCodec = codec
-		log.Printf("webcam: set quality=%d codec=%s", quality, codec)
+		if maxHeight != -1 && maxHeight != 360 && maxHeight != 480 && maxHeight != 720 && maxHeight != 1080 {
+			maxHeight = 720
+		}
+		env.WebcamMaxHeight = maxHeight
+		log.Printf("webcam: set quality=%d codec=%s max_height=%d", quality, codec, maxHeight)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
 	case "webcam_stop":

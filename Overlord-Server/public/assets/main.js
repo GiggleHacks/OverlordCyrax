@@ -1108,7 +1108,7 @@ function initializeRenderer() {
     requestPreview,
     requestThumbnail,
     pingClient: (id) => sendCommand(id, "ping"),
-    onOpenWebcam: (id) => window.open(`/webcam?clientId=${encodeURIComponent(id)}`, "_blank", "noopener"),
+    onOpenWebcam: (id) => window.open(`/viewer?clientId=${encodeURIComponent(id)}&mode=webcam`, "_blank", "noopener"),
     onMacPermissionRequest: (id, _card, permissionKey) => requestMacPermissions(id, permissionKey),
     onMacPermissionRefresh: (id) => requestMacPermissions(id, "", { refreshOnly: true }),
     onMacPermissionApply: (id) => applyMacPermissionChanges(id),
@@ -2031,12 +2031,12 @@ menu.addEventListener("click", async (e) => {
     return;
   }
   if (open === "remotedesktop") {
-    window.open(`/remotedesktop?clientId=${contextCard}`, "_blank", "noopener");
+    window.open(`/viewer?clientId=${contextCard}&mode=desktop`, "_blank", "noopener");
     closeMenu(clearContext);
     return;
   }
   if (open === "webcam") {
-    window.open(`/webcam?clientId=${contextCard}`, "_blank", "noopener");
+    window.open(`/viewer?clientId=${contextCard}&mode=webcam`, "_blank", "noopener");
     closeMenu(clearContext);
     return;
   }

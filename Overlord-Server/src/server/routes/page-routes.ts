@@ -102,6 +102,7 @@ const STATIC_PAGES: StaticPageDef[] = [
 
 /** Client-scoped pages accessed via query param ?clientId=... */
 const QUERY_CLIENT_PAGES: QueryClientPageDef[] = [
+  { path: "/viewer",        file: "viewer.html" },
   { path: "/remotedesktop", file: "remotedesktop.html" },
   { path: "/webcam",        file: "webcam.html" },
   { path: "/hvnc",          file: "hvnc.html" },

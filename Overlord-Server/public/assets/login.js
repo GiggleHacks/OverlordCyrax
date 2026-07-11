@@ -14,6 +14,12 @@ const loginLogo = document.getElementById("login-logo");
 const loginHeroImage = document.getElementById("login-hero-image");
 const loginBrandFooter = document.getElementById("login-brand-footer");
 const loginSupportLink = document.getElementById("login-support-link");
+const loginVersion = document.getElementById("login-version");
+
+fetch("/api/version", { credentials: "same-origin" })
+  .then((response) => response.ok ? response.json() : null)
+  .then((data) => { if (loginVersion && data?.version) loginVersion.textContent = `v${data.version}`; })
+  .catch(() => {});
 
 (() => {
   const params = new URLSearchParams(window.location.search);

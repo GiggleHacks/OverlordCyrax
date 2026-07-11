@@ -23,10 +23,7 @@ for (const id of ids) {
   tile.querySelector(".tile-stop").onclick = (event) => { event.stopPropagation(); stopTile(tile); };
   tile.querySelector(".tile-focus").onclick = () => {
     for (const other of activeTiles.values()) if (other !== tile) stopTile(other);
-    tile.classList.remove("is-stopped");
-    grid.classList.add("is-focused");
-    grid.dataset.count = "1";
-    count.textContent = "FOCUSED";
+    location.href = `/viewer?clientId=${encodeURIComponent(id)}&mode=webcam`;
   };
   activeTiles.set(id, tile);
   grid.append(tile);
