@@ -48,6 +48,7 @@ const bulkClearBtn = document.getElementById("bulk-clear");
 const bulkGroupBtn = document.getElementById("bulk-group");
 const bulkMuteBtn = document.getElementById("bulk-mute");
 const bulkUnmuteBtn = document.getElementById("bulk-unmute");
+const bulkWebcamsBtn = document.getElementById("bulk-webcams");
 const serverVersionText = document.getElementById("server-version-text");
 const onlineAsciiStatus = document.getElementById("online-ascii-status");
 const selectedClients = new Set();
@@ -1119,7 +1120,7 @@ function initializeRenderer() {
   rendererSetLayout = rSetLayout;
   registerRenderer((data, options) => {
     renderMerge(data, options);
-    if (onlineAsciiStatus) onlineAsciiStatus.textContent = `[ ONLINE: ${String(Number(data?.online) || 0).padStart(3, "0")} ]`;
+    if (onlineAsciiStatus) onlineAsciiStatus.textContent = String(Number(data?.online) || 0).padStart(3, "0");
     if (!options?.fromPluginDashboard) {
       refreshDashboardPluginContributions(data?.items || []);
     }
@@ -1463,6 +1464,17 @@ async function bulkSetMuted(muted) {
 
 bulkMuteBtn?.addEventListener("click", () => bulkSetMuted(true));
 bulkUnmuteBtn?.addEventListener("click", () => bulkSetMuted(false));
+
+bulkWebcamsBtn?.addEventListener("click", () => {
+  const ids = [...selectedClients].filter((id) => document.querySelector(`[data-client-row][data-id="${CSS.escape(id)}"]`)?.dataset.hasWebcam === "true").slice(0, 6);
+  if (!ids.length) return alert("Select one or more online clients with webcams first.");
+  const overlay = document.createElement("div");
+  overlay.className = "webcam-bulk-confirm";
+  overlay.innerHTML = `<section><div class="webcam-bulk-preview"><i></i><i></i><i></i><i></i><i></i><i></i></div><h2>Open tiled webcam view?</h2><p>${ids.length} selected webcam${ids.length === 1 ? "" : "s"} will begin streaming in a tiled layout. Selecting a tile stops the others and opens its focused view.</p><div><button data-cancel>Cancel</button><button data-confirm>View Webcams</button></div></section>`;
+  overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
+  overlay.querySelector("[data-confirm]").onclick = () => location.assign(`/webcams?clientIds=${encodeURIComponent(ids.join(","))}`);
+  document.body.append(overlay);
+});
 
 async function openBulkGroupPicker(clientIds) {
   const groups = await loadGroups();

@@ -261,6 +261,9 @@ async function applyBranding() {
     for (const el of document.querySelectorAll("#nav-brand-name, #nav-mobile-brand-name")) {
       el.textContent = navName;
     }
+    fetch("/api/version", { credentials: "include" }).then((r) => r.ok ? r.json() : null).then((data) => {
+      if (data?.version) document.querySelectorAll("[data-server-version]").forEach((el) => { el.textContent = `v${data.version}`; });
+    }).catch(() => {});
 
     const iconClass = brand.iconClass || "fa-solid fa-skull";
     for (const icon of document.querySelectorAll("#nav-brand-icon, #nav-mobile-brand-icon")) {

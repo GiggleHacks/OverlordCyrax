@@ -136,7 +136,7 @@ function mountTopbar(host) {
         <a href="/" class="nav-brand-link flex items-center gap-2 font-semibold tracking-wide">
           <img id="nav-brand-logo" class="nav-brand-logo" alt="Overlord 2.0 logo" style="display: none" />
           <i id="nav-brand-icon" class="fa-solid fa-skull header-crown"></i>
-          <span id="nav-brand-name">Overlord 2.0</span>
+          <span class="nav-brand-stack"><span id="nav-brand-name">Overlord 2.0</span><small data-server-version>v…</small></span>
         </a>
         <button id="topbar-nav-toggle" class="topbar-nav-toggle" aria-label="Open navigation menu" aria-expanded="false" type="button">
           <i class="fa-solid fa-layer-group"></i>
@@ -286,7 +286,7 @@ function mountSidebar(host) {
       <a href="/" class="sb-logo nav-brand-link">
         <img id="nav-brand-logo" class="nav-brand-logo sb-icon" alt="Overlord 2.0 logo" style="display: none" />
         <i id="nav-brand-icon" class="fa-solid fa-skull header-crown sb-icon"></i>
-        <span id="nav-brand-name" class="sb-text">Overlord 2.0</span>
+        <span class="nav-brand-stack sb-text"><span id="nav-brand-name">Overlord 2.0</span><small data-server-version>v…</small></span>
       </a>
       <button id="sb-collapse-btn" class="sb-collapse-btn" title="Toggle sidebar" aria-label="Toggle sidebar">
         <i class="fa-solid fa-chevron-left"></i>
@@ -337,7 +337,7 @@ function mountSidebar(host) {
     <a href="/" class="sb-mobile-brand">
       <img id="nav-mobile-brand-logo" class="nav-brand-logo" alt="Overlord 2.0 logo" style="display: none" />
       <i id="nav-mobile-brand-icon" class="fa-solid fa-skull header-crown" style="font-size:0.85rem"></i>
-      <span id="nav-mobile-brand-name">Overlord 2.0</span>
+      <span class="nav-brand-stack"><span id="nav-mobile-brand-name">Overlord 2.0</span><small data-server-version>v…</small></span>
     </a>
   `;
   host.insertAdjacentElement("afterend", mobileBar);

