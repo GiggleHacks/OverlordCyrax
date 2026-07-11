@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/vxaboveground/Overlord/refs/heads/main/Overlord-Server/public/assets/overlord.png" alt="Overlord" width="280" />
+  <img src="Overlord-Server/public/assets/overlord.png" alt="Overlord" width="280" />
 </p>
 
 # Overlord
