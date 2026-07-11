@@ -1,4 +1,5 @@
 import { decodeMsgpack } from "./msgpack-helpers.js";
+import { playSoundEffect } from "./sounds.js";
 
 const STORAGE_KEY = "overlord_notifications_enabled";
 const UNREAD_KEY = "overlord_notifications_unread";
@@ -333,6 +334,9 @@ function handleMessage(payload) {
     console.log("[notifications] client event", payload.event, payload.clientId);
     emitClientEvent(payload);
     showClientEventDesktopNotification(payload);
+    if (payload.event === "client_purgatory") {
+      playSoundEffect("purgatory");
+    }
   }
   if (payload.type === "notifications_cleared" && payload.clientId) {
     console.log("[notifications] cleared for", payload.clientId);

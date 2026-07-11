@@ -5,6 +5,7 @@ import {
   setDesktopNotificationsEnabled,
   requestDesktopNotificationPermission,
 } from "./notify-client.js";
+import { isSoundEffectsEnabled, setSoundEffectsEnabled } from "./sounds.js";
 import { escapeHtml, formatBytes as formatSharedBytes, formatDate as formatSharedDate } from "./format.js";
 
 const PREF_REFRESH_KEY = "overlord_refresh_interval_seconds";
@@ -38,6 +39,7 @@ const prefsForm = document.getElementById("prefs-form");
 const prefNotificationsInput = document.getElementById("pref-notifications");
 const prefDesktopNotificationsInput = document.getElementById("pref-desktop-notifications");
 const prefDesktopNotificationsHint = document.getElementById("pref-desktop-notifications-hint");
+const prefSoundEffectsInput = document.getElementById("pref-sound-effects");
 const prefRefreshSecondsInput = document.getElementById("pref-refresh-seconds");
 
 const inputArchiveUserForm = document.getElementById("input-archive-user-form");
@@ -571,6 +573,9 @@ function loadPrefs() {
   if (prefDesktopNotificationsInput) {
     prefDesktopNotificationsInput.checked = getDesktopNotificationsEnabled();
   }
+  if (prefSoundEffectsInput) {
+    prefSoundEffectsInput.checked = isSoundEffectsEnabled();
+  }
   const refreshSeconds = Number(localStorage.getItem(PREF_REFRESH_KEY) || 8);
   prefRefreshSecondsInput.value = String(Math.min(120, Math.max(3, refreshSeconds)));
 
@@ -747,6 +752,9 @@ function savePrefs(event) {
   );
 
   setNotificationsEnabled(prefNotificationsInput.checked);
+  if (prefSoundEffectsInput) {
+    setSoundEffectsEnabled(prefSoundEffectsInput.checked);
+  }
   localStorage.setItem(PREF_REFRESH_KEY, String(refreshSeconds));
   prefRefreshSecondsInput.value = String(refreshSeconds);
 
