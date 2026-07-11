@@ -22,15 +22,15 @@ describe("SECURITY_HEADERS", () => {
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("script-src 'self'");
     expect(csp).toContain("font-src 'self' data:");
-    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("frame-ancestors 'self'");
   });
 
   test("prevents MIME sniffing", () => {
     expect(SECURITY_HEADERS["X-Content-Type-Options"]).toBe("nosniff");
   });
 
-  test("denies framing", () => {
-    expect(SECURITY_HEADERS["X-Frame-Options"]).toBe("DENY");
+  test("allows same-origin framing for the webcam gallery", () => {
+    expect(SECURITY_HEADERS["X-Frame-Options"]).toBe("SAMEORIGIN");
   });
 
   test("enables XSS protection", () => {
