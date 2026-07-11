@@ -7,7 +7,10 @@ import type { ClientInfo } from "../types";
 import {
   handleRemoteDesktopViewerMessage,
   handleRemoteDesktopViewerOpen,
+  handleWebcamViewerMessage,
+  handleWebcamViewerOpen,
   rdStreamingState,
+  webcamStreamingState,
 } from "./ws-console-rd-hvnc";
 
 type MockWs = {
@@ -70,10 +73,39 @@ afterEach(() => {
     for (const session of sessionManager.getRdSessionsForClient(clientId)) {
       sessionManager.deleteRdSession(session.id);
     }
+    for (const session of sessionManager.getWebcamSessionsForClient(clientId)) {
+      sessionManager.deleteWebcamSession(session.id);
+    }
     rdStreamingState.delete(clientId);
+    webcamStreamingState.delete(clientId);
     clientManager.deleteClient(clientId);
   }
   clientIdsToCleanup.clear();
+});
+
+describe("webcam viewer control", () => {
+  test("reasserts webcam_start when server stream state has never produced a frame", () => {
+    const clientId = `webcam-stale-${Date.now().toString(36)}`;
+    const { agentWs } = createClient(clientId);
+    const viewer = createMockWs({ role: "webcam_viewer", clientId });
+    webcamStreamingState.set(clientId, {
+      isStreaming: true,
+      deviceIndex: 0,
+      fps: 30,
+      useMax: false,
+      quality: 90,
+      codec: "jpeg",
+      startedAt: Date.now() - 5000,
+      lastFrameAt: 0,
+    } as any);
+
+    handleWebcamViewerOpen(viewer as any);
+    handleWebcamViewerMessage(viewer as any, JSON.stringify({ type: "webcam_start" }));
+
+    const commands = agentCommands(agentWs);
+    expect(commands.filter((msg) => msg.commandType === "webcam_start")).toHaveLength(1);
+    expect(webcamStreamingState.get(clientId)?.startedAt).toBeGreaterThan(0);
+  });
 });
 
 describe("remote desktop viewer control", () => {

