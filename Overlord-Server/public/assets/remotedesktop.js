@@ -15,6 +15,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const allowed = await checkFeatureAccess("remote_desktop", clientId);
   if (!allowed) return;
 
+  const embedded = new URLSearchParams(location.search).get("embedded") === "1";
+  if (embedded) document.body.classList.add("rd-embedded");
+
   const clientLabel = document.getElementById("clientLabel");
   clientLabel.textContent = clientId;
 

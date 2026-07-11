@@ -312,7 +312,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     return {
       camera: Number(cameraSelect?.value ?? savedCameraIndex ?? 0),
       fps: Number(fpsInput?.value || 30),
-      resolution: Number(resolutionSelect?.value || 720),
+      resolution: Number(resolutionSelect?.value || 480),
       preferH264: !!prefersH264,
       webrtcMode: getWebrtcMode(),
       audio: !!audioCtrl?.checked,
@@ -343,7 +343,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   setCodecModeLabel(prefersH264 ? "h264" : "jpeg", "preferred");
 
   function pushVideoSettings() {
-    const maxHeight = Number(resolutionSelect?.value || 720);
+    const maxHeight = Number(resolutionSelect?.value || 480);
     const codec = prefersH264 ? "h264" : "jpeg";
     console.debug("webcam: pushVideoSettings maxHeight=", maxHeight, "codec=", codec);
     setCodecModeLabel(codec, "requested");
@@ -561,11 +561,11 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       if (!desiredStreaming || hasRenderedFrame) return;
       if (startRetryCount < 1) {
         startRetryCount += 1;
-        setStreamState("starting", "Stalled · retrying camera");
+        setStreamState("starting", "Camera is slow to respond · retrying automatically");
         send("webcam_stop");
         setTimeout(() => startStreaming(false), 250);
       } else {
-        setStreamState("error", "No camera frames received · check camera access");
+        setStreamState("error", "Unable to start camera · verify the device has a camera and it is not in use by another app");
       }
     }, 6000);
   }

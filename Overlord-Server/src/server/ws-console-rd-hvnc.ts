@@ -793,7 +793,7 @@ type WebcamStreamingState = {
 };
 
 function defaultWebcamStreamingState(): WebcamStreamingState {
-  return { isStreaming: false, deviceIndex: 0, fps: 30, useMax: false, quality: 90, codec: "", maxHeight: 720, startedAt: 0, lastFrameAt: 0 };
+  return { isStreaming: false, deviceIndex: 0, fps: 30, useMax: false, quality: 90, codec: "", maxHeight: 480, startedAt: 0, lastFrameAt: 0 };
 }
 
 export const webcamStreamingState = new Map<string, WebcamStreamingState>();

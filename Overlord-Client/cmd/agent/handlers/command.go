@@ -124,7 +124,7 @@ func resetForReconnect(env *runtime.Env) {
 	env.WebcamDone = nil
 	env.WebcamDeviceIndex = 0
 	env.WebcamFPS = 30
-	env.WebcamMaxHeight = 720
+	env.WebcamMaxHeight = 480
 	env.WebcamUseMaxFPS = false
 	env.WebcamMu.Unlock()
 
@@ -1959,7 +1959,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		env.WebcamQuality = quality
 		env.WebcamCodec = codec
 		if maxHeight != -1 && maxHeight != 360 && maxHeight != 480 && maxHeight != 720 && maxHeight != 1080 {
-			maxHeight = 720
+			maxHeight = 480
 		}
 		env.WebcamMaxHeight = maxHeight
 		log.Printf("webcam: set quality=%d codec=%s max_height=%d", quality, codec, maxHeight)

@@ -19,12 +19,9 @@ for (const id of ids) {
   const tile = document.createElement("article");
   tile.className = "webcam-tile";
   tile.dataset.clientId = id;
-  tile.innerHTML = `<button class="tile-focus" aria-label="Focus webcam ${id}"></button><span class="tile-client">${id.slice(0, 12)}</span><button class="tile-stop" title="Stop webcam" aria-label="Stop webcam"><i class="fa-solid fa-stop"></i></button><iframe title="Webcam ${id}" src="/webcam?clientId=${encodeURIComponent(id)}&embedded=1"></iframe>`;
+  tile.innerHTML = `<button class="tile-expand" title="Open in viewer" aria-label="Open webcam in viewer"><i class="fa-solid fa-expand"></i></button><span class="tile-client">${id.slice(0, 12)}</span><button class="tile-stop" title="Stop webcam" aria-label="Stop webcam"><i class="fa-solid fa-stop"></i></button><iframe title="Webcam ${id}" src="/webcam?clientId=${encodeURIComponent(id)}&embedded=1"></iframe>`;
   tile.querySelector(".tile-stop").onclick = (event) => { event.stopPropagation(); stopTile(tile); };
-  tile.querySelector(".tile-focus").onclick = () => {
-    for (const other of activeTiles.values()) if (other !== tile) stopTile(other);
-    location.href = `/viewer?clientId=${encodeURIComponent(id)}&mode=webcam`;
-  };
+  tile.querySelector(".tile-expand").onclick = () => { window.open(`/viewer?clientId=${encodeURIComponent(id)}&mode=webcam`, "_blank"); };
   activeTiles.set(id, tile);
   grid.append(tile);
 }
