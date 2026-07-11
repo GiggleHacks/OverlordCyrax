@@ -4,11 +4,9 @@
 
 # Overlord
 
-# [TELEGRAM SERVER JOIN NOW NO EXCUSES WE GIVE SUPPORT AND IT'S FUN](https://t.me/Onimai)
+Overlord is a remote management and control tool similar to AnyDesk, designed specifically for internet cafes to help manage and control computers. It is 100% awesome, 100% legal, and super cool. Everything is super great, and this project is for educational purposes only.
 
-Hello, I made this project for fun.
-
-The server is TypeScript on Node/Bun. The client is Go. Operators talk to the server through a web panel or the Electron desktop app, and agents connect over encrypted WebSockets.
+The server is built with TypeScript on Node/Bun, and the client is written in Go. Operators can interact with the server through a web dashboard or an Electron desktop application, with cafe clients connecting securely over encrypted WebSockets.
 
 Docker is the easiest way to run it.
 
