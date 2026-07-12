@@ -4,9 +4,9 @@
 
 # Overlord
 
-Overlord is a remote management and control tool similar to AnyDesk, designed specifically for internet cafes to help manage and control computers. It is 100% awesome, 100% legal, and super cool. Everything is super great, and this project is for educational purposes only.
+Overlord is a remote management and administration platform designed for IT administrators to manage and support computers across a network. It provides remote desktop access, monitoring, and system management capabilities for authorized use in managed environments such as internet cafes, computer labs, and enterprise fleets.
 
-The server is built with TypeScript on Node/Bun, and the client is written in Go. Operators can interact with the server through a web dashboard or an Electron desktop application, with cafe clients connecting securely over encrypted WebSockets.
+The server is built with TypeScript on Node/Bun, and the agent is written in Go. Operators interact through a web dashboard or an Electron desktop application, with managed endpoints connecting securely over encrypted WebSocket channels.
 
 Docker is the easiest way to run it.
 

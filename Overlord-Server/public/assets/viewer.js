@@ -11,11 +11,20 @@ const capability = document.getElementById("viewerCapability");
 const pipPicker = document.getElementById("pipCornerPicker");
 
 idLabel.textContent = clientId.slice(0, 12) || "unknown";
-const webcamUrl = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&controls=1`;
+const transition = params.get("transition") || "";
+const webcamUrl = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&controls=1${transition ? "&transition=1" : ""}`;
 const desktopUrl = `/remotedesktop?clientId=${encodeURIComponent(clientId)}&embedded=1`;
 
 function ensureFrame(frame, url) {
-  if (!frame.src) frame.src = url;
+  if (!frame.src || frame.src === "about:blank" || frame.contentWindow?.location?.href === "about:blank") {
+    frame.src = url;
+  }
+}
+
+function unloadFrame(frame) {
+  if (frame.src && frame.src !== "about:blank") {
+    frame.src = "about:blank";
+  }
 }
 
 function setMode(nextMode) {
@@ -27,8 +36,22 @@ function setMode(nextMode) {
     panels.style.gridTemplateRows = "";
   }
   document.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("is-active", button.dataset.mode === mode));
-  if (mode === "webcam" || mode === "split" || mode === "split-v" || mode === "pip") ensureFrame(webcam, webcamUrl);
-  if (mode === "desktop" || mode === "split" || mode === "split-v" || mode === "pip") ensureFrame(desktop, desktopUrl);
+
+  const needsWebcam = (mode === "webcam" || mode === "split" || mode === "split-v" || mode === "pip");
+  const needsDesktop = (mode === "desktop" || mode === "split" || mode === "split-v" || mode === "pip");
+
+  if (needsWebcam) {
+    ensureFrame(webcam, webcamUrl);
+  } else {
+    unloadFrame(webcam);
+  }
+
+  if (needsDesktop) {
+    ensureFrame(desktop, desktopUrl);
+  } else {
+    unloadFrame(desktop);
+  }
+
   pipPicker.style.display = mode === "pip" ? "flex" : "none";
   if (mode === "pip") panels.dataset.pip = pipCorner;
   history.replaceState(null, "", `/viewer?clientId=${encodeURIComponent(clientId)}&mode=${mode}`);

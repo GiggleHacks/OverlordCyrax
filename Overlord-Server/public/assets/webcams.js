@@ -21,7 +21,10 @@ for (const id of ids) {
   tile.dataset.clientId = id;
   tile.innerHTML = `<button class="tile-expand" title="Open in viewer" aria-label="Open webcam in viewer"><i class="fa-solid fa-expand"></i></button><span class="tile-client">${id.slice(0, 12)}</span><span class="tile-status"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting</span><span class="tile-ping"></span><button class="tile-stop" title="Stop webcam" aria-label="Stop webcam"><i class="fa-solid fa-stop"></i></button><iframe title="Webcam ${id}" src="/webcam?clientId=${encodeURIComponent(id)}&embedded=1"></iframe>`;
   tile.querySelector(".tile-stop").onclick = (event) => { event.stopPropagation(); stopTile(tile); };
-  tile.querySelector(".tile-expand").onclick = () => { window.open(`/viewer?clientId=${encodeURIComponent(id)}&mode=webcam`, "_blank"); };
+  tile.querySelector(".tile-expand").onclick = () => {
+    stopTile(tile);
+    window.open(`/viewer?clientId=${encodeURIComponent(id)}&mode=webcam&transition=1`, "_blank");
+  };
   activeTiles.set(id, tile);
   grid.append(tile);
 }

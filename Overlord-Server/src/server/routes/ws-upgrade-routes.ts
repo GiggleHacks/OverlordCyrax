@@ -23,7 +23,7 @@ function positiveIntEnv(name: string, fallback: number): number {
 }
 
 const WS_RATE_WINDOW_MS = positiveIntEnv("OVERLORD_WS_UPGRADE_RATE_WINDOW_MS", 10_000);
-const WS_RATE_MAX = positiveIntEnv("OVERLORD_WS_UPGRADE_RATE_MAX", 30);
+const WS_RATE_MAX = positiveIntEnv("OVERLORD_WS_UPGRADE_RATE_MAX", 120);
 const wsRateMap = new Map<string, { count: number; windowStart: number }>();
 
 setInterval(() => {

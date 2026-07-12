@@ -927,5 +927,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
   viewerScaleBtn?.addEventListener("click", () => { viewerScale = viewerScale === 60 ? 100 : 60; applyViewerScale(); sharedSettingsSaver.scheduleSave(); });
 
-  connect();
+  const transition = new URLSearchParams(location.search).get("transition") === "1";
+  const initDelay = transition ? 800 : (embedded ? 500 : 0);
+  setTimeout(connect, initDelay);
 })();
