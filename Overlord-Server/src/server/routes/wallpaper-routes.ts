@@ -9,6 +9,7 @@ import { metrics } from "../../metrics";
 import { encodeMessage } from "../../protocol";
 import { requireClientAccess, requirePermission } from "../../rbac";
 import { createUploadPull } from "../file-transfer-state";
+import { logger } from "../../logger";
 
 type RequestIpProvider = {
   requestIP: (req: Request) => { address?: string } | null | undefined;
@@ -134,7 +135,7 @@ export async function handleWallpaperRoutes(
 ): Promise<Response | null> {
   /* Only handle POST /api/clients/{clientId}/wallpaper */
   if (req.method !== "POST") return null;
-  const match = url.pathname.match(/^\/api\/clients\/(.+)\/wallpaper$/);
+  const match = url.pathname.match(/^\/api\/clients\/([^/]+)\/wallpaper$/);
   if (!match) return null;
 
   const user = await authenticateRequest(req);
@@ -212,8 +213,10 @@ export async function handleWallpaperRoutes(
       size: bytes.length,
       ttlMs: 5 * 60_000, // 5 minutes
     });
-    const pullUrl = `/api/file/upload/pull/${encodeURIComponent(pullId)}`;
+    const pullUrl = `${url.origin}/api/file/upload/pull/${encodeURIComponent(pullId)}`;
     const remotePath = `C:\\Users\\Public\\overlord_wallpaper.${ext}`;
+
+    logger.info(`[wallpaper] uploading to ${remotePath} via pull URL: ${pullUrl} (size=${bytes.length})`);
 
     const uploadResult = await waitForCommandReply(
       deps,
@@ -230,6 +233,7 @@ export async function handleWallpaperRoutes(
     );
 
     if (!uploadResult.ok) {
+      logger.warn(`[wallpaper] upload failed for ${targetId}: ${uploadResult.message}`);
       return Response.json(
         { ok: false, message: uploadResult.message || "Failed to upload wallpaper to client" },
         { status: 500 },
