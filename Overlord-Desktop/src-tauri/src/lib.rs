@@ -215,7 +215,7 @@ pub fn run() {
             let handler_app = app.handle().clone();
             let window =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("Overlord")
+                    .title("Overlord 2.0")
                     .inner_size(1280.0, 800.0)
                     .min_inner_size(900.0, 600.0)
                     .resizable(true)

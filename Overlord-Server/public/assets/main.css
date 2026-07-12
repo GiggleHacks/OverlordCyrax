@@ -1758,8 +1758,25 @@ article.card[data-bookmarked="true"] {
 .pip-corner:hover, .pip-corner.is-active { background: #5ee7ff; color: #061015; border-color: #5ee7ff; }
 .rd-focus-view { width: 65%; margin: 0 auto; transition: width .2s ease; }
 .rd-view--100 .rd-focus-view { width: 100%; }
-body.rd-embedded .rd-focus-view { width: 100% !important; max-width: none; padding: 0; }
-body.rd-embedded { overflow: hidden; }
+body.rd-embedded {
+  height: 100vh;
+  min-height: 0 !important;
+  overflow: hidden;
+}
+body.rd-embedded .rd-focus-view {
+  width: 100% !important;
+  max-width: none;
+  padding: 0;
+  height: 100vh;
+}
+body.rd-embedded .rd-focus-view > div {
+  height: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+}
+body.rd-embedded #canvasContainer {
+  min-height: 0 !important;
+}
 body.rd-embedded #rdScaleBtn { display: none; }
 body.webcam-embedded .webcam-workspace { width: 100% !important; max-width: none; min-width: 0 !important; }
 @media (max-width: 800px) { .viewer-capability { display: none; } .rd-focus-view { width: 100%; } }
@@ -2292,7 +2309,7 @@ mark.search-current {
 }
 
 #top-nav:empty::before {
-  content: "Overlord";
+  content: "Overlord 2.0";
   display: flex;
   align-items: center;
   height: 60px;
@@ -3086,7 +3103,7 @@ tbody tr:hover {
 .dashboard-icon-btn:active, .layout-toggle-btn:active, .cv-webcam-btn:active { transform:scale(.92); }
 @media (prefers-reduced-motion: reduce) { .cv-row, .cv-card, .dashboard-icon-btn, .layout-toggle-btn, .webcam-workspace { transition:none !important; transform:none !important; } }
 @media (max-width: 900px) { .webcam-focus { padding:10px; } .webcam-workspace--60 { width:100%; min-width:0; } }
-.webcam-tile-page{padding:16px}.webcam-tile-page header{display:flex;justify-content:space-between;color:#67e8f9;font:12px "JetBrains Mono",monospace;letter-spacing:.14em;margin-bottom:12px}.webcam-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}.webcam-tile{position:relative;aspect-ratio:16/10;border:1px solid #155e75;background:#020617;overflow:hidden;border-radius:10px}.webcam-tile iframe{width:100%;height:100%;border:0}.tile-expand{position:absolute;z-index:2;left:8px;top:8px;padding:7px;border-radius:7px;background:#1e3a5f;color:#a5f3fc;cursor:pointer;border:none;font-size:13px;opacity:.7;transition:opacity .15s}.tile-expand:hover{opacity:1;background:#2563eb}.tile-stop{position:absolute;z-index:2;right:8px;top:8px;padding:7px;border-radius:7px;background:#7f1d1d;color:#fff;cursor:pointer;border:none}.webcam-tile.is-stopped{opacity:.5}
+.webcam-tile-page{padding:16px}.webcam-tile-page header{display:flex;justify-content:space-between;align-items:center;color:#67e8f9;font:12px "JetBrains Mono",monospace;letter-spacing:.14em;margin-bottom:12px}.webcam-tile-page header .header-left{display:flex;align-items:center;gap:12px}.webcam-tile-page header .divider-line{color:rgba(255,255,255,0.15);font-weight:300}.webcam-tile-page header a.nav-brand-link{color:#f1f5f9;text-decoration:none;display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:13px;letter-spacing:0.05em;transition:color 0.15s}.webcam-tile-page header a.nav-brand-link:hover{color:#818cf8}.webcam-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}.webcam-tile{position:relative;aspect-ratio:16/10;border:1px solid #155e75;background:#020617;overflow:hidden;border-radius:10px}.webcam-tile iframe{width:100%;height:100%;border:0}.tile-expand{position:absolute;z-index:2;left:8px;top:8px;padding:7px;border-radius:7px;background:#1e3a5f;color:#a5f3fc;cursor:pointer;border:none;font-size:13px;opacity:.7;transition:opacity .15s}.tile-expand:hover{opacity:1;background:#2563eb}.tile-stop{position:absolute;z-index:2;right:8px;top:8px;padding:7px;border-radius:7px;background:#7f1d1d;color:#fff;cursor:pointer;border:none}.webcam-tile.is-stopped{opacity:.5}
 .tile-status{position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-50%);color:#67e8f9;background:#020617cc;padding:6px 12px;border-radius:6px;font:10px "JetBrains Mono",monospace;white-space:nowrap;pointer-events:none;display:flex;align-items:center;gap:6px}
 .tile-status--ok{color:#70f7a5;background:transparent;font-size:9px;top:auto;bottom:6px;left:auto;right:7px;transform:none;padding:3px 5px}
 .tile-status--warn{color:#fcd34d}
