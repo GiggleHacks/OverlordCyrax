@@ -5,6 +5,8 @@ import { P2PClient } from "./webrtc-p2p.js";
 import { createKeyboardCapture } from "./keyboard-capture.js";
 import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
 
+import { initSidePanel } from "./side-panel.js";
+
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
   if (!clientId) {
@@ -17,6 +19,16 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
   const embedded = new URLSearchParams(location.search).get("embedded") === "1";
   if (embedded) document.body.classList.add("rd-embedded");
+
+  /* Side action panel (non-embedded only) */
+  if (!embedded) {
+    const panel = document.getElementById("sidePanel");
+    if (panel) {
+      panel.style.display = "";
+      document.body.classList.add("rd-has-panel");
+      initSidePanel(clientId, panel);
+    }
+  }
 
   const clientLabel = document.getElementById("clientLabel");
   clientLabel.textContent = clientId;

@@ -1,8 +1,13 @@
+import { initSidePanel } from "./side-panel.js";
+
 const params = new URLSearchParams(location.search);
 const clientId = params.get("clientId") || "";
 const allowedModes = new Set(["webcam", "desktop", "split", "split-v", "pip"]);
 let mode = allowedModes.has(params.get("mode")) ? params.get("mode") : "webcam";
 let pipCorner = "br";
+
+/* Side action panel */
+initSidePanel(clientId, document.getElementById("sidePanel"));
 const panels = document.getElementById("viewerPanels");
 const webcam = document.getElementById("viewerWebcam");
 const desktop = document.getElementById("viewerDesktop");

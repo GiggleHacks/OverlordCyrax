@@ -44,6 +44,7 @@ import { handleWebSocketClose, handleWebSocketMessage, handleWebSocketOpen } fro
 import { handleWsUpgradeRoutes } from "./server/routes/ws-upgrade-routes";
 import { handleWebrtcRoutes } from "./server/routes/webrtc-routes";
 import { handleRemoteDesktopRecordingRoutes } from "./server/routes/rd-recording-routes";
+import { handleWallpaperRoutes } from "./server/routes/wallpaper-routes";
 import { isAuthorizedAgentRequest } from "./server/agent-auth";
 import { generateBuildMutex, sanitizeMutex, sanitizeOutputName } from "./server/build-utils";
 import { detectUploadOs, normalizeClientOs, type DeployOs } from "./server/deploy-utils";
@@ -578,6 +579,10 @@ async function startServer() {
     rdRecording: {
       secureHeaders,
     },
+    wallpaper: {
+      pendingCommandReplies,
+      pendingScripts,
+    },
     wsUpgrade: {
       isAuthorizedAgentRequest: isAuthorizedAgent,
     },
@@ -741,6 +746,7 @@ async function startServer() {
           requestIP: (srv as any).requestIP,
         }),
         (req, url) => handleWebrtcRoutes(req, url),
+        (req, url, srv) => handleWallpaperRoutes(req, url, srv as any, routeDeps.wallpaper),
         (req, url, srv) => handleClientRoutes(req, url, srv as any, routeDeps.client),
         (req, url, srv) => handleWsUpgradeRoutes(req, url, srv as any, routeDeps.wsUpgrade),
         (req, url) => handleRemoteDesktopRecordingRoutes(req, url, routeDeps.rdRecording),
