@@ -86,5 +86,13 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
+      - name: Vendor third-party headers (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          bash scripts/vendor-onevpl-headers.sh
+          bash scripts/vendor-amf-headers.sh
+
       - name: Run client tests
         run: go test ./...
