@@ -1001,7 +1001,6 @@ export function createRenderer({
         ${isViewer ? "" : `<button class="command-btn cv-btn-primary" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-terminal"></i><span>Commands</span></button>`}
         ${webcamButtonHtml(client)}
         <button class="cv-icon-btn cv-ping-btn" title="Ping" ${client.online ? "" : "disabled"}><i class="fa-solid fa-satellite-dish"></i></button>
-        ${isViewer ? "" : `<button class="cv-icon-btn cv-icon-danger ban-btn" title="Ban IP" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-ban"></i></button>`}
         <button class="cv-icon-btn cv-expand-btn" title="More info" aria-expanded="false"><i class="fa-solid fa-chevron-down"></i></button>
       </div>
       <div class="cv-expand-panel hidden">
@@ -1180,7 +1179,6 @@ export function createRenderer({
           ${isViewer ? "" : `<button class="command-btn cv-btn-primary cv-btn-flex" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-terminal"></i><span>Commands</span></button>`}
           ${webcamButtonHtml(client)}
           <button class="cv-icon-btn cv-ping-btn" title="Ping" ${client.online ? "" : "disabled"}><i class="fa-solid fa-satellite-dish"></i></button>
-          ${isViewer ? "" : `<button class="cv-icon-btn cv-icon-danger ban-btn" title="Ban IP" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-ban"></i></button>`}
         </div>
       </div>
     `;
