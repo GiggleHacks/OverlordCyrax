@@ -12,13 +12,13 @@ import (
 
 var errVirtualCaptureUnsupported = errors.New("virtual capture is only supported on Windows")
 
-func InitializevirtualMode() error {
+func InitializeVirtualMode() error {
 	return nil
 }
 
-func CleanupvirtualMode() {}
+func CleanupVirtualMode() {}
 
-func SetvirtualCursorCapture(enabled bool) {}
+func SetVirtualCursorCapture(enabled bool) {}
 
 func VirtualMonitorCount() int {
 	return 0
@@ -54,38 +54,38 @@ func virtualCaptureDisplayFallback() (*image.RGBA, error) {
 	return nil, nil
 }
 
-func StartvirtualProcess(filePath string) (uint32, error) {
+func StartVirtualProcess(filePath string) (uint32, error) {
 	return 0, nil
 }
 
-func virtualKillAll() error {
+func VirtualKillAll() error {
 	return nil
 }
 
-func virtualEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
+func VirtualEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
 	return nil, nil
 }
 
-func virtualInputMouseMove(x, y int32) error {
+func VirtualInputMouseMove(x, y int32) error {
 	return nil
 }
 
-func virtualInputMouseDown(button int) error {
+func VirtualInputMouseDown(button int) error {
 	return nil
 }
 
-func virtualInputMouseUp(button int) error {
+func VirtualInputMouseUp(button int) error {
 	return nil
 }
 
-func virtualInputKeyDown(vk uint16) error {
+func VirtualInputKeyDown(vk uint16) error {
 	return nil
 }
 
-func virtualInputKeyUp(vk uint16) error {
+func VirtualInputKeyUp(vk uint16) error {
 	return nil
 }
 
-func virtualInputMouseWheel(delta int32) error {
+func VirtualInputMouseWheel(delta int32) error {
 	return nil
 }
