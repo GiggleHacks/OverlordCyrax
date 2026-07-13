@@ -2,9 +2,8 @@ import { initSidePanel } from "./side-panel.js";
 
 const params = new URLSearchParams(location.search);
 const clientId = params.get("clientId") || "";
-const allowedModes = new Set(["webcam", "desktop", "split", "split-v", "pip"]);
+const allowedModes = new Set(["webcam", "desktop", "split"]);
 let mode = allowedModes.has(params.get("mode")) ? params.get("mode") : "webcam";
-let pipCorner = "br";
 
 /* Side action panel */
 initSidePanel(clientId, document.getElementById("sidePanel"));
@@ -13,7 +12,6 @@ const webcam = document.getElementById("viewerWebcam");
 const desktop = document.getElementById("viewerDesktop");
 const idLabel = document.getElementById("viewerClientId");
 const capability = document.getElementById("viewerCapability");
-const pipPicker = document.getElementById("pipCornerPicker");
 
 idLabel.textContent = clientId.slice(0, 12) || "unknown";
 const transition = params.get("transition") || "";
@@ -42,8 +40,8 @@ function setMode(nextMode) {
   }
   document.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("is-active", button.dataset.mode === mode));
 
-  const needsWebcam = (mode === "webcam" || mode === "split" || mode === "split-v" || mode === "pip");
-  const needsDesktop = (mode === "desktop" || mode === "split" || mode === "split-v" || mode === "pip");
+  const needsWebcam = (mode === "webcam" || mode === "split");
+  const needsDesktop = (mode === "desktop" || mode === "split");
 
   if (needsWebcam) {
     ensureFrame(webcam, webcamUrl);
@@ -57,20 +55,10 @@ function setMode(nextMode) {
     unloadFrame(desktop);
   }
 
-  pipPicker.style.display = mode === "pip" ? "flex" : "none";
-  if (mode === "pip") panels.dataset.pip = pipCorner;
   history.replaceState(null, "", `/viewer?clientId=${encodeURIComponent(clientId)}&mode=${mode}`);
 }
 
 document.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
-
-document.querySelectorAll("[data-corner]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    pipCorner = btn.dataset.corner;
-    panels.dataset.pip = pipCorner;
-    document.querySelectorAll("[data-corner]").forEach((b) => b.classList.toggle("is-active", b.dataset.corner === pipCorner));
-  });
-});
 
 async function refreshCapability() {
   try {
@@ -96,33 +84,27 @@ let startPos = 0;
 let startSize = 0;
 
 divider.addEventListener("mousedown", (e) => {
-  if (mode !== "split" && mode !== "split-v") return;
+  if (mode !== "split") return;
   e.preventDefault();
   isDragging = true;
-  const isVertical = mode === "split-v";
-  startPos = isVertical ? e.clientY : e.clientX;
-  startSize = panels.querySelector(".viewer-panel-webcam").getBoundingClientRect()[isVertical ? "height" : "width"];
+  startPos = e.clientX;
+  startSize = panels.querySelector(".viewer-panel-webcam").getBoundingClientRect().width;
   divider.classList.add("is-dragging");
-  document.body.style.cursor = isVertical ? "row-resize" : "col-resize";
+  document.body.style.cursor = "col-resize";
   document.body.style.userSelect = "none";
   panels.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = "none"));
 });
 
 document.addEventListener("mousemove", (e) => {
   if (!isDragging) return;
-  const isVertical = mode === "split-v";
-  const totalSize = panels.getBoundingClientRect()[isVertical ? "height" : "width"];
+  const totalSize = panels.getBoundingClientRect().width;
   const dividerSize = 6;
-  const minSize = isVertical ? 120 : 200;
-  const pos = isVertical ? e.clientY : e.clientX;
+  const minSize = 200;
+  const pos = e.clientX;
   let newFirst = startSize + (pos - startPos);
   newFirst = Math.max(minSize, Math.min(newFirst, totalSize - dividerSize - minSize));
   const second = totalSize - newFirst - dividerSize;
-  if (isVertical) {
-    panels.style.gridTemplateRows = `${newFirst}px ${dividerSize}px ${second}px`;
-  } else {
-    panels.style.gridTemplateColumns = `${newFirst}px ${dividerSize}px ${second}px`;
-  }
+  panels.style.gridTemplateColumns = `${newFirst}px ${dividerSize}px ${second}px`;
 });
 
 document.addEventListener("mouseup", () => {

@@ -553,6 +553,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       renderCount = 0;
       renderWindowStart = performance.now();
     }
+    try {
+      window.parent.postMessage({ type: "webcam_status", clientId, status: state }, "*");
+    } catch (e) {}
   }
 
   function armFirstFrameWatch() {

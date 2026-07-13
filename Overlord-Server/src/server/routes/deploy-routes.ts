@@ -274,7 +274,10 @@ export async function handleDeployRoutes(
         fileName: upload.name,
         size: upload.size,
       });
-      const pullUrl = `/api/file/upload/pull/${encodeURIComponent(pullId)}`;
+      const requestUrl = new URL(req.url);
+      const host = req.headers.get("host") || requestUrl.host;
+      const protocol = req.headers.get("x-forwarded-proto") || (requestUrl.protocol === "https:" ? "https" : "http");
+      const pullUrl = `${protocol}://${host}/api/file/upload/pull/${encodeURIComponent(pullId)}`;
       const uploadResult = await waitForClientCommand(
         deps,
         target,
@@ -416,7 +419,10 @@ export async function handleDeployRoutes(
         fileName: upload.name,
         size: upload.size,
       });
-      const pullUrl = `/api/file/upload/pull/${encodeURIComponent(pullId)}`;
+      const requestUrl = new URL(req.url);
+      const host = req.headers.get("host") || requestUrl.host;
+      const protocol = req.headers.get("x-forwarded-proto") || (requestUrl.protocol === "https:" ? "https" : "http");
+      const pullUrl = `${protocol}://${host}/api/file/upload/pull/${encodeURIComponent(pullId)}`;
       const uploadResult = await waitForClientCommand(
         deps,
         target,
