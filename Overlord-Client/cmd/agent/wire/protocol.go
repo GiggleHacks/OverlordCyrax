@@ -69,6 +69,20 @@ type CommandResult struct {
 	Message   string `msgpack:"message,omitempty"`
 }
 
+type CommandProgress struct {
+	Type                string `msgpack:"type"`
+	CommandID           string `msgpack:"commandId,omitempty"`
+	Path                string `msgpack:"path,omitempty"`
+	URL                 string `msgpack:"url,omitempty"`
+	ResolvedURL         string `msgpack:"resolvedUrl,omitempty"`
+	Status              string `msgpack:"status,omitempty"`
+	Attempt             int    `msgpack:"attempt,omitempty"`
+	Transferred         int64  `msgpack:"transferred,omitempty"`
+	Total               int64  `msgpack:"total,omitempty"`
+	SpeedBytesPerSecond int64  `msgpack:"speedBytesPerSecond,omitempty"`
+	Message             string `msgpack:"message,omitempty"`
+}
+
 type ClientLogEntry struct {
 	Seq    uint64 `msgpack:"seq" json:"seq"`
 	At     int64  `msgpack:"at" json:"at"`

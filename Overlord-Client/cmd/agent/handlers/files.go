@@ -722,14 +722,18 @@ func HandleFileUpload(ctx context.Context, env *agentRuntime.Env, cmdID string, 
 }
 
 type progressReader struct {
-	r     io.Reader
-	bytes atomic.Int64
+	r      io.Reader
+	bytes  atomic.Int64
+	onRead func(totalRead int64)
 }
 
 func (p *progressReader) Read(b []byte) (int, error) {
 	n, err := p.r.Read(b)
 	if n > 0 {
-		p.bytes.Add(int64(n))
+		total := p.bytes.Add(int64(n))
+		if p.onRead != nil {
+			p.onRead(total)
+		}
 	}
 	return n, err
 }
@@ -742,28 +746,75 @@ const (
 )
 
 func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID string, destPath string, sourceURL string, expectedSize int64) error {
+	startedAt := time.Now()
+	lastProgressSent := time.Time{}
+	progressTransferred := int64(0)
+	progressAttempt := 0
+
+	sendProgress := func(status string, attempt int, transferred int64, message string, resolvedURL string, force bool) {
+		if transferred < 0 {
+			transferred = 0
+		}
+		if expectedSize > 0 && transferred > expectedSize {
+			transferred = expectedSize
+		}
+		now := time.Now()
+		if !force && now.Sub(lastProgressSent) < 250*time.Millisecond {
+			return
+		}
+		lastProgressSent = now
+		progressTransferred = transferred
+		progressAttempt = attempt
+		elapsed := now.Sub(startedAt).Seconds()
+		speed := int64(0)
+		if elapsed > 0 {
+			speed = int64(float64(transferred) / elapsed)
+		}
+		progress := wire.CommandProgress{
+			Type:                "command_progress",
+			CommandID:           cmdID,
+			Path:                destPath,
+			URL:                 sourceURL,
+			ResolvedURL:         resolvedURL,
+			Status:              status,
+			Attempt:             attempt,
+			Transferred:         transferred,
+			Total:               expectedSize,
+			SpeedBytesPerSecond: speed,
+			Message:             message,
+		}
+		if err := wire.WriteMsg(ctx, env.Conn, progress); err != nil {
+			log.Printf("file_upload_http progress send failed: %v", err)
+		}
+	}
+	failResult := func(message string, resolvedURL string) error {
+		sendProgress("failed", progressAttempt, progressTransferred, message, resolvedURL, true)
+		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: message})
+	}
+
 	resolvedURL, err := resolveUploadPullURL(env, sourceURL)
 	if err != nil {
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
+		return failResult(err.Error(), "")
 	}
+	sendProgress("starting", 0, 0, "Starting client pull upload", resolvedURL, true)
 
 	parsed, err := url.Parse(resolvedURL)
 	if err != nil || parsed == nil || parsed.Host == "" {
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: "invalid upload url"})
+		return failResult("invalid upload url", resolvedURL)
 	}
 	if parsed.Scheme != "https" && parsed.Scheme != "http" {
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: "unsupported upload url scheme"})
+		return failResult("unsupported upload url scheme", resolvedURL)
 	}
 
 	tlsConfig := &tls.Config{InsecureSkipVerify: env.Cfg.TLSInsecureSkipVerify, MinVersion: tls.VersionTLS12}
 	if caPath := strings.TrimSpace(env.Cfg.TLSCAPath); caPath != "" {
 		caBytes, err := os.ReadFile(caPath)
 		if err != nil {
-			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: fmt.Sprintf("failed to read TLS CA: %v", err)})
+			return failResult(fmt.Sprintf("failed to read TLS CA: %v", err), resolvedURL)
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(caBytes) {
-			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: "failed to parse TLS CA"})
+			return failResult("failed to parse TLS CA", resolvedURL)
 		}
 		tlsConfig.RootCAs = pool
 	}
@@ -780,29 +831,31 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 	dir := filepath.Dir(destPath)
 	if dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
+			return failResult(err.Error(), resolvedURL)
 		}
 	}
 
 	tmpPath := destPath + ".httpuploading"
 	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0644)
 	if err != nil {
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
+		return failResult(err.Error(), resolvedURL)
 	}
 
 	var lastErr error
 	backoff := httpUploadInitBackoff
 
 	for attempt := 1; attempt <= httpUploadMaxAttempts; attempt++ {
+		progressAttempt = attempt
 		offset, seekErr := f.Seek(0, io.SeekEnd)
 		if seekErr != nil {
 			_ = f.Close()
 			_ = os.Remove(tmpPath)
-			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: seekErr.Error()})
+			return failResult(seekErr.Error(), resolvedURL)
 		}
 		if expectedSize > 0 && offset >= expectedSize {
 			break
 		}
+		sendProgress("requesting", attempt, offset, fmt.Sprintf("Requesting upload payload (attempt %d)", attempt), resolvedURL, true)
 
 		attemptCtx, attemptCancel := context.WithCancel(ctx)
 
@@ -840,14 +893,14 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 				attemptCancel()
 				_ = f.Close()
 				_ = os.Remove(tmpPath)
-				return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
+				return failResult(err.Error(), resolvedURL)
 			}
 			if err := f.Truncate(0); err != nil {
 				_ = resp.Body.Close()
 				attemptCancel()
 				_ = f.Close()
 				_ = os.Remove(tmpPath)
-				return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
+				return failResult(err.Error(), resolvedURL)
 			}
 			offset = 0
 		}
@@ -857,6 +910,7 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 			_ = resp.Body.Close()
 			attemptCancel()
 			lastErr = fmt.Errorf("upload fetch failed: status %d", status)
+			sendProgress("retrying", attempt, offset, lastErr.Error(), resolvedURL, true)
 			// 4xx (not 416) won't get better on retry — bail.
 			if status >= 400 && status < 500 && status != http.StatusRequestedRangeNotSatisfiable {
 				break
@@ -866,7 +920,21 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 			continue
 		}
 
-		pr := &progressReader{r: resp.Body}
+		sendProgress("transferring", attempt, offset, fmt.Sprintf("Transferring %d of %d bytes", offset, expectedSize), resolvedURL, true)
+		pr := &progressReader{
+			r: resp.Body,
+			onRead: func(totalRead int64) {
+				transferred := offset + totalRead
+				sendProgress(
+					"transferring",
+					attempt,
+					transferred,
+					fmt.Sprintf("Transferred %d of %d bytes", transferred, expectedSize),
+					resolvedURL,
+					false,
+				)
+			},
+		}
 		watchdogDone := make(chan struct{})
 		go func() {
 			ticker := time.NewTicker(httpUploadStallTimeout / 3)
@@ -909,6 +977,7 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 		if ctx.Err() != nil {
 			break
 		}
+		sendProgress("retrying", attempt, offset+pr.bytes.Load(), fmt.Sprintf("Transfer interrupted: %v", copyErr), resolvedURL, true)
 		sleepBackoff(ctx, backoff)
 		backoff = nextBackoff(backoff)
 	}
@@ -916,26 +985,28 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 	if lastErr != nil {
 		_ = f.Close()
 		_ = os.Remove(tmpPath)
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: lastErr.Error()})
+		return failResult(lastErr.Error(), resolvedURL)
 	}
 
 	written, _ := f.Seek(0, io.SeekEnd)
+	sendProgress("verifying", progressAttempt, written, fmt.Sprintf("Verifying %d uploaded bytes", written), resolvedURL, true)
 	if closeErr := f.Close(); closeErr != nil {
 		_ = os.Remove(tmpPath)
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: closeErr.Error()})
+		return failResult(closeErr.Error(), resolvedURL)
 	}
 
 	if expectedSize > 0 && written != expectedSize {
 		_ = os.Remove(tmpPath)
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: fmt.Sprintf("upload size mismatch: got %d, expected %d", written, expectedSize)})
+		return failResult(fmt.Sprintf("upload size mismatch: got %d, expected %d", written, expectedSize), resolvedURL)
 	}
 
 	_ = os.Remove(destPath)
 	if err := os.Rename(tmpPath, destPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
+		return failResult(err.Error(), resolvedURL)
 	}
 
+	sendProgress("complete", progressAttempt, written, fmt.Sprintf("Upload complete: %d bytes written", written), resolvedURL, true)
 	return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: true})
 }
 

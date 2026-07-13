@@ -429,6 +429,7 @@ type PendingCommandReply = {
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
   clientId: string;
+  onProgress?: (payload: any) => void;
 };
 const pendingCommandReplies = new Map<string, PendingCommandReply>();
 

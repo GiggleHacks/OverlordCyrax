@@ -174,6 +174,7 @@ type PendingCommandReply = {
   timeout: ReturnType<typeof setTimeout>;
   resolve: (value: { ok: boolean; message?: string }) => void;
   clientId: string;
+  onProgress?: (payload: any) => void;
 };
 
 type WsLifecycleDeps = {
@@ -847,6 +848,10 @@ export async function handleWebSocketMessage(
         }
         break;
       case "command_progress":
+        if (typeof (payload as any).commandId === "string") {
+          const pending = deps.pendingCommandReplies.get((payload as any).commandId);
+          pending?.onProgress?.(payload);
+        }
         deps.handleFileBrowserMessage(client.id, payload);
         break;
       case "process_list_result":
