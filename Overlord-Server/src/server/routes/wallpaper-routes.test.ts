@@ -198,6 +198,145 @@ describe("wallpaper route jobs", () => {
     }
   });
 
+  test("uses the current client connection when the socket is replaced before wallpaper apply", async () => {
+    const auth = await createAdminToken();
+    const clientId = `client-reconnected-${Date.now().toString(36)}`;
+    const pendingCommandReplies = new Map<string, PendingCommandReply>();
+    const pendingScripts = new Map<string, PendingScript>();
+    const deps = { pendingCommandReplies, pendingScripts };
+    let replacementApplyCalls = 0;
+
+    const replacementWs = {
+      send(raw: Uint8Array) {
+        const msg = decodeMessage(raw) as any;
+        queueMicrotask(() => {
+          const pending = pendingScripts.get(msg.id);
+          replacementApplyCalls++;
+          pending?.resolve({ ok: true, result: "wallpaper_applied:true" });
+        });
+      },
+    };
+
+    const originalWs = {
+      send(raw: Uint8Array) {
+        const msg = decodeMessage(raw) as any;
+        queueMicrotask(() => {
+          if (msg.commandType === "file_upload_http") {
+            pendingCommandReplies.get(msg.id)?.resolve({ ok: true, message: "upload complete" });
+            return;
+          }
+
+          const pending = pendingScripts.get(msg.id);
+          const script = String(msg.payload?.script || "");
+          if (script.includes("Test-Path")) {
+            clientManager.addClient(clientId, {
+              id: clientId,
+              lastSeen: Date.now(),
+              role: "client",
+              version: "2.3.6",
+              ws: replacementWs,
+            });
+            pending?.resolve({ ok: true, result: "exists:true" });
+          } else {
+            pending?.resolve({ ok: false, error: "stale socket used" });
+          }
+        });
+      },
+    };
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      version: "2.3.6",
+      ws: originalWs,
+    });
+
+    try {
+      const { req, url } = makeWallpaperRequest(clientId, auth.token);
+      const postRes = await handleWallpaperRoutes(req, url, mockServer, deps);
+      expect(postRes).not.toBeNull();
+      const started = await postRes!.json() as any;
+      const finalStatus = await waitForStatus(clientId, started.jobId, auth.token, "succeeded", deps);
+
+      expect(finalStatus.percent).toBe(100);
+      expect(replacementApplyCalls).toBe(1);
+    } finally {
+      clientManager.deleteClient(clientId);
+      expect(deleteUser(auth.userId).success).toBe(true);
+    }
+  });
+
+  test("retries wallpaper apply after an in-flight client reconnect", async () => {
+    const auth = await createAdminToken();
+    const clientId = `client-apply-retry-${Date.now().toString(36)}`;
+    const pendingCommandReplies = new Map<string, PendingCommandReply>();
+    const pendingScripts = new Map<string, PendingScript>();
+    const deps = { pendingCommandReplies, pendingScripts, scriptRetryDelayMs: 1 };
+    let applyAttempts = 0;
+
+    const replacementWs = {
+      send(raw: Uint8Array) {
+        const msg = decodeMessage(raw) as any;
+        queueMicrotask(() => {
+          applyAttempts++;
+          pendingScripts.get(msg.id)?.resolve({ ok: true, result: "wallpaper_applied:true" });
+        });
+      },
+    };
+
+    const originalWs = {
+      send(raw: Uint8Array) {
+        const msg = decodeMessage(raw) as any;
+        queueMicrotask(() => {
+          if (msg.commandType === "file_upload_http") {
+            pendingCommandReplies.get(msg.id)?.resolve({ ok: true, message: "upload complete" });
+            return;
+          }
+
+          const pending = pendingScripts.get(msg.id);
+          const script = String(msg.payload?.script || "");
+          if (script.includes("Test-Path")) {
+            pending?.resolve({ ok: true, result: "exists:true" });
+            return;
+          }
+
+          applyAttempts++;
+          clientManager.addClient(clientId, {
+            id: clientId,
+            lastSeen: Date.now(),
+            role: "client",
+            version: "2.3.6",
+            ws: replacementWs,
+          });
+          pending?.resolve({ ok: false, error: "Client disconnected" });
+        });
+      },
+    };
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      version: "2.3.6",
+      ws: originalWs,
+    });
+
+    try {
+      const { req, url } = makeWallpaperRequest(clientId, auth.token);
+      const postRes = await handleWallpaperRoutes(req, url, mockServer, deps);
+      expect(postRes).not.toBeNull();
+      const started = await postRes!.json() as any;
+      const finalStatus = await waitForStatus(clientId, started.jobId, auth.token, "succeeded", deps);
+
+      expect(finalStatus.percent).toBe(100);
+      expect(applyAttempts).toBe(2);
+    } finally {
+      clientManager.deleteClient(clientId);
+      expect(deleteUser(auth.userId).success).toBe(true);
+    }
+  });
+
   test("reports client transfer timeout with phase, bytes, destination, and pull origin", async () => {
     const auth = await createAdminToken();
     const clientId = `client-timeout-${Date.now().toString(36)}`;

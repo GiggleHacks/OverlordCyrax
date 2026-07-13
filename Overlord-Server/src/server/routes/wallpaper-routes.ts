@@ -41,6 +41,7 @@ type WallpaperRouteDeps = {
   pendingScripts: Map<string, PendingScript>;
   uploadTimeoutMs?: number;
   scriptTimeoutMs?: number;
+  scriptRetryDelayMs?: number;
 };
 
 type WallpaperPhase =
@@ -304,7 +305,6 @@ function updateJobFromProgress(job: WallpaperJob, payload: any) {
 
 function waitForCommandReply(
   deps: WallpaperRouteDeps,
-  target: any,
   clientId: string,
   command: any,
   timeout: { code: string; message: string },
@@ -323,7 +323,9 @@ function waitForCommandReply(
   });
 
   try {
-    target.ws.send(encodeMessage(command));
+    const currentTarget = clientManager.getClient(clientId);
+    if (!currentTarget?.ws) throw new Error("Client is offline");
+    currentTarget.ws.send(encodeMessage(command));
   } catch (error) {
     const pending = deps.pendingCommandReplies.get(cmdId);
     if (pending) {
@@ -346,7 +348,6 @@ function waitForCommandReply(
 
 function waitForScriptResult(
   deps: WallpaperRouteDeps,
-  target: any,
   clientId: string,
   script: string,
   scriptType: string,
@@ -363,7 +364,9 @@ function waitForScriptResult(
   });
 
   try {
-    target.ws.send(
+    const currentTarget = clientManager.getClient(clientId);
+    if (!currentTarget?.ws) throw new Error("Client is offline");
+    currentTarget.ws.send(
       encodeMessage({
         type: "command",
         commandType: "script_exec",
@@ -387,6 +390,40 @@ function waitForScriptResult(
     ok: false,
     error: (error as Error)?.message || "Script execution failed",
   }));
+}
+
+function isTransientClientConnectionError(error: unknown): boolean {
+  return /client (?:is offline|disconnected|reconnected \(superseded\))/i.test(String(error || ""));
+}
+
+async function waitForScriptResultWithReconnectRetry(
+  deps: WallpaperRouteDeps,
+  clientId: string,
+  script: string,
+  scriptType: string,
+  timeoutMs: number,
+): Promise<{ ok: boolean; result?: string; error?: string }> {
+  const maxAttempts = 3;
+  let lastResult: { ok: boolean; result?: string; error?: string } = {
+    ok: false,
+    error: "Script execution did not start",
+  };
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    lastResult = await waitForScriptResult(deps, clientId, script, scriptType, timeoutMs);
+    if (lastResult.ok || !isTransientClientConnectionError(lastResult.error)) {
+      return lastResult;
+    }
+    if (attempt < maxAttempts) {
+      logger.warn(`[wallpaper] client ${clientId} connection changed during script; retrying on current socket (${attempt + 1}/${maxAttempts})`);
+      await new Promise((resolve) => setTimeout(resolve, deps.scriptRetryDelayMs ?? 250));
+    }
+  }
+
+  return {
+    ...lastResult,
+    error: `${lastResult.error || "Client connection changed"} after ${maxAttempts} attempts`,
+  };
 }
 
 function verificationScript(remotePath: string): string {
@@ -424,7 +461,7 @@ exit 0
 `.trim();
 }
 
-async function runWallpaperJob(job: WallpaperJob, deps: WallpaperRouteDeps, target: any, user: any, ip: string) {
+async function runWallpaperJob(job: WallpaperJob, deps: WallpaperRouteDeps, user: any, ip: string) {
   try {
     setJobPhase(job, "client_transfer", 0);
     job.commandSentAt = now();
@@ -432,7 +469,6 @@ async function runWallpaperJob(job: WallpaperJob, deps: WallpaperRouteDeps, targ
 
     const uploadResult = await waitForCommandReply(
       deps,
-      target,
       job.clientId,
       {
         type: "command",
@@ -469,9 +505,8 @@ async function runWallpaperJob(job: WallpaperJob, deps: WallpaperRouteDeps, targ
     job.percent = 95;
     setJobPhase(job, "verify_remote_file", 96);
 
-    const verifyResult = await waitForScriptResult(
+    const verifyResult = await waitForScriptResultWithReconnectRetry(
       deps,
-      target,
       job.clientId,
       verificationScript(job.destinationPath),
       "powershell",
@@ -487,20 +522,27 @@ async function runWallpaperJob(job: WallpaperJob, deps: WallpaperRouteDeps, targ
     }
 
     setJobPhase(job, "apply_wallpaper", 98);
-    const applyResult = await waitForScriptResult(
+    const applyResult = await waitForScriptResultWithReconnectRetry(
       deps,
-      target,
       job.clientId,
       applyWallpaperScript(job.destinationPath),
       "powershell",
       deps.scriptTimeoutMs ?? SCRIPT_TIMEOUT_MS,
     );
     const applyOutput = String(applyResult.result || "");
-    if (!applyResult.ok || applyOutput.toLowerCase().includes("wallpaper_applied:false")) {
-      failJob(job, "apply_wallpaper_failed", "file exists on the client but Windows did not apply it as wallpaper", {
-        phase: "apply_wallpaper",
-        clientMessage: applyResult.error || applyOutput,
-      });
+    if (!applyResult.ok || !applyOutput.toLowerCase().includes("wallpaper_applied:true")) {
+      const connectionFailed = isTransientClientConnectionError(applyResult.error);
+      failJob(
+        job,
+        connectionFailed ? "apply_wallpaper_connection_failed" : "apply_wallpaper_failed",
+        connectionFailed
+          ? "file exists on the client, but repeated client reconnects interrupted the wallpaper apply command"
+          : "file exists on the client but Windows did not apply it as wallpaper",
+        {
+          phase: "apply_wallpaper",
+          clientMessage: applyResult.error || applyOutput,
+        },
+      );
       return;
     }
 
@@ -646,7 +688,7 @@ export async function handleWallpaperRoutes(
   job.timeout = scheduleJobCleanup(job);
   wallpaperJobs.set(job.id, job);
 
-  void runWallpaperJob(job, deps, target, user, ip);
+  void runWallpaperJob(job, deps, user, ip);
 
   return Response.json({
     ok: true,
