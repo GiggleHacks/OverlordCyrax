@@ -69,6 +69,24 @@ type CommandResult struct {
 	Message   string `msgpack:"message,omitempty"`
 }
 
+type DesktopEncoderProfile struct {
+	MaxHeight int      `msgpack:"maxHeight"`
+	Width     int      `msgpack:"width"`
+	Height    int      `msgpack:"height"`
+	FPS       int      `msgpack:"fps"`
+	Label     string   `msgpack:"label"`
+	Providers []string `msgpack:"providers"`
+}
+
+type DesktopEncoderCapabilities struct {
+	Type      string                  `msgpack:"type"`
+	CommandID string                  `msgpack:"commandId,omitempty"`
+	Probed    bool                    `msgpack:"probed"`
+	Display   int                     `msgpack:"display"`
+	Profiles  []DesktopEncoderProfile `msgpack:"profiles"`
+	Detail    string                  `msgpack:"detail,omitempty"`
+}
+
 type ClientLogEntry struct {
 	Seq    uint64 `msgpack:"seq" json:"seq"`
 	At     int64  `msgpack:"at" json:"at"`

@@ -139,18 +139,6 @@
                     <i class="fa-solid fa-rotate"></i>
                   </button>
                 </div>
-                <div class="flex items-center gap-2">
-                  <label class="text-sm text-slate-300 w-20" for="resolutionSelect">Resolution</label>
-                  <select
-                    id="resolutionSelect"
-                    class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
-                  >
-                    <option value="720">720p</option>
-                    <option value="1080" selected>1080p</option>
-                    <option value="1440">1440p</option>
-                    <option value="-1">Native</option>
-                  </select>
-                </div>
               </div>
 
               <div class="px-4 py-3 border-b border-slate-800">
@@ -177,21 +165,19 @@
                   </select>
                 </div>
                 <div class="flex items-center gap-2 mb-2">
-                  <label class="text-sm text-slate-300 w-20" for="targetFpsSelect">Max FPS</label>
+                  <label class="text-sm text-slate-300 w-20" for="streamProfileSelect">Profile</label>
                   <select
-                    id="targetFpsSelect"
+                    id="streamProfileSelect"
                     class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
-                    title="Target capture and encoder frame rate"
+                    title="Resolution and frame-rate combinations supported by this computer"
                   >
-                    <option value="30">30 fps</option>
-                    <option value="60">60 fps</option>
-                    <option value="90">90 fps</option>
-                    <option value="120" selected>120 fps</option>
-                    <option value="144">144 fps</option>
-                    <option value="165">165 fps</option>
-                    <option value="240">240 fps</option>
+                    <option value="720:30">30 FPS - 720p</option>
+                    <option value="720:60">60 FPS - 720p</option>
+                    <option value="1080:30">30 FPS - 1080p</option>
+                    <option value="1080:60" selected>60 FPS - 1080p</option>
                   </select>
                 </div>
+                <div id="streamProfileDetail" class="mb-2 text-xs text-slate-500">Checking hardware encoder profiles…</div>
                 <div class="flex items-center justify-between gap-2">
                   <label class="flex items-center gap-2 text-sm text-slate-200" title="Prefer H.264 when available; disable to force JPEG">
                     <input type="checkbox" id="codecH264" checked /> H.264

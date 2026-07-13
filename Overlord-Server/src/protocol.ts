@@ -7,6 +7,7 @@ export type MessageKind =
   | "pong"
   | "command"
   | "command_result"
+  | "desktop_encoder_capabilities"
   | "client_logs_result"
   | "screenshot_result"
   | "frame"

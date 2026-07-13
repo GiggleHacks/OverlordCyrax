@@ -368,6 +368,11 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
 
   logger.debug(`[rd] inbound viewer msg type=${payload.type} client=${clientId}`);
   switch (payload.type) {
+    case "desktop_encoder_capabilities":
+      sendDesktopCommand(target, "desktop_encoder_capabilities", {
+        display: Number((payload as any).display) || 0,
+      });
+      break;
     case "desktop_start":
       logger.debug(`[rd-debug] desktop_start requested client=${clientId} session=${ws.data.sessionId || ""} state=${JSON.stringify(state)} viewers=${sessionManager.getRdSessionsForClient(clientId).length} webrtc=${(payload as any).webrtc === true}`);
       if (!state.isStreaming) {
@@ -551,6 +556,18 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
         state.maxHeight = newMaxHeight;
         rdStreamingState.set(clientId, state);
         logger.debug(`[rd] set max resolution height=${newMaxHeight}`);
+      }
+      break;
+    }
+    case "desktop_set_profile": {
+      const newMaxHeight = Number((payload as any).maxHeight) || 0;
+      const newMaxFps = clampDesktopFps((payload as any).fps);
+      if (state.maxHeight !== newMaxHeight || state.maxFps !== newMaxFps) {
+        sendDesktopCommand(target, "desktop_set_profile", { maxHeight: newMaxHeight, fps: newMaxFps });
+        state.maxHeight = newMaxHeight;
+        state.maxFps = newMaxFps;
+        rdStreamingState.set(clientId, state);
+        logger.debug(`[rd] set stream profile max_height=${newMaxHeight} fps=${newMaxFps}`);
       }
       break;
     }
@@ -1422,6 +1439,12 @@ export function sendHVNCCommand(target: ClientInfo | undefined, commandType: str
   } catch (err) {
     logger.error("[hvnc] send command failed", err);
     return false;
+  }
+}
+
+export function handleDesktopEncoderCapabilities(clientId: string, payload: any) {
+  for (const session of sessionManager.getRdSessionsForClient(clientId)) {
+    safeSendViewer(session.viewer, payload);
   }
 }
 

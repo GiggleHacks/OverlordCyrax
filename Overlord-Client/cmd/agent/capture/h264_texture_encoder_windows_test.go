@@ -39,13 +39,16 @@ func TestD3D11TextureBackendSelectionAndFailover(t *testing.T) {
 	d3d11H264TextureRegistry.Lock()
 	savedBackends := d3d11H264TextureRegistry.backends
 	savedActive := d3d11H264TextureRegistry.active
+	savedFailures := d3d11H264TextureRegistry.failures
 	d3d11H264TextureRegistry.backends = []h264D3D11TextureBackend{first, second}
 	d3d11H264TextureRegistry.active = nil
+	d3d11H264TextureRegistry.failures = make(map[d3d11H264FailureKey]d3d11H264Failure)
 	d3d11H264TextureRegistry.Unlock()
 	t.Cleanup(func() {
 		d3d11H264TextureRegistry.Lock()
 		d3d11H264TextureRegistry.backends = savedBackends
 		d3d11H264TextureRegistry.active = savedActive
+		d3d11H264TextureRegistry.failures = savedFailures
 		d3d11H264TextureRegistry.Unlock()
 	})
 
@@ -77,5 +80,38 @@ func TestD3D11TextureBackendSelectionAndFailover(t *testing.T) {
 	resetH264D3D11TextureEncoder()
 	if first.resetCalls != 2 || second.resetCalls != 1 {
 		t.Fatalf("reset did not reach every backend: first=%d second=%d", first.resetCalls, second.resetCalls)
+	}
+}
+
+func TestD3D11TextureBackendFailuresUseCooldown(t *testing.T) {
+	first := &fakeD3D11TextureBackend{name: "first", errors: []error{errors.New("unsupported")}}
+	second := &fakeD3D11TextureBackend{name: "second", errors: []error{errors.New("also unsupported")}}
+
+	d3d11H264TextureRegistry.Lock()
+	savedBackends := d3d11H264TextureRegistry.backends
+	savedActive := d3d11H264TextureRegistry.active
+	savedFailures := d3d11H264TextureRegistry.failures
+	d3d11H264TextureRegistry.backends = []h264D3D11TextureBackend{first, second}
+	d3d11H264TextureRegistry.active = nil
+	d3d11H264TextureRegistry.failures = make(map[d3d11H264FailureKey]d3d11H264Failure)
+	d3d11H264TextureRegistry.Unlock()
+	t.Cleanup(func() {
+		d3d11H264TextureRegistry.Lock()
+		d3d11H264TextureRegistry.backends = savedBackends
+		d3d11H264TextureRegistry.active = savedActive
+		d3d11H264TextureRegistry.failures = savedFailures
+		d3d11H264TextureRegistry.Unlock()
+	})
+
+	device, texture := 1, 2
+	req := h264D3D11TextureRequest{Device: unsafe.Pointer(&device), Texture: unsafe.Pointer(&texture), EncodeWidth: 2560, EncodeHeight: 1440, FPS: 240}
+	if _, _, err := encodeH264D3D11Texture(req); err == nil {
+		t.Fatal("expected initial profile failure")
+	}
+	if _, _, err := encodeH264D3D11Texture(req); err == nil {
+		t.Fatal("expected cached profile failure")
+	}
+	if first.encodeCalls != 1 || second.encodeCalls != 1 {
+		t.Fatalf("failed profile was retried during cooldown: first=%d second=%d", first.encodeCalls, second.encodeCalls)
 	}
 }

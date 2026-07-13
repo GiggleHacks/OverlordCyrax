@@ -846,6 +846,51 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		capture.SetMaxResolution(maxH)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
+	case "desktop_set_profile":
+		payload, _ := envelope["payload"].(map[string]interface{})
+		maxH, fps := 1080, 60
+		if payload != nil {
+			if v, ok := payloadInt(payload, "maxHeight"); ok {
+				maxH = v
+			}
+			if v, ok := payloadInt(payload, "fps"); ok {
+				fps = v
+			}
+		}
+		SetDesktopTargetFPS(30)
+		capture.SetMaxResolution(maxH)
+		fps = SetDesktopTargetFPS(fps)
+		log.Printf("desktop: set stream profile max_height=%d fps=%d", maxH, fps)
+		sendCommandResultSafe(env, cmdID, true, "")
+		return nil
+	case "desktop_encoder_capabilities":
+		payload, _ := envelope["payload"].(map[string]interface{})
+		display := env.SelectedDisplay
+		if payload != nil {
+			if v, ok := payloadInt(payload, "display"); ok {
+				display = v
+			}
+		}
+		if display < 0 || display >= capture.MonitorCount() {
+			display = 0
+		}
+		goSafe("desktop encoder capability probe", env.Cancel, func() {
+			caps := capture.ProbeDesktopEncoderCapabilities(display)
+			profiles := make([]wire.DesktopEncoderProfile, 0, len(caps.Profiles))
+			for _, profile := range caps.Profiles {
+				profiles = append(profiles, wire.DesktopEncoderProfile{
+					MaxHeight: profile.MaxHeight, Width: profile.Width, Height: profile.Height,
+					FPS: profile.FPS, Label: profile.Label, Providers: profile.Providers,
+				})
+			}
+			if err := wire.WriteMsg(ctx, env.Conn, wire.DesktopEncoderCapabilities{
+				Type: "desktop_encoder_capabilities", CommandID: cmdID, Probed: caps.Probed,
+				Display: caps.Display, Profiles: profiles, Detail: caps.Detail,
+			}); err != nil {
+				log.Printf("desktop: encoder capability result send failed: %v", err)
+			}
+		})
+		return nil
 	case "desktop_set_fps":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		fps := 120

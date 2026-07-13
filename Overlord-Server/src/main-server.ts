@@ -90,6 +90,7 @@ import { prepareTlsOptions, logServerStartup } from "./server/tls-bootstrap";
 import { createWebSocketRuntime } from "./server/websocket-runtime";
 import {
   handleConsoleOutput,
+  handleDesktopEncoderCapabilities,
   handleConsoleViewerMessage,
   handleConsoleViewerOpen,
   handleHVNCViewerMessage,
@@ -653,6 +654,7 @@ async function startServer() {
     storeNotificationScreenshot: storeNotificationScreenshotForPending,
     handleNotificationScreenshotResult: notificationPluginHandlers.handleNotificationScreenshotResult,
     handleConsoleOutput: (clientId: string, payload: any) => handleConsoleOutput(clientId, payload),
+    handleDesktopEncoderCapabilities: (clientId: string, payload: any) => handleDesktopEncoderCapabilities(clientId, payload),
     handleFileBrowserMessage: (clientId: string, payload: any) =>
       forwardFileBrowserMessage(clientId, payload, {
         pendingHttpDownloads,

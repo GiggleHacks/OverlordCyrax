@@ -1462,6 +1462,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -1745,6 +1746,35 @@ func (e *nativeD3D11TextureH264Encoder) EncodeTexture(texture unsafe.Pointer, fo
 	}
 	defer C.free(unsafe.Pointer(raw.data))
 	return C.GoBytes(unsafe.Pointer(raw.data), C.int(raw.size)), nil
+}
+
+func probeNativeD3D11TextureProfile(device, texture unsafe.Pointer, inputWidth, inputHeight, encodeWidth, encodeHeight, fps int, dxgiFormat uint32) (time.Duration, error) {
+	enc, err := newNativeD3D11TextureH264Encoder(device, inputWidth, inputHeight, encodeWidth, encodeHeight, fps, dxgiFormat)
+	if err != nil {
+		return 0, err
+	}
+	defer enc.Close()
+	producedOutput := false
+	for frame := 0; frame < 2; frame++ {
+		out, err := enc.EncodeTexture(texture, frame == 0)
+		if err != nil {
+			return 0, err
+		}
+		producedOutput = producedOutput || len(out) > 0
+	}
+	started := time.Now()
+	for frame := 0; frame < 6; frame++ {
+		out, err := enc.EncodeTexture(texture, false)
+		if err != nil {
+			return 0, err
+		}
+		producedOutput = producedOutput || len(out) > 0
+	}
+	average := time.Since(started) / 6
+	if !producedOutput {
+		return average, fmt.Errorf("NVENC produced no output during capability probe")
+	}
+	return average, nil
 }
 
 func (e *nativeD3D11TextureH264Encoder) maybeLogEncodeDetail(raw C.nvenc_d3d11_encode_result, frame uint64, forceIDR bool) {
