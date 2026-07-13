@@ -155,9 +155,9 @@ if [ -d "$MINHOOK_DIR" ] && { [ -f "$MINHOOK_DIR/hook.c" ] || [ -f "$MINHOOK_DIR
   if [ -f "$MINHOOK_DIR/hook.c" ] && [ ! -f "$SRC_DIR/include/MinHook.h" ]; then
     mkdir -p "$SRC_DIR/include"
     if [ -f "$MINHOOK_DIR/MinHook.h" ]; then
-      cp -f "$MINHOOK_DIR/MinHook.h" "$SRC_DIR/include/MinHook.h"
+      cp -f "$MINHOOK_DIR/MinHook.h" "$SRC_DIR/include/MinHook.h" || true
     elif [ -f "$MINHOOK_DIR/include/MinHook.h" ]; then
-      cp -f "$MINHOOK_DIR/include/MinHook.h" "$SRC_DIR/include/MinHook.h"
+      cp -f "$MINHOOK_DIR/include/MinHook.h" "$SRC_DIR/include/MinHook.h" || true
     fi
   fi
 
