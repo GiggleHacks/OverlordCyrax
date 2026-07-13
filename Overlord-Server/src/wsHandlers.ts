@@ -16,7 +16,7 @@ import {
   requestThumbnailRegen,
 } from "./thumbnails";
 import { metrics } from "./metrics";
-import { flushQueuedClientDbUpdates, markClientDbSynced, queueClientDbUpdate, shouldSyncClientToDb } from "./client-db-sync";
+import { flushQueuedClientDbUpdates, queueClientDbUpdate, shouldSyncClientToDb } from "./client-db-sync";
 import { setClientDisconnectInfo } from "./db";
 
 export { clearClientSyncState } from "./client-db-sync";
@@ -225,14 +225,15 @@ export function handlePong(info: ClientInfo, payload: WireMessage) {
 
   if (rtt >= 0 && rtt < maxRttMs) {
     info.pingMs = rtt;
-    queueClientDbUpdate({
-      id: info.id,
-      pingMs: info.pingMs,
-      lastSeen: info.lastSeen,
-      online: 1,
-      isAdmin: info.isAdmin,
-    });
-    markClientDbSynced(info.id, nowTs);
+    if (shouldSyncClientToDb(info.id, nowTs)) {
+      queueClientDbUpdate({
+        id: info.id,
+        pingMs: info.pingMs,
+        lastSeen: info.lastSeen,
+        online: 1,
+        isAdmin: info.isAdmin,
+      });
+    }
 
     metrics.recordPing(rtt);
   } else {

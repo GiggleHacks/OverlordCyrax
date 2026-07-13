@@ -41,6 +41,14 @@ const desktopAudioSessions = new Map<string, DesktopAudioViewer>();
 const desktopAudioSessionsByClient = new Map<string, Set<string>>();
 const dashboardSessions = new Map<string, DashboardViewer>();
 const chatSessions = new Map<string, ChatViewer>();
+const VIEWER_BACKPRESSURE_BYTES = Math.max(
+  64 * 1024,
+  Number(process.env.OVERLORD_VIEWER_BACKPRESSURE_BYTES || 2 * 1024 * 1024),
+);
+
+function viewerHasBackpressure(ws: ServerWebSocket<SocketData>): boolean {
+  return (ws.getBufferedAmount?.() ?? 0) > VIEWER_BACKPRESSURE_BYTES;
+}
 
 function addSessionToClientIndex(
   index: Map<string, Set<string>>,
@@ -346,6 +354,7 @@ export function safeSendViewer(
   payload: any,
 ): boolean {
   try {
+    if (viewerHasBackpressure(ws)) return false;
     ws.send(JSON.stringify(payload));
     return true;
   } catch (err) {
@@ -359,6 +368,7 @@ export function safeSendViewerFrame(
   header?: any,
 ): number {
   try {
+    if (viewerHasBackpressure(ws)) return 0;
     const meta = JSON.stringify(header || {});
     const metaBytes = new TextEncoder().encode(meta);
     const metaLength = new Uint8Array(4);
@@ -532,6 +542,7 @@ export function notifyDashboardClientEvent(
   });
   for (const [id, session] of dashboardSessions) {
     try {
+      if (viewerHasBackpressure(session.viewer)) continue;
       session.viewer.send(msg);
     } catch {
       dashboardSessions.delete(id);
@@ -553,6 +564,7 @@ export function notifyDashboardViewers(): void {
     const msg = JSON.stringify({ type: "clients_changed" });
     for (const [id, session] of dashboardSessions) {
       try {
+        if (viewerHasBackpressure(session.viewer)) continue;
         session.viewer.send(msg);
       } catch {
         dashboardSessions.delete(id);
@@ -580,6 +592,7 @@ export function getChatSessionCount(): number {
 export function broadcastChatMessage(msg: string): void {
   for (const [id, session] of chatSessions) {
     try {
+      if (viewerHasBackpressure(session.viewer)) continue;
       session.viewer.send(msg);
     } catch {
       chatSessions.delete(id);

@@ -1,7 +1,16 @@
 import { upsertClientRows, type ClientDbRow } from "./db";
 import { metrics } from "./metrics";
 
-export const CLIENT_DB_SYNC_INTERVAL_MS = Number(process.env.OVERLORD_CLIENT_DB_SYNC_MS || 5000);
+function positiveNumberEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name] || fallback);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+export const CLIENT_DB_SYNC_INTERVAL_MS = positiveNumberEnv("OVERLORD_CLIENT_DB_SYNC_MS", 5000);
+export const CLIENT_PRESENCE_SYNC_INTERVAL_MS = Math.max(
+  CLIENT_DB_SYNC_INTERVAL_MS,
+  positiveNumberEnv("OVERLORD_CLIENT_PRESENCE_SYNC_MS", 60_000),
+);
 export const CLIENT_DB_SYNC_BATCH_SIZE = Math.max(
   1,
   Number(process.env.OVERLORD_CLIENT_DB_SYNC_BATCH_SIZE || 500),
@@ -65,7 +74,7 @@ setInterval(flushQueuedClientDbUpdates, CLIENT_DB_SYNC_INTERVAL_MS);
 
 export function shouldSyncClientToDb(clientId: string, now: number): boolean {
   const last = lastClientDbSync.get(clientId) || 0;
-  if (now - last < CLIENT_DB_SYNC_INTERVAL_MS) return false;
+  if (now - last < CLIENT_PRESENCE_SYNC_INTERVAL_MS) return false;
   lastClientDbSync.set(clientId, now);
   return true;
 }

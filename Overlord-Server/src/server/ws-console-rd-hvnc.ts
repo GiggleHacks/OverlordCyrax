@@ -127,7 +127,10 @@ function getCaptureDllBytes(): Uint8Array | null {
   return null;
 }
 
-const VIEWER_BACKPRESSURE_BYTES = 2 * 1024 * 1024; // 2 MB
+const VIEWER_BACKPRESSURE_BYTES = Math.max(
+  64 * 1024,
+  Number(process.env.OVERLORD_MEDIA_VIEWER_BACKPRESSURE_BYTES || 512 * 1024),
+);
 
 type FrameBroadcastResult = {
   sent: boolean;

@@ -16,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/rtcp"
@@ -46,23 +47,36 @@ func drainRTCP(sender *webrtc.RTPSender) {
 const h264SDPFmtpLine = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640034"
 
 var rtcpKeyframeLogOnce sync.Once
+var lastRTCPKeyframeRequest atomic.Int64
+
+const rtcpKeyframeMinInterval = 750 * time.Millisecond
 
 func handleRTCPKeyframeFeedback() {
 	if !honorRTCPKeyframes() {
 		rtcpKeyframeLogOnce.Do(func() {
-			log.Printf("webrtcpub: ignoring RTCP video keyframe requests by default; set OVERLORD_WEBRTC_RTCP_KEYFRAMES=true to honor them")
+			log.Printf("webrtcpub: RTCP video keyframe recovery disabled by OVERLORD_WEBRTC_RTCP_KEYFRAMES")
 		})
 		return
+	}
+	now := time.Now().UnixNano()
+	for {
+		last := lastRTCPKeyframeRequest.Load()
+		if last > 0 && time.Duration(now-last) < rtcpKeyframeMinInterval {
+			return
+		}
+		if lastRTCPKeyframeRequest.CompareAndSwap(last, now) {
+			break
+		}
 	}
 	RequestKeyframe()
 }
 
 func honorRTCPKeyframes() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("OVERLORD_WEBRTC_RTCP_KEYFRAMES"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
+	case "0", "false", "no", "off":
 		return false
+	default:
+		return true
 	}
 }
 

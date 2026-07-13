@@ -373,18 +373,41 @@ If you only ever want P2P, you can comment out the `mediamtx:` service in your c
 
 ### LAN / public access
 
-By default MediaMTX advertises `127.0.0.1` as an ICE candidate, which is enough for operators running their browser on the same machine as Docker.
+MediaMTX automatically discovers addresses assigned directly to its network interfaces. This covers ordinary Linux host-network and many LAN deployments, but it cannot reliably infer a public address created by NAT, port forwarding, a cloud load balancer, or a reverse proxy. It also cannot discover which public DNS name you intend operators to use.
 
-For viewers on a different machine:
+Before using **WebRTC Relayed** from another machine, make sure MediaMTX advertises an address that both agents and operators can reach:
 
-- **Linux** (host networking): nothing to configure — MediaMTX sees the host's eth0/wlan0 and gathers those candidates automatically.
-- **Windows / macOS** (bridge networking): set `OVERLORD_WEBRTC_ADDITIONAL_HOSTS` to a comma-separated list including the server's reachable LAN or public IP. Either export it in your shell, or add it to a `.env` file next to the compose file:
+- **Linux with host networking and no public NAT:** normally nothing is required; MediaMTX sees the host's interfaces automatically.
+- **Public server behind NAT, port forwarding, or a cloud public-IP mapping:** set the public IP or a DNS name that resolves to it.
+- **Windows / macOS Docker Desktop:** set the host's reachable LAN/public address because automatic interface discovery sees the container network, not necessarily the Docker host.
+- **Same-machine testing on Docker Desktop:** retain `127.0.0.1` in the list.
 
-  ```
-  OVERLORD_WEBRTC_ADDITIONAL_HOSTS=127.0.0.1,192.168.1.42
-  ```
+Set `OVERLORD_WEBRTC_ADDITIONAL_HOSTS` as a comma-separated list in the shell or in a `.env` file next to the compose file:
 
-  Then `docker compose -f docker-compose.windows.yml up -d mediamtx` to apply.
+```env
+# LAN example
+OVERLORD_WEBRTC_ADDITIONAL_HOSTS=192.168.1.42
+
+# Public DNS plus LAN access
+OVERLORD_WEBRTC_ADDITIONAL_HOSTS=stream.example.com,192.168.1.42
+
+# Docker Desktop: same host plus other LAN machines
+OVERLORD_WEBRTC_ADDITIONAL_HOSTS=127.0.0.1,192.168.1.42
+```
+
+Ensure inbound UDP `8189` is forwarded to the MediaMTX host/container; TCP `8189` is the slower fallback. Recreate the sidecar after changing the setting:
+
+```bash
+# Linux
+docker compose up -d --force-recreate mediamtx
+
+# Windows / macOS Docker Desktop
+docker compose -f docker-compose.windows.yml up -d --force-recreate mediamtx
+```
+
+To verify the selected route, open `chrome://webrtc-internals` during a relayed stream and confirm that the chosen remote candidate points to the expected server address and preferably uses UDP.
+
+Automatic public-IP discovery is possible with STUN, but it is not a complete replacement for this setting: it can require random UDP ports, does not discover your intended domain, and can fail behind restrictive or symmetric NAT. For predictable production deployments, explicitly setting the reachable IP/domain and forwarding fixed UDP port `8189` is recommended.
 
 ### Advanced MediaMTX customization
 
