@@ -99,7 +99,6 @@ services:
       # safe across common VPN, IPv6, and tunneled network paths.
       MTX_WRITEQUEUESIZE: ${OVERLORD_MEDIAMTX_WRITE_QUEUE_SIZE:-128}
       MTX_UDPMAXPAYLOADSIZE: ${OVERLORD_MEDIAMTX_UDP_MAX_PAYLOAD_SIZE:-1200}
-      MTX_UDPREADBUFFERSIZE: ${OVERLORD_MEDIAMTX_UDP_READ_BUFFER_SIZE:-4194304}
       # Leave blank to let MediaMTX advertise detected interfaces. Public-NAT
       # deployments must set this to their public IP/DNS; LAN deployments can
       # include both LAN and public addresses, for example:
