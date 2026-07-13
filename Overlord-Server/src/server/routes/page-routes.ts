@@ -98,6 +98,7 @@ const STATIC_PAGES: StaticPageDef[] = [
   { path: "/file-share",          file: "file-share.html",          access: "no-viewer",        checkPasswordChange: true },
   { path: "/purgatory",          file: "purgatory.html",           access: "admin-or-operator", checkPasswordChange: true },
   { path: "/webcams",            file: "webcams.html",             access: "no-viewer",        checkPasswordChange: true },
+  { path: "/soundboard",         file: "soundboard.html",          access: "no-viewer",        checkPasswordChange: true },
 ];
 
 /** Client-scoped pages accessed via query param ?clientId=... */

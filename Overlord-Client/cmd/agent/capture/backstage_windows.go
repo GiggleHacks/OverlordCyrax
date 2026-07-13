@@ -49,6 +49,8 @@ var (
 	procGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
 	procEnumDesktopWindows       = user32.NewProc("EnumDesktopWindows")
 	procTerminateProcess         = kernel32.NewProc("TerminateProcess")
+	procGetWindowLongPtrW        = user32.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtrW        = user32.NewProc("SetWindowLongPtrW")
 )
 
 const (
@@ -75,8 +77,13 @@ const (
 	GW_HWNDPREV          = 3
 	PW_RENDERFULLCONTENT = 0x00000002
 
+	STARTF_USESIZE         = 0x00000002
 	STARTF_USEPOSITION     = 0x00000004
 	CREATE_NEW_CONSOLE     = 0x00000010
+	SWP_NOSIZE             = 0x0001
+	SWP_NOZORDER           = 0x0004
+	SWP_NOACTIVATE         = 0x0010
+	SWP_SHOWWINDOW         = 0x0040
 	MOUSEEVENTF_MOVE       = 0x0001
 	MOUSEEVENTF_LEFTDOWN   = 0x0002
 	MOUSEEVENTF_LEFTUP     = 0x0004
@@ -139,6 +146,9 @@ const (
 	SW_SHOWMAXIMIZED       = 3
 	GA_ROOT                = 2
 	SMTO_ABORTIFHUNG       = 0x0002
+
+	GWL_EXSTYLE     = -20
+	WS_EX_TOOLWINDOW = 0x00000080
 )
 
 var (

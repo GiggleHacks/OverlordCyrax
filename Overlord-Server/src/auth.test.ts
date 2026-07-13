@@ -2,8 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { extractTokenFromCookie, extractTokenFromHeader, generateToken } from "./auth";
 import { getConfig, updateAppearanceConfig, type Config } from "./config";
 import { generateTotpCode } from "./mfa";
-import * as fs from "fs/promises";
-import path from "path";
+import { getBrandingImage } from "./db";
 import {
   createUser,
   deleteUser,
@@ -19,12 +18,15 @@ const mockServer = {
   requestIP: () => ({ address: "127.0.0.1" }),
 };
 let originalAppearance: Config["appearance"];
-const uploadPublicRoot = path.resolve(".test-data", "branding-upload-public");
+const uploadPublicRoot = ".";
 
 beforeAll(async () => {
   originalAppearance = JSON.parse(JSON.stringify(getConfig().appearance));
   await updateAppearanceConfig("", {
     productName: "Overlord 2.0",
+    tabName: "Overlord 2.0",
+    faviconUrl: "",
+    dashboardBackgroundUrl: "",
     navName: "Overlord 2.0",
     title: "Welcome back",
     subtitle: "Sign in to your control plane",
@@ -46,7 +48,6 @@ afterAll(async () => {
   if (originalAppearance) {
     await updateAppearanceConfig(originalAppearance.customCSS, originalAppearance.loginBranding);
   }
-  await fs.rm(uploadPublicRoot, { recursive: true, force: true });
 });
 
 describe("auth token extraction", () => {
@@ -66,13 +67,16 @@ describe("auth token extraction", () => {
 });
 
 describe("login branding", () => {
-  test("returns default public login branding", async () => {
+  test("returns configured public login branding", async () => {
     const url = new URL("https://localhost/api/login/branding");
     const res = await handleAuthRoutes(new Request(url), url, mockServer);
     expect(res?.status).toBe(200);
 
     const body = (await res!.json()) as any;
     expect(body.productName).toBe("Overlord 2.0");
+    expect(body.tabName).toBe("Overlord 2.0");
+    expect(body.faviconUrl).toBe("");
+    expect(body.dashboardBackgroundUrl).toBe("");
     expect(body.navName).toBe("Overlord 2.0");
     expect(body.iconClass).toBe("fa-solid fa-skull");
     expect(body.title).toBe("Welcome back");
@@ -122,7 +126,6 @@ describe("branding uploads", () => {
     expect(created.success).toBe(true);
 
     try {
-      await fs.mkdir(uploadPublicRoot, { recursive: true });
       const user = getUserById(created.userId!);
       expect(user).toBeTruthy();
       const token = await generateToken(user!);
@@ -156,8 +159,10 @@ describe("branding uploads", () => {
 
       expect(res?.status).toBe(200);
       const body = (await res!.json()) as any;
-      expect(body.url).toMatch(/^\/assets\/branding\/nav-logo-[a-z0-9]+-[0-9a-f-]+\.png$/);
-      expect(await Bun.file(path.join(uploadPublicRoot, body.url.replace("/assets/", "assets/"))).exists()).toBe(true);
+      expect(body.url).toBe("/api/branding/image/nav-logo");
+      const stored = getBrandingImage("nav-logo");
+      expect(stored?.contentType).toBe("image/png");
+      expect(Array.from(stored?.bytes || [])).toEqual(Array.from(pngBytes));
     } finally {
       deleteUser(created.userId!);
     }

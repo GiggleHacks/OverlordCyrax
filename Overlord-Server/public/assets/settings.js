@@ -119,6 +119,11 @@ const appearancePermissionNote = document.getElementById("appearance-permission-
 const appearanceSaveBtn = document.getElementById("appearance-save-btn");
 const appearanceCustomCssInput = document.getElementById("appearance-custom-css");
 const brandProductNameInput = document.getElementById("brand-product-name");
+const brandTabNameInput = document.getElementById("brand-tab-name");
+const brandFaviconUrlInput = document.getElementById("brand-favicon-url");
+const brandFaviconFileInput = document.getElementById("brand-favicon-file");
+const brandDashboardBackgroundUrlInput = document.getElementById("brand-dashboard-background-url");
+const brandDashboardBackgroundFileInput = document.getElementById("brand-dashboard-background-file");
 const brandNavNameInput = document.getElementById("brand-nav-name");
 const brandAccentColorInput = document.getElementById("brand-accent-color");
 const brandIconClassInput = document.getElementById("brand-icon-class");
@@ -173,6 +178,11 @@ function showMessage(text, type = "ok") {
 
 function formatDate(timestamp) {
   return formatSharedDate(timestamp, "-");
+}
+
+function showSettingsSuccess(text, showInline = showMessage) {
+  showInline(text);
+  window.showToast?.(text, "success");
 }
 
 function canManageClientBans(role) {
@@ -650,7 +660,7 @@ async function updatePassword(event) {
   }
 
   passwordForm.reset();
-  showMessage("Password updated successfully.");
+  showSettingsSuccess("Password updated successfully.");
 }
 
 function showMfaMessage(text, type = "ok") {
@@ -781,7 +791,7 @@ function savePrefs(event) {
       if (perm === "granted") {
         setDesktopNotificationsEnabled(true);
         if (prefDesktopNotificationsHint) prefDesktopNotificationsHint.classList.add("hidden");
-        showMessage("Preferences saved. Desktop notifications enabled.");
+        showSettingsSuccess("Preferences saved. Desktop notifications enabled.");
       } else {
         setDesktopNotificationsEnabled(false);
         if (prefDesktopNotificationsInput) prefDesktopNotificationsInput.checked = false;
@@ -792,7 +802,7 @@ function savePrefs(event) {
   } else {
     setDesktopNotificationsEnabled(false);
     if (prefDesktopNotificationsHint) prefDesktopNotificationsHint.classList.add("hidden");
-    showMessage("Preferences saved.");
+    showSettingsSuccess("Preferences saved.");
   }
 
   const navHiddenInput = document.getElementById("pref-nav-hidden");
@@ -837,7 +847,7 @@ async function saveSecurityPolicy(event) {
 
   securityConfig = data.security || payload;
   applySecurityForm();
-  showMessage("Security policy updated.");
+  showSettingsSuccess("Security policy updated.");
 }
 
 async function saveTlsSettings(event) {
@@ -872,7 +882,7 @@ async function saveTlsSettings(event) {
 
   tlsConfig = data.tls || payload;
   applyTlsForm();
-  showMessage("TLS settings updated. Restart server to apply.");
+  showSettingsSuccess("TLS settings updated. Restart server to apply.");
 }
 
 async function saveOidcSettings(event) {
@@ -948,7 +958,7 @@ async function saveOidcSettings(event) {
 
   oidcConfig = data.oidc || payload;
   applyOidcForm();
-  showMessage("OIDC settings saved. Environment variables still take priority after restart.");
+  showSettingsSuccess("OIDC settings saved. Environment variables still take priority after restart.");
 }
 
 async function runCertbotAutoSetup() {
@@ -1033,7 +1043,7 @@ async function saveMyTelegram() {
     }
 
     myTelegramChatIdInput.value = data.telegramChatId || "";
-    showMessage(chatId ? "Telegram chat ID saved." : "Telegram notifications disabled.");
+    showSettingsSuccess(chatId ? "Telegram chat ID saved." : "Telegram notifications disabled.");
   } catch {
     showMessage("Failed to save Telegram settings.", "error");
   }
@@ -1396,6 +1406,11 @@ function initSettingsSidebar() {
 
 const brandInputs = [
   brandProductNameInput,
+  brandTabNameInput,
+  brandFaviconUrlInput,
+  brandFaviconFileInput,
+  brandDashboardBackgroundUrlInput,
+  brandDashboardBackgroundFileInput,
   brandNavNameInput,
   brandAccentColorInput,
   brandIconClassInput,
@@ -1423,6 +1438,9 @@ function setAppearanceFormDisabled(disabled) {
 
 function applyBrandingForm(loginBranding = {}) {
   if (brandProductNameInput) brandProductNameInput.value = loginBranding.productName || "Overlord";
+  if (brandTabNameInput) brandTabNameInput.value = loginBranding.tabName || loginBranding.productName || "Overlord";
+  if (brandFaviconUrlInput) brandFaviconUrlInput.value = loginBranding.faviconUrl || "";
+  if (brandDashboardBackgroundUrlInput) brandDashboardBackgroundUrlInput.value = loginBranding.dashboardBackgroundUrl || "";
   if (brandNavNameInput) brandNavNameInput.value = loginBranding.navName || loginBranding.productName || "Overlord";
   if (brandAccentColorInput) brandAccentColorInput.value = /^#[0-9a-fA-F]{6}$/.test(loginBranding.accentColor || "") ? loginBranding.accentColor : "#7a5bff";
   if (brandIconClassInput) brandIconClassInput.value = loginBranding.iconClass || "fa-solid fa-crown";
@@ -1442,6 +1460,9 @@ function applyBrandingForm(loginBranding = {}) {
 function collectBrandingForm() {
   return {
     productName: String(brandProductNameInput?.value || "").trim(),
+    tabName: String(brandTabNameInput?.value || "").trim(),
+    faviconUrl: String(brandFaviconUrlInput?.value || "").trim(),
+    dashboardBackgroundUrl: String(brandDashboardBackgroundUrlInput?.value || "").trim(),
     navName: String(brandNavNameInput?.value || "").trim(),
     accentColor: String(brandAccentColorInput?.value || "").trim(),
     iconClass: String(brandIconClassInput?.value || "").trim(),
@@ -1508,6 +1529,18 @@ async function uploadBrandingImage(fileInput, targetInput, kind, label) {
 }
 
 function initBrandingUploads() {
+  if (brandDashboardBackgroundFileInput) {
+    brandDashboardBackgroundFileInput.addEventListener("change", () => {
+      setBrandingUploadName(brandDashboardBackgroundFileInput);
+      uploadBrandingImage(brandDashboardBackgroundFileInput, brandDashboardBackgroundUrlInput, "dashboard-background", "Dashboard background");
+    });
+  }
+  if (brandFaviconFileInput) {
+    brandFaviconFileInput.addEventListener("change", () => {
+      setBrandingUploadName(brandFaviconFileInput);
+      uploadBrandingImage(brandFaviconFileInput, brandFaviconUrlInput, "tab-icon", "Browser tab icon");
+    });
+  }
   if (brandNavLogoFileInput) {
     brandNavLogoFileInput.addEventListener("change", () => {
       setBrandingUploadName(brandNavLogoFileInput);
@@ -1580,7 +1613,7 @@ async function saveAppearanceSettings(event) {
   }
 
   applyBrandingForm(data.loginBranding || collectBrandingForm());
-  showMessage("Branding saved. Reload any open page to apply it everywhere.");
+  showSettingsSuccess("Branding saved. Reload any open page to apply it everywhere.");
 }
 
 const chatSettingsSection = document.getElementById("chat-settings-section");
@@ -1630,7 +1663,7 @@ async function saveInputArchivePreference(event) {
     showMessage(data.error || "Failed to save input archive preference.", "error");
     return;
   }
-  showMessage("Input archive preference saved.");
+  showSettingsSuccess("Input archive preference saved.");
 }
 
 async function saveInputArchiveAdminSettings(event) {
@@ -1673,7 +1706,7 @@ async function saveInputArchiveAdminSettings(event) {
     showMessage(data.error || "Failed to save input archive settings.", "error");
     return;
   }
-  showMessage("Input archive settings saved.");
+  showSettingsSuccess("Input archive settings saved.");
 }
 
 async function saveChatSettings(event) {
@@ -1701,7 +1734,7 @@ async function saveChatSettings(event) {
     return;
   }
 
-  showMessage("Chat settings saved.");
+  showSettingsSuccess("Chat settings saved.");
 }
 
 function showExportImportMessage(text, type = "ok") {
@@ -2108,7 +2141,7 @@ async function saveRegistrationSettings(e) {
       showRegMsg(data.error || "Failed to save", "error");
       return;
     }
-    showRegMsg("Registration settings saved.", "success");
+    showSettingsSuccess("Registration settings saved.", (text) => showRegMsg(text, "success"));
     updateRegSubsections(mode);
     if (mode === "key" && userHas("users:manage")) loadRegistrationKeys();
     if (mode === "approval" && userHas("users:manage")) loadPendingRegistrations();
@@ -2331,7 +2364,7 @@ async function saveBuildRateLimitSettings(e) {
       showBrlMsg(data.error || "Failed to save", "error");
       return;
     }
-    showBrlMsg("Build rate limit settings saved.", "success");
+    showSettingsSuccess("Build rate limit settings saved.", (text) => showBrlMsg(text, "success"));
   } catch {
     showBrlMsg("Network error.", "error");
   }
@@ -2390,7 +2423,7 @@ async function saveThumbnailSettings(e) {
       showThumbnailsMsg(data.error || "Failed to save", "error");
       return;
     }
-    showThumbnailsMsg("Thumbnail settings saved.", "success");
+    showSettingsSuccess("Thumbnail settings saved.", (text) => showThumbnailsMsg(text, "success"));
   } catch {
     showThumbnailsMsg("Network error.", "error");
   }

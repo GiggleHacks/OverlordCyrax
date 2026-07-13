@@ -5,10 +5,13 @@ import * as sessionManager from "../sessions/sessionManager";
 import type { SocketData } from "../sessions/types";
 import type { ClientInfo } from "../types";
 import {
+  handleHVNCViewerMessage,
+  handleHVNCViewerOpen,
   handleRemoteDesktopViewerMessage,
   handleRemoteDesktopViewerOpen,
   handleWebcamViewerMessage,
   handleWebcamViewerOpen,
+  hvncStreamingState,
   rdStreamingState,
   webcamStreamingState,
 } from "./ws-console-rd-hvnc";
@@ -76,8 +79,12 @@ afterEach(() => {
     for (const session of sessionManager.getWebcamSessionsForClient(clientId)) {
       sessionManager.deleteWebcamSession(session.id);
     }
+    for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+      sessionManager.deleteHvncSession(session.id);
+    }
     rdStreamingState.delete(clientId);
     webcamStreamingState.delete(clientId);
+    hvncStreamingState.delete(clientId);
     clientManager.deleteClient(clientId);
   }
   clientIdsToCleanup.clear();
@@ -182,5 +189,31 @@ describe("remote desktop viewer control", () => {
     expect(commands.filter((msg) => msg.commandType === "desktop_start")).toHaveLength(1);
     expect(commands.filter((msg) => msg.commandType === "desktop_request_keyframe")).toHaveLength(0);
     expect(rdStreamingState.get(clientId)?.isStreaming).toBe(true);
+  });
+});
+
+describe("hvnc viewer control", () => {
+  test("forwards hvnc_stop even when server stream state is stale", () => {
+    const clientId = `hvnc-stale-stop-${Date.now().toString(36)}`;
+    const { agentWs } = createClient(clientId);
+    const viewer = createMockWs({ role: "hvnc_viewer", clientId });
+
+    handleHVNCViewerOpen(viewer as any);
+    hvncStreamingState.set(clientId, {
+      isStreaming: false,
+      virtualMode: true,
+      display: 0,
+      quality: 90,
+      codec: "",
+      maxFps: 120,
+      lastFps: 0,
+    });
+
+    handleHVNCViewerMessage(viewer as any, JSON.stringify({ type: "hvnc_stop" }));
+
+    const commands = agentCommands(agentWs);
+    expect(commands.filter((msg) => msg.commandType === "hvnc_stop")).toHaveLength(1);
+    expect(commands.filter((msg) => msg.commandType === "webrtc_stop")).toHaveLength(1);
+    expect(hvncStreamingState.get(clientId)?.isStreaming).toBe(false);
   });
 });

@@ -16,7 +16,7 @@ import {
   requestThumbnailRegen,
 } from "./thumbnails";
 import { metrics } from "./metrics";
-import { flushQueuedClientDbUpdates, markClientDbSynced, queueClientDbUpdate, shouldSyncClientToDb } from "./client-db-sync";
+import { flushQueuedClientDbUpdates, queueClientDbUpdate, shouldSyncClientToDb } from "./client-db-sync";
 import { setClientDisconnectInfo } from "./db";
 
 export { clearClientSyncState } from "./client-db-sync";
@@ -171,19 +171,28 @@ export function handlePing(info: ClientInfo, payload: Ping, ws: any) {
       isAdmin: info.isAdmin,
     });
   }
-  ws.send(encodeMessage({ type: "pong", ts: payload.ts || Date.now() }));
+  const ts = typeof payload.ts === "number" && Number.isFinite(payload.ts)
+    ? payload.ts
+    : Date.now();
+  ws.send(encodeMessage({ type: "pong", ts }));
 }
 
-export function sendPingRequest(info: ClientInfo, ws: any, reason: string) {
+export function sendPingRequest(
+  info: ClientInfo,
+  ws: any,
+  reason: string,
+  minIntervalMs = 1_000,
+): boolean {
   const now = Date.now();
-  if (info.lastPingSent && now - info.lastPingSent < 1_000) {
-    return;
+  if (minIntervalMs > 0 && info.lastPingSent && now - info.lastPingSent < minIntervalMs) {
+    return false;
   }
   const nonce = now + Math.floor(Math.random() * 1000);
   info.lastPingSent = now;
   info.lastPingNonce = nonce;
   //console.log(`[ping] send ping to client=${info.id} reason=${reason} nonce=${nonce}`);
   ws.send(encodeMessage({ type: "ping", ts: nonce }));
+  return true;
 }
 
 export function handlePong(info: ClientInfo, payload: WireMessage) {
@@ -216,14 +225,15 @@ export function handlePong(info: ClientInfo, payload: WireMessage) {
 
   if (rtt >= 0 && rtt < maxRttMs) {
     info.pingMs = rtt;
-    queueClientDbUpdate({
-      id: info.id,
-      pingMs: info.pingMs,
-      lastSeen: info.lastSeen,
-      online: 1,
-      isAdmin: info.isAdmin,
-    });
-    markClientDbSynced(info.id, nowTs);
+    if (shouldSyncClientToDb(info.id, nowTs)) {
+      queueClientDbUpdate({
+        id: info.id,
+        pingMs: info.pingMs,
+        lastSeen: info.lastSeen,
+        online: 1,
+        isAdmin: info.isAdmin,
+      });
+    }
 
     metrics.recordPing(rtt);
   } else {
@@ -236,6 +246,31 @@ export function handlePong(info: ClientInfo, payload: WireMessage) {
       });
     }
   }
+}
+
+export function handleScreenshotThumbnailResult(info: ClientInfo, payload: any): boolean {
+  const requested = isThumbnailRequested(info.id);
+  if (!requested || payload?.error) return false;
+
+  let bytes: Uint8Array | null = null;
+  if (payload?.data instanceof Uint8Array) {
+    bytes = payload.data;
+  } else if (payload?.data instanceof ArrayBuffer) {
+    bytes = new Uint8Array(payload.data);
+  } else if (ArrayBuffer.isView(payload?.data)) {
+    bytes = new Uint8Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength);
+  }
+  if (!bytes?.byteLength) return false;
+
+  const rawFormat = String(payload?.format || "jpeg").toLowerCase();
+  const format = rawFormat === "jpg" ? "jpeg" : rawFormat;
+  if (format !== "jpeg" && format !== "webp") return false;
+
+  setLatestFrame(info.id, bytes, format);
+  void requestThumbnailRegen(info.id).then((ok) => {
+    if (ok) notifyThumbnailGenerated(info.id);
+  });
+  return true;
 }
 
 export function handleFrame(info: ClientInfo, payload: any): boolean {

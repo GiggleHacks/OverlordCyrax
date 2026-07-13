@@ -221,8 +221,24 @@ try {
       DELETE FROM client_search_fts WHERE rowid = old.rowid;
     END;
   `);
+  db.run(`DROP TRIGGER IF EXISTS clients_search_au`);
   db.run(`
-    CREATE TRIGGER IF NOT EXISTS clients_search_au AFTER UPDATE ON clients BEGIN
+    CREATE TRIGGER clients_search_au AFTER UPDATE ON clients
+    WHEN old.host IS NOT new.host
+      OR old.user IS NOT new.user
+      OR old.nickname IS NOT new.nickname
+      OR old.custom_tag IS NOT new.custom_tag
+      OR old.custom_tag_note IS NOT new.custom_tag_note
+      OR old.os IS NOT new.os
+      OR old.ip IS NOT new.ip
+      OR old.hwid IS NOT new.hwid
+      OR old.country IS NOT new.country
+      OR old.version IS NOT new.version
+      OR old.build_tag IS NOT new.build_tag
+      OR old.cpu IS NOT new.cpu
+      OR old.gpu IS NOT new.gpu
+      OR old.ram IS NOT new.ram
+    BEGIN
       DELETE FROM client_search_fts WHERE rowid = old.rowid;
       INSERT INTO client_search_fts(
         rowid, id, host, user, nickname, custom_tag, custom_tag_note,
@@ -376,6 +392,15 @@ db.run(`
     scope TEXT PRIMARY KEY,
     settings_json TEXT NOT NULL,
     updated_by_user_id INTEGER,
+    updated_at INTEGER NOT NULL
+  );
+`);
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS branding_images (
+    kind TEXT PRIMARY KEY,
+    content_type TEXT NOT NULL,
+    bytes BLOB NOT NULL,
     updated_at INTEGER NOT NULL
   );
 `);

@@ -22,6 +22,7 @@ import { runDonut } from "./donut-manager";
 import { buildLinuxShellcode } from "./linux-shellcode-manager";
 import { runSgn } from "./sgn-manager";
 import { resolveContainedPath } from "./upload-security";
+import { createIsolatedBuildEnv } from "./build-environment";
 
 function isClientModuleDir(dir: string): boolean {
   return (
@@ -84,6 +85,9 @@ type BuildProcessConfig = {
   disableMutex?: boolean;
   stripDebug?: boolean;
   disableCgo?: boolean;
+  enableNvenc?: boolean;
+  enableAmf?: boolean;
+  enableQsv?: boolean;
   obfuscate?: boolean;
   enablePersistence?: boolean;
   persistenceMethods?: string[];
@@ -398,22 +402,114 @@ function nvcodecHeaderPath(clientDir: string): string {
   return path.join(clientDir, "third_party", "nvcodec", "nvEncodeAPI.h");
 }
 
-function ensureNVCodecHeaderForWindowsCgo(
+function amfHeaderPath(clientDir: string): string {
+  return path.join(clientDir, "third_party", "amf", "include", "core", "Factory.h");
+}
+
+function oneVPLHeaderPath(clientDir: string): string {
+  return path.join(clientDir, "third_party", "onevpl", "include", "vpl", "mfxvideo.h");
+}
+
+const AMF_REPOSITORY = "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git";
+const AMF_REF = "v1.5.2";
+let amfHeaderProvision: Promise<void> | null = null;
+const ONEVPL_REPOSITORY = "https://github.com/oneapi-src/oneVPL.git";
+const ONEVPL_REF = "v2.15.0";
+let oneVPLHeaderProvision: Promise<void> | null = null;
+
+function copyDirectory(source: string, destination: string): void {
+  fs.mkdirSync(destination, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name);
+    const to = path.join(destination, entry.name);
+    if (entry.isDirectory()) copyDirectory(from, to);
+    else if (entry.isFile()) fs.copyFileSync(from, to);
+  }
+}
+
+async function ensureAMFHeaders(
   clientDir: string,
   sendToStream: (data: any) => void,
-): void {
-  const headerPath = nvcodecHeaderPath(clientDir);
-  if (fs.existsSync(headerPath)) {
-    sendToStream({
-      type: "output",
-      text: `Native NVENC header: ${headerPath}\n`,
-      level: "info",
+): Promise<void> {
+  const headerPath = amfHeaderPath(clientDir);
+  if (fs.existsSync(headerPath)) return;
+
+  if (!amfHeaderProvision) {
+    amfHeaderProvision = (async () => {
+      const destination = path.join(clientDir, "third_party", "amf");
+      const temporary = path.join(clientDir, "third_party", `.amf-${process.pid}-${Date.now()}`);
+      sendToStream({
+        type: "output",
+        text: `AMD AMF headers are not cached; fetching ${AMF_REF}...\n`,
+        level: "info",
+      });
+      try {
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        const clone = await $`git clone --depth 1 --filter=blob:none --sparse --branch ${AMF_REF} ${AMF_REPOSITORY} ${temporary}`.quiet().nothrow();
+        if (clone.exitCode !== 0) throw new Error(clone.stderr.toString().trim() || "git clone failed");
+        const sparse = await $`git -C ${temporary} sparse-checkout set --no-cone amf/public/include/ LICENSE.txt`.quiet().nothrow();
+        if (sparse.exitCode !== 0) throw new Error(sparse.stderr.toString().trim() || "git sparse-checkout failed");
+        fs.rmSync(destination, { recursive: true, force: true });
+        fs.mkdirSync(destination, { recursive: true });
+        copyDirectory(path.join(temporary, "amf", "public", "include"), path.join(destination, "include"));
+        fs.copyFileSync(path.join(temporary, "LICENSE.txt"), path.join(destination, "LICENSE.txt"));
+      } finally {
+        fs.rmSync(temporary, { recursive: true, force: true });
+      }
+      if (!fs.existsSync(headerPath)) throw new Error(`AMF header was not created at ${headerPath}`);
+    })().catch((error) => {
+      amfHeaderProvision = null;
+      throw error;
     });
-    return;
   }
-  throw new Error(
-    "Native NVENC streaming requires Overlord-Client/third_party/nvcodec/nvEncodeAPI.h for Windows CGO builds. Restore the vendored header or run scripts/vendor-nvcodec-headers from the repo root.",
-  );
+  await amfHeaderProvision;
+}
+
+async function ensureNVCodecHeaderForWindowsCgo(
+  clientDir: string,
+  sendToStream: (data: any) => void,
+  enableNvenc: boolean,
+  enableAmf: boolean,
+  enableQsv: boolean,
+): Promise<void> {
+  if (enableNvenc) {
+    const headerPath = nvcodecHeaderPath(clientDir);
+    if (!fs.existsSync(headerPath)) {
+      throw new Error(
+        "Native NVENC streaming requires Overlord-Client/third_party/nvcodec/nvEncodeAPI.h for Windows CGO builds. Restore the vendored header or run scripts/vendor-nvcodec-headers from the repo root.",
+      );
+    }
+    sendToStream({ type: "output", text: `Native NVENC header: ${headerPath}\n`, level: "info" });
+  }
+
+  if (enableAmf) {
+    await ensureAMFHeaders(clientDir, sendToStream);
+    const amfPath = amfHeaderPath(clientDir);
+    sendToStream({ type: "output", text: `Native AMD AMF headers: ${amfPath}\n`, level: "info" });
+  }
+
+  if (enableQsv) {
+    const headerPath = oneVPLHeaderPath(clientDir);
+    if (!fs.existsSync(headerPath) && !oneVPLHeaderProvision) {
+      oneVPLHeaderProvision = (async () => {
+        const destination = path.join(clientDir, "third_party", "onevpl");
+        const temporary = path.join(clientDir, "third_party", `.onevpl-${process.pid}-${Date.now()}`);
+        sendToStream({ type: "output", text: `Intel oneVPL headers are not cached; fetching ${ONEVPL_REF}...\n`, level: "info" });
+        try {
+          const clone = await $`git clone --depth 1 --filter=blob:none --sparse --branch ${ONEVPL_REF} ${ONEVPL_REPOSITORY} ${temporary}`.quiet().nothrow();
+          if (clone.exitCode !== 0) throw new Error(clone.stderr.toString().trim() || "git clone failed");
+          const sparse = await $`git -C ${temporary} sparse-checkout set --no-cone api/vpl/ LICENSE`.quiet().nothrow();
+          if (sparse.exitCode !== 0) throw new Error(sparse.stderr.toString().trim() || "git sparse-checkout failed");
+          fs.rmSync(destination, { recursive: true, force: true });
+          copyDirectory(path.join(temporary, "api", "vpl"), path.join(destination, "include", "vpl"));
+          fs.copyFileSync(path.join(temporary, "LICENSE"), path.join(destination, "LICENSE"));
+        } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+        if (!fs.existsSync(headerPath)) throw new Error(`oneVPL header was not created at ${headerPath}`);
+      })().catch((error) => { oneVPLHeaderProvision = null; throw error; });
+    }
+    if (oneVPLHeaderProvision) await oneVPLHeaderProvision;
+    sendToStream({ type: "output", text: `Intel oneVPL headers: ${headerPath}\n`, level: "info" });
+  }
 }
 
 function writeSgnTextArtifact(
@@ -654,7 +750,8 @@ export async function startBuildProcess(
     if (hasAssemblyData && hasWindowsTargets) {
       sendToStream({ type: "status", text: "Generating Windows resource data..." });
 
-      const goEnvResult = await $`go env GOPATH`.quiet();
+      const isolatedBuildEnv = createIsolatedBuildEnv();
+      const goEnvResult = await $`go env GOPATH`.env(isolatedBuildEnv).quiet();
       const goPath = goEnvResult.stdout.toString().trim();
       const goBinDir = process.env.GOBIN || (goPath ? path.join(goPath, "bin") : "");
       const winresExe = process.platform === "win32" ? "go-winres.exe" : "go-winres";
@@ -671,7 +768,7 @@ export async function startBuildProcess(
         } catch {
           try {
             sendToStream({ type: "output", text: "Installing go-winres...\n", level: "info" });
-            await $`go install github.com/tc-hib/go-winres@latest`.env({ ...process.env, GOMODCACHE: goModCacheDir }).quiet();
+            await $`go install github.com/tc-hib/go-winres@latest`.env({ ...isolatedBuildEnv, GOMODCACHE: goModCacheDir }).quiet();
             if (goBinDir && fs.existsSync(path.join(goBinDir, winresExe))) {
               winresBin = path.join(goBinDir, winresExe);
               hasWinres = true;
@@ -956,7 +1053,7 @@ func runBoundFiles() {
       sendToStream({ type: "output", text: `\n=== Building ${platform} ===\n`, level: "info" });
 
       const env: NodeJS.ProcessEnv = {
-        ...process.env,
+        ...createIsolatedBuildEnv(),
         GOOS: effectiveOs,
         GOARCH: actualArch,
         CGO_ENABLED: config.disableCgo === true ? "0" : "1",
@@ -1056,7 +1153,13 @@ func runBoundFiles() {
       }
 
       if (effectiveOs === "windows" && env.CGO_ENABLED === "1") {
-        ensureNVCodecHeaderForWindowsCgo(clientDir, sendToStream);
+        await ensureNVCodecHeaderForWindowsCgo(
+          clientDir,
+          sendToStream,
+          config.enableNvenc !== false,
+          config.enableAmf !== false,
+          config.enableQsv !== false,
+        );
       }
 
       let ldflags = config.stripDebug !== false ? "-s -w -buildid=" : "";
@@ -1230,6 +1333,12 @@ func runBoundFiles() {
 
         // Base tags: always present regardless of build pass
         let baseTags: string[] = [];
+        // UI-builder artifacts ignore runtime OVERLORD_* environment overrides.
+        // Direct go run/test builds (including start-dev.bat) do not carry this tag.
+        baseTags.push("builder_release");
+        if (config.enableNvenc === false) baseTags.push("no_nvenc");
+        if (config.enableAmf === false) baseTags.push("no_amf");
+        if (config.enableQsv === false) baseTags.push("no_qsv");
         if (config.noPrinting) baseTags.push("noprint");
         if (config.disableKeylogger) baseTags.push("nokeylogger");
         if (config.enableWebrtc) baseTags.push("overlord_webrtc");
@@ -1314,6 +1423,12 @@ func runBoundFiles() {
         if (skipTarget) {
           sendToStream({ type: "output", text: `Skipping ${platform}; requested by server plugin hook.\n`, level: "warn" });
           continue;
+        }
+
+        // A plugin may replace the tag list, but cannot disable the builder's
+        // environment-isolation contract.
+        if (!baseTags.includes("builder_release")) {
+          baseTags.push("builder_release");
         }
 
         const runBuild = async (tags: string[], outputPath: string) => {

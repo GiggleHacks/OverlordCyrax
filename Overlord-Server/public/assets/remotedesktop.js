@@ -96,6 +96,7 @@ import { initSidePanel } from "./side-panel.js";
   const statusEl = document.getElementById("streamStatus");
   const rdScaleBtn = document.getElementById("rdScaleBtn");
   const clipboardSyncCtrl = document.getElementById("clipboardSyncCtrl");
+  const privacyCtrl = document.getElementById("privacyCtrl");
   const audioCtrl = document.getElementById("audioCtrl");
   const webrtcMode = document.getElementById("webrtcMode");
   const webrtcVideo = document.getElementById("webrtcVideo");
@@ -447,6 +448,7 @@ import { initSidePanel } from "./side-panel.js";
       duplication: !!duplicationCtrl?.checked,
       softwareH264: !!softwareH264Ctrl?.checked,
       clipboardSync: !!clipboardSyncCtrl?.checked,
+      privacy: !!privacyCtrl?.checked,
       audio: !!audioCtrl?.checked,
       audioTransport: getAudioTransport(),
       smoothing: Number(smoothingSlider?.value || 20),
@@ -819,6 +821,13 @@ import { initSidePanel } from "./side-panel.js";
   if (clipboardSyncCtrl) {
     clipboardSyncCtrl.addEventListener("change", function () {
       checkClipboardSync();
+      sharedSettingsSaver.scheduleSave();
+    });
+  }
+
+  if (privacyCtrl) {
+    privacyCtrl.addEventListener("change", function () {
+      pushPrivacyToggle();
       sharedSettingsSaver.scheduleSave();
     });
   }
@@ -1408,6 +1417,7 @@ import { initSidePanel } from "./side-panel.js";
     desiredStreaming = false;
     lastFrameAt = 0;
     setStreamState("stopping", "Stopping stream");
+    disablePrivacyIfActive();
     sendCmd("desktop_stop", {});
     disconnectAudio();
     stopAllWebrtc();
@@ -1453,6 +1463,18 @@ import { initSidePanel } from "./side-panel.js";
     }
     if (duplicationCtrl && !duplicationCtrl.disabled) {
       sendCmd("desktop_set_duplication", { enabled: !!duplicationCtrl.checked });
+    }
+  }
+
+  function pushPrivacyToggle() {
+    if (!privacyCtrl) return;
+    sendCmd(privacyCtrl.checked ? "privacy_start" : "privacy_stop", {});
+  }
+
+  function disablePrivacyIfActive() {
+    if (privacyCtrl && privacyCtrl.checked) {
+      privacyCtrl.checked = false;
+      sendCmd("privacy_stop", {});
     }
   }
 
@@ -2181,6 +2203,7 @@ import { initSidePanel } from "./side-panel.js";
   function stopOnExit() {
     sharedSettingsSaver.saveNow();
     if (isRecording()) stopRecording();
+    disablePrivacyIfActive();
     if (ws && ws.readyState === WebSocket.OPEN && desiredStreaming) {
       desiredStreaming = false;
       sendCmd("desktop_stop", {});

@@ -13,6 +13,14 @@ call bun install
 popd
 
 echo === Ensuring client dependencies (Go) ===
+if not exist "%ROOT%Overlord-Client\third_party\onevpl\include\vpl\mfxdispatcher.h" (
+	echo [client] Intel oneVPL headers are missing; fetching them...
+	call "%SCRIPT_DIR%vendor-onevpl-headers.bat"
+	if errorlevel 1 (
+		echo [client] Failed to provision Intel oneVPL headers.
+		exit /b 1
+	)
+)
 pushd "%ROOT%Overlord-Client"
 if exist go.mod (
 	echo [client] go mod tidy...

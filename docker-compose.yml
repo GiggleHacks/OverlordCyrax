@@ -97,12 +97,16 @@ services:
       # ICE on fixed ports so the compose / host firewall has a single target.
       MTX_WEBRTCLOCALUDPADDRESS: ":8189"
       MTX_WEBRTCLOCALTCPADDRESS: ":8189"
-      # Advertise 127.0.0.1 as an ICE candidate. Always required on Windows /
-      # macOS (bridge networking); harmless on Linux (host networking). To
-      # allow viewers on a different machine, override this with a comma-
-      # separated list including the host's LAN/public IP, e.g.:
-      #   OVERLORD_WEBRTC_ADDITIONAL_HOSTS=127.0.0.1,192.168.1.42
-      MTX_WEBRTCADDITIONALHOSTS: ${OVERLORD_WEBRTC_ADDITIONAL_HOSTS:-127.0.0.1}
+      # Keep the real-time packet queue bounded and use an MTU that remains
+      # safe across common VPN, IPv6, and tunneled network paths.
+      MTX_WRITEQUEUESIZE: ${OVERLORD_MEDIAMTX_WRITE_QUEUE_SIZE:-128}
+      MTX_UDPMAXPAYLOADSIZE: ${OVERLORD_MEDIAMTX_UDP_MAX_PAYLOAD_SIZE:-1200}
+      MTX_UDPREADBUFFERSIZE: ${OVERLORD_MEDIAMTX_UDP_READ_BUFFER_SIZE:-4194304}
+      # Leave blank to let MediaMTX advertise detected interfaces. Public-NAT
+      # deployments must set this to their public IP/DNS; LAN deployments can
+      # include both LAN and public addresses, for example:
+      #   OVERLORD_WEBRTC_ADDITIONAL_HOSTS=192.168.1.42,stream.example.com
+      MTX_WEBRTCADDITIONALHOSTS: ${OVERLORD_WEBRTC_ADDITIONAL_HOSTS:-}
 
 volumes:
   overlord-data:

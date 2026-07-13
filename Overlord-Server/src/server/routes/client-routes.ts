@@ -61,6 +61,18 @@ type ClientRouteDeps = {
   broadcastNotificationsCleared: (clientId: string) => void;
 };
 
+function mergeLiveClientState(result: any) {
+  return {
+    ...result,
+    items: (result.items || []).map((item: any) => {
+      const live = clientManager.getClient(item.id);
+      return live
+        ? { ...item, online: true, lastSeen: live.lastSeen, pingMs: live.pingMs ?? item.pingMs }
+        : item;
+    }),
+  };
+}
+
 export async function handleClientRoutes(
   req: Request,
   url: URL,
@@ -115,12 +127,12 @@ export async function handleClientRoutes(
 
     if (user.role === "admin") {
       const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter });
-      return Response.json(result, { headers: deps.CORS_HEADERS });
+      return Response.json(mergeLiveClientState(result), { headers: deps.CORS_HEADERS });
     }
 
     if (user.role === "operator" && isEnrollmentRequest) {
       const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter, builtByUserId: user.userId, requireBuildOwner: true });
-      return Response.json(result, { headers: deps.CORS_HEADERS });
+      return Response.json(mergeLiveClientState(result), { headers: deps.CORS_HEADERS });
     }
 
     const scope = getUserClientAccessScope(user.userId);
@@ -132,7 +144,7 @@ export async function handleClientRoutes(
     const deniedClientIds = scope === "denylist" ? listUserClientRuleIdsByAccess(user.userId, "deny") : undefined;
 
     const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter, allowedClientIds, deniedClientIds });
-    return Response.json(result, { headers: deps.CORS_HEADERS });
+    return Response.json(mergeLiveClientState(result), { headers: deps.CORS_HEADERS });
   }
 
   if (url.pathname === "/api/clients/countries") {
@@ -287,9 +299,7 @@ export async function handleClientRoutes(
       metrics.recordCommand("screenshot");
     }
     const fresh = target?.online ? await waitForThumbnail(clientId, 2500) : false;
-    if (fresh) {
-      await new Promise((r) => setTimeout(r, 300));
-    } else {
+    if (!fresh) {
       await requestThumbnailRegen(clientId);
     }
     clearThumbnailRequest(clientId);

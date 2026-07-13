@@ -346,6 +346,23 @@ export async function sendCommand(clientId, action) {
   }
 }
 
+export async function pingClientNow(clientId) {
+  try {
+    const res = await fetch(`/api/clients/${clientId}/command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "ping", waitForResult: true }),
+    });
+    if (!res.ok) throw new Error(`ping failed ${res.status}`);
+    const result = await res.json().catch(() => ({}));
+    await loadWithOptions({ force: true, reorder: false });
+    return Boolean(result?.updated);
+  } catch (err) {
+    console.error("Failed to refresh ping:", err);
+    return false;
+  }
+}
+
 export async function fetchVoiceCapabilities(clientId) {
   try {
     const res = await fetch(`/api/clients/${clientId}/command`, {
@@ -375,15 +392,26 @@ export async function requestPreview(clientId) {
 
 export async function requestThumbnail(clientId) {
   try {
-    const res = await fetch(`/api/clients/${clientId}/thumbnail`, {
+    const res = await fetch(`/api/clients/${encodeURIComponent(clientId)}/thumbnail`, {
       method: "POST",
+      headers: { "x-overlord-thumbnail-source": "manual" },
     });
     if (res.ok) {
       const data = await res.json();
       if (data.ok) {
-        await loadWithOptions({ force: true });
-        setTimeout(() => loadWithOptions({ force: true }), 250);
-        setTimeout(() => loadWithOptions({ force: true }), 800);
+        if (data.updated && Number(data.version) > 0) {
+          const escapedId = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(clientId) : clientId;
+          document.querySelectorAll(`[data-thumb-client="${escapedId}"]`).forEach((host) => {
+            const img = host.querySelector("img[data-thumb-img]");
+            if (!img) return;
+            const url = `/api/clients/${encodeURIComponent(clientId)}/thumbnail?v=${Number(data.version)}`;
+            host.dataset.thumbVersion = String(data.version);
+            img.dataset.thumbUrl = url;
+            img.src = url;
+            img.style.display = "block";
+          });
+        }
+        await loadWithOptions({ force: true, reorder: false });
         return true;
       }
     }

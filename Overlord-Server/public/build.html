@@ -679,6 +679,30 @@
                       </div>
                     </label>
 
+                    <label class="flex items-center gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg cursor-pointer hover:border-green-500 transition-colors">
+                      <input type="checkbox" name="enable-nvenc" class="w-4 h-4" checked />
+                      <div class="flex flex-col">
+                        <span><i class="fa-solid fa-microchip text-green-400 mr-2"></i>Include NVIDIA NVENC</span>
+                        <span class="text-xs text-slate-500">Native NVIDIA H.264 acceleration for Windows CGO builds</span>
+                      </div>
+                    </label>
+
+                    <label class="flex items-center gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg cursor-pointer hover:border-red-500 transition-colors">
+                      <input type="checkbox" name="enable-amf" class="w-4 h-4" checked />
+                      <div class="flex flex-col">
+                        <span><i class="fa-solid fa-microchip text-red-400 mr-2"></i>Include AMD AMF</span>
+                        <span class="text-xs text-slate-500">Native AMD H.264 acceleration for Windows CGO builds</span>
+                      </div>
+                    </label>
+
+                    <label class="flex items-center gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg cursor-pointer hover:border-blue-500 transition-colors">
+                      <input type="checkbox" name="enable-qsv" class="w-4 h-4" checked />
+                      <div class="flex flex-col">
+                        <span><i class="fa-solid fa-microchip text-blue-400 mr-2"></i>Include Intel Quick Sync</span>
+                        <span class="text-xs text-slate-500">Native Intel oneVPL H.264 acceleration for Windows CGO builds</span>
+                      </div>
+                    </label>
+
                     <label class="flex items-center gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg cursor-pointer hover:border-amber-500 transition-colors">
                       <input type="checkbox" name="enable-winre" class="w-4 h-4" />
                       <div class="flex flex-col">

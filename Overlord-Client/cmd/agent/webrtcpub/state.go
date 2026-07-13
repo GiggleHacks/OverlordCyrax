@@ -24,8 +24,68 @@ type AudioWriter interface {
 }
 
 type writerEntry struct {
-	video VideoWriter
+	video *latestVideoWriter
 	audio AudioWriter
+}
+
+type latestVideoWriter struct {
+	writer  VideoWriter
+	mu      sync.Mutex
+	pending []byte
+	dur     time.Duration
+	closed  bool
+	wake    chan struct{}
+}
+
+func newLatestVideoWriter(writer VideoWriter) *latestVideoWriter {
+	queued := &latestVideoWriter{writer: writer, wake: make(chan struct{}, 1)}
+	go queued.run()
+	return queued
+}
+
+func (w *latestVideoWriter) enqueue(frame []byte, dur time.Duration) {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return
+	}
+	w.pending = frame
+	w.dur = dur
+	w.mu.Unlock()
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (w *latestVideoWriter) close() {
+	w.mu.Lock()
+	w.closed = true
+	w.pending = nil
+	w.mu.Unlock()
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (w *latestVideoWriter) run() {
+	for range w.wake {
+		for {
+			w.mu.Lock()
+			if w.closed {
+				w.mu.Unlock()
+				return
+			}
+			frame, dur := w.pending, w.dur
+			w.pending = nil
+			w.mu.Unlock()
+			if len(frame) == 0 {
+				break
+			}
+			_ = w.writer.WriteH264(frame, dur)
+		}
+	}
 }
 
 var (
@@ -44,7 +104,10 @@ func registerVideoWriter(kind Kind, id string, w VideoWriter) {
 		writers[string(kind)] = bucket
 	}
 	entry := bucket[id]
-	entry.video = w
+	if entry.video != nil {
+		entry.video.close()
+	}
+	entry.video = newLatestVideoWriter(w)
 	bucket[id] = entry
 	writersMu.Unlock()
 	RequestKeyframe()
@@ -72,6 +135,9 @@ func unregisterWriter(kind Kind, id string) {
 	}
 	writersMu.Lock()
 	if bucket, ok := writers[string(kind)]; ok {
+		if entry, exists := bucket[id]; exists && entry.video != nil {
+			entry.video.close()
+		}
 		delete(bucket, id)
 		if len(bucket) == 0 {
 			delete(writers, string(kind))
@@ -103,13 +169,18 @@ func WriteH264(kind Kind, nalu []byte, dur time.Duration) error {
 	if len(nalu) == 0 {
 		return nil
 	}
+	frame := append([]byte(nil), nalu...)
 	writersMu.RLock()
-	defer writersMu.RUnlock()
 	bucket := writers[string(kind)]
+	targets := make([]*latestVideoWriter, 0, len(bucket))
 	for _, w := range bucket {
 		if w.video != nil {
-			_ = w.video.WriteH264(nalu, dur)
+			targets = append(targets, w.video)
 		}
+	}
+	writersMu.RUnlock()
+	for _, target := range targets {
+		target.enqueue(frame, dur)
 	}
 	return nil
 }
@@ -119,12 +190,16 @@ func WriteAudio(kind Kind, pcm []int16) error {
 		return nil
 	}
 	writersMu.RLock()
-	defer writersMu.RUnlock()
 	bucket := writers[string(kind)]
+	targets := make([]AudioWriter, 0, len(bucket))
 	for _, w := range bucket {
 		if w.audio != nil {
-			_ = w.audio.WriteAudio(pcm)
+			targets = append(targets, w.audio)
 		}
+	}
+	writersMu.RUnlock()
+	for _, target := range targets {
+		_ = target.WriteAudio(pcm)
 	}
 	return nil
 }
