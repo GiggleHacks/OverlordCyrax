@@ -7,6 +7,7 @@ export type MessageKind =
   | "pong"
   | "command"
   | "command_result"
+  | "command_progress"
   | "client_logs_result"
   | "screenshot_result"
   | "frame"
@@ -152,6 +153,20 @@ export type CommandResult = {
   type: "command_result";
   commandId?: string;
   ok: boolean;
+  message?: string;
+};
+
+export type CommandProgress = {
+  type: "command_progress";
+  commandId?: string;
+  path?: string;
+  url?: string;
+  resolvedUrl?: string;
+  status?: string;
+  attempt?: number;
+  transferred?: number;
+  total?: number;
+  speedBytesPerSecond?: number;
   message?: string;
 };
 
@@ -500,6 +515,7 @@ export type WireMessage =
   | Pong
   | Command
   | CommandResult
+  | CommandProgress
   | ClientLogsResult
   | ScreenshotResult
   | Frame

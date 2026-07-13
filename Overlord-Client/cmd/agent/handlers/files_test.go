@@ -28,6 +28,26 @@ func (w *testWriter) Write(ctx context.Context, messageType websocket.MessageTyp
 	return nil
 }
 
+func requireLastCommandResult(t *testing.T, msgs [][]byte) wire.CommandResult {
+	t.Helper()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		var meta map[string]interface{}
+		if err := msgpack.Unmarshal(msgs[i], &meta); err != nil {
+			t.Fatalf("failed to unmarshal message metadata: %v", err)
+		}
+		if meta["type"] != "command_result" {
+			continue
+		}
+		var result wire.CommandResult
+		if err := msgpack.Unmarshal(msgs[i], &result); err != nil {
+			t.Fatalf("failed to unmarshal command result: %v", err)
+		}
+		return result
+	}
+	t.Fatalf("expected command_result message, got %d message(s)", len(msgs))
+	return wire.CommandResult{}
+}
+
 func TestHandleFileList(t *testing.T) {
 
 	tmpDir := t.TempDir()
@@ -511,15 +531,85 @@ func TestHandleFileUploadHTTP(t *testing.T) {
 		t.Fatalf("uploaded content mismatch")
 	}
 
-	if len(writer.msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(writer.msgs))
-	}
-	var result wire.CommandResult
-	if err := msgpack.Unmarshal(writer.msgs[0], &result); err != nil {
-		t.Fatalf("failed to unmarshal command result: %v", err)
-	}
+	result := requireLastCommandResult(t, writer.msgs)
 	if !result.OK {
 		t.Fatalf("expected OK=true, got false: %s", result.Message)
+	}
+}
+
+func TestHandleFileUploadHTTP_EmitsProgressBeforeFinalResult(t *testing.T) {
+	data := bytes.Repeat([]byte("progress-payload-"), 32*1024)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+		_, _ = w.Write(data)
+	}))
+	defer ts.Close()
+
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "uploaded-http-progress.bin")
+
+	writer := &testWriter{}
+	env := &rt.Env{
+		Conn: writer,
+		Cfg:  config.Config{TLSInsecureSkipVerify: true},
+	}
+
+	if err := HandleFileUploadHTTP(context.Background(), env, "cmd-http-progress", destPath, ts.URL+"/file", int64(len(data))); err != nil {
+		t.Fatalf("HandleFileUploadHTTP failed: %v", err)
+	}
+
+	if len(writer.msgs) < 2 {
+		t.Fatalf("expected progress and final result messages, got %d", len(writer.msgs))
+	}
+
+	var sawProgress bool
+	var sawFinal bool
+	for _, raw := range writer.msgs {
+		var msg map[string]interface{}
+		if err := msgpack.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("failed to unmarshal message: %v", err)
+		}
+		switch msg["type"] {
+		case "command_progress":
+			if msg["commandId"] != "cmd-http-progress" {
+				t.Fatalf("progress commandId mismatch: %v", msg["commandId"])
+			}
+			if msg["path"] != destPath {
+				t.Fatalf("progress path mismatch: %v", msg["path"])
+			}
+			if msg["url"] != ts.URL+"/file" {
+				t.Fatalf("progress url mismatch: %v", msg["url"])
+			}
+			if msg["resolvedUrl"] != ts.URL+"/file" {
+				t.Fatalf("progress resolvedUrl mismatch: %v", msg["resolvedUrl"])
+			}
+			if msg["status"] != "transferring" && msg["status"] != "verifying" && msg["status"] != "complete" {
+				continue
+			}
+			if _, ok := msg["transferred"].(int64); !ok {
+				continue
+			}
+			sawProgress = true
+			if msg["total"] != int64(len(data)) {
+				t.Fatalf("progress total mismatch: %v", msg["total"])
+			}
+			if _, ok := msg["speedBytesPerSecond"].(int64); !ok {
+				t.Fatalf("progress speed missing or wrong type: %T", msg["speedBytesPerSecond"])
+			}
+			if msg["attempt"] != int8(1) && msg["attempt"] != int64(1) && msg["attempt"] != int(1) {
+				t.Fatalf("progress attempt mismatch: %v", msg["attempt"])
+			}
+		case "command_result":
+			sawFinal = true
+		}
+	}
+
+	if !sawProgress {
+		t.Fatal("expected at least one command_progress message")
+	}
+	if !sawFinal {
+		t.Fatal("expected final command_result message")
 	}
 }
 
@@ -566,13 +656,7 @@ func TestHandleFileUploadHTTP_RewritesUploadPullURLToAgentServer(t *testing.T) {
 		t.Fatalf("uploaded content mismatch")
 	}
 
-	if len(writer.msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(writer.msgs))
-	}
-	var result wire.CommandResult
-	if err := msgpack.Unmarshal(writer.msgs[0], &result); err != nil {
-		t.Fatalf("failed to unmarshal command result: %v", err)
-	}
+	result := requireLastCommandResult(t, writer.msgs)
 	if !result.OK {
 		t.Fatalf("expected OK=true, got false: %s", result.Message)
 	}
@@ -632,13 +716,7 @@ func TestHandleFileUploadHTTP_ResumesWithRangeAfterShortRead(t *testing.T) {
 		t.Fatalf("uploaded content mismatch after resume")
 	}
 
-	if len(writer.msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(writer.msgs))
-	}
-	var result wire.CommandResult
-	if err := msgpack.Unmarshal(writer.msgs[0], &result); err != nil {
-		t.Fatalf("failed to unmarshal command result: %v", err)
-	}
+	result := requireLastCommandResult(t, writer.msgs)
 	if !result.OK {
 		t.Fatalf("expected OK=true, got false: %s", result.Message)
 	}
@@ -665,13 +743,7 @@ func TestHandleFileUploadHTTP_SizeMismatch(t *testing.T) {
 		t.Fatalf("HandleFileUploadHTTP failed: %v", err)
 	}
 
-	if len(writer.msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(writer.msgs))
-	}
-	var result wire.CommandResult
-	if err := msgpack.Unmarshal(writer.msgs[0], &result); err != nil {
-		t.Fatalf("failed to unmarshal command result: %v", err)
-	}
+	result := requireLastCommandResult(t, writer.msgs)
 	if result.OK {
 		t.Fatalf("expected OK=false for size mismatch")
 	}

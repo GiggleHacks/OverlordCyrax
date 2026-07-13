@@ -36,6 +36,8 @@ services:
       # in front of Overlord — otherwise agents can spoof their IP. Auto-enabled when
       # OVERLORD_TLS_OFFLOAD=true.
       OVERLORD_TRUST_PROXY: ${OVERLORD_TRUST_PROXY:-false}
+      # Canonical browser/agent-reachable origin used for server-to-client pull URLs.
+      OVERLORD_EXTERNAL_URL: ${OVERLORD_EXTERNAL_URL:-}
       # Cookie security mode: auto (default), true, or false.
       # auto: Secure cookie on HTTPS requests / X-Forwarded-Proto=https.
       OVERLORD_AUTH_COOKIE_SECURE: ${OVERLORD_AUTH_COOKIE_SECURE:-auto}

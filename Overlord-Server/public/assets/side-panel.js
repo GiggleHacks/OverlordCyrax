@@ -104,7 +104,12 @@ function showToast(message, type = "info", durationMs = 4000) {
   const toast = document.createElement("div");
   toast.className = `sp-toast sp-toast-${type}`;
   const iconMap = { success: "fa-circle-check", error: "fa-circle-xmark", info: "fa-circle-info" };
-  toast.innerHTML = `<i class="fa-solid ${iconMap[type] || iconMap.info}"></i><span>${message}</span>`;
+  toast.innerHTML = `<i class="fa-solid ${iconMap[type] || iconMap.info}"></i><span></span>`;
+  const text = toast.querySelector("span");
+  if (text) {
+    text.textContent = message;
+    if (String(message).includes("\n")) text.style.whiteSpace = "pre-line";
+  }
   toastContainer.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add("sp-toast-visible"));
   setTimeout(() => {
@@ -147,6 +152,90 @@ async function patchClient(clientId, field, value) {
 
 const ALLOWED_EXTENSIONS = new Set(["jpg", "jpeg", "png", "bmp"]);
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const WALLPAPER_POLL_MS = 500;
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
+}
+
+function formatSpeed(bytesPerSecond) {
+  const value = Number(bytesPerSecond) || 0;
+  if (value <= 0) return "0 B/s";
+  return `${formatBytes(value)}/s`;
+}
+
+function wallpaperPhaseLabel(phase) {
+  switch (phase) {
+    case "queued": return "Queued";
+    case "client_transfer": return "Client transfer";
+    case "verify_remote_file": return "Verifying file on client";
+    case "apply_wallpaper": return "Applying wallpaper";
+    case "succeeded": return "Wallpaper applied";
+    case "failed": return "Wallpaper failed";
+    default: return "Wallpaper";
+  }
+}
+
+function wallpaperTransferStateLabel(state) {
+  switch (state) {
+    case "command_not_sent": return "Command was not sent";
+    case "command_sent_no_client_progress": return "Command sent; client did not acknowledge the transfer";
+    case "client_transfer_active": return "Client acknowledged the transfer";
+    case "client_transfer_complete": return "Client transfer completed";
+    default: return "Waiting for client acknowledgement";
+  }
+}
+
+function wallpaperEndpointSourceLabel(source) {
+  switch (source) {
+    case "external_config": return "Configured public endpoint";
+    case "forwarded_host": return "Reverse-proxy forwarded host";
+    case "request_host": return "Request host fallback";
+    default: return "Unknown endpoint source";
+  }
+}
+
+function renderWallpaperDetails(status, file) {
+  const transferred = formatBytes(status.bytesTransferred || 0);
+  const total = formatBytes(status.totalBytes || file.size || 0);
+  const speed = formatSpeed(status.speedBytesPerSecond || 0);
+  const destination = status.destinationPath || "unknown destination";
+  const endpoint = status.resolvedUrl || status.pullOrigin || "waiting for transfer endpoint";
+  const client = String(status.clientId || "unknown").slice(0, 12);
+  const version = status.clientVersion ? ` · v${status.clientVersion}` : "";
+  return `
+    <div class="sp-progress-detail">${escapeHtml(file.name)} · ${transferred} / ${total} · ${speed}</div>
+    <div class="sp-progress-detail">Client: ${escapeHtml(client)}${escapeHtml(version)} · ${escapeHtml(wallpaperTransferStateLabel(status.transferState))}</div>
+    <div class="sp-progress-detail">Destination: ${escapeHtml(destination)}</div>
+    <div class="sp-progress-detail">Endpoint: ${escapeHtml(endpoint)}</div>
+  `;
+}
+
+function wallpaperErrorText(status) {
+  const err = status?.error || {};
+  const parts = [
+    err.message || status?.message || "Wallpaper change failed",
+    err.phase ? `Step: ${wallpaperPhaseLabel(err.phase)}` : "",
+    err.transferState || status?.transferState ? `Transfer state: ${wallpaperTransferStateLabel(err.transferState || status.transferState)}` : "",
+    err.clientVersion || status?.clientVersion ? `Client version: ${err.clientVersion || status.clientVersion}` : "",
+    err.endpointSource || status?.endpointSource ? `Endpoint source: ${wallpaperEndpointSourceLabel(err.endpointSource || status.endpointSource)}` : "",
+    `Transferred: ${formatBytes(err.bytesTransferred ?? status?.bytesTransferred ?? 0)} / ${formatBytes(err.totalBytes ?? status?.totalBytes ?? 0)}`,
+    err.destinationPath ? `Destination: ${err.destinationPath}` : "",
+    err.resolvedUrl || err.pullOrigin ? `Endpoint: ${err.resolvedUrl || err.pullOrigin}` : "",
+    err.clientMessage ? `Client: ${err.clientMessage}` : "",
+    err.serverMessage ? `Server: ${err.serverMessage}` : "",
+  ].filter(Boolean);
+  return parts.join("\n");
+}
 
 function triggerWallpaperUpload(clientId) {
   const input = document.createElement("input");
@@ -188,48 +277,121 @@ function uploadWallpaper(clientId, file) {
   progressToast.className = "sp-toast sp-toast-info sp-toast-visible sp-toast-progress";
   progressToast.innerHTML = `
     <i class="fa-solid fa-cloud-arrow-up"></i>
-    <span class="sp-progress-label">Uploading wallpaper\u2026 0%</span>
+    <span class="sp-progress-label">Preparing wallpaper upload\u2026</span>
+    <div class="sp-progress-meta"></div>
     <div class="sp-progress-track"><div class="sp-progress-bar"></div></div>
   `;
   toastContainer.appendChild(progressToast);
   const bar = progressToast.querySelector(".sp-progress-bar");
   const label = progressToast.querySelector(".sp-progress-label");
+  const meta = progressToast.querySelector(".sp-progress-meta");
+
+  let pollTimer = null;
+  let completed = false;
+
+  const cleanup = () => {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    progressToast.remove();
+  };
 
   xhr.upload.addEventListener("progress", (e) => {
     if (!e.lengthComputable) return;
-    const pct = Math.round((e.loaded / e.total) * 100);
-    bar.style.width = pct + "%";
-    label.textContent = `Uploading wallpaper\u2026 ${pct}%`;
+    const pct = Math.min(99, Math.floor((e.loaded / e.total) * 100));
+    bar.style.width = `${Math.min(45, pct)}%`;
+    label.textContent = `Host to server\u2026 ${pct}%`;
+    meta.innerHTML = `
+      <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>
+      <div class="sp-progress-detail">Preparing client transfer after staging completes</div>
+    `;
   });
 
+  async function pollWallpaperJob(jobId) {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/wallpaper/${encodeURIComponent(jobId)}`, { credentials: "include" });
+      const status = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(status.message || `Wallpaper status failed: ${res.status}`);
+      }
+
+      const pct = status.status === "succeeded" ? 100 : Math.min(99, Math.max(0, Number(status.percent) || 0));
+      bar.style.width = `${pct}%`;
+      label.textContent = `${wallpaperPhaseLabel(status.phase)}\u2026 ${pct}%`;
+      meta.innerHTML = renderWallpaperDetails(status, file);
+
+      if (status.status === "succeeded") {
+        completed = true;
+        label.textContent = "Wallpaper applied successfully 100%";
+        bar.style.width = "100%";
+        setTimeout(() => {
+          cleanup();
+          showToast("Wallpaper changed successfully!", "success");
+        }, 600);
+        return;
+      }
+
+      if (status.status === "failed") {
+        completed = true;
+        cleanup();
+        showToast(wallpaperErrorText(status), "error", 10000);
+        return;
+      }
+
+      pollTimer = setTimeout(() => pollWallpaperJob(jobId), WALLPAPER_POLL_MS);
+    } catch (err) {
+      completed = true;
+      cleanup();
+      showToast(err.message || "Wallpaper status polling failed", "error", 8000);
+    }
+  }
+
   xhr.addEventListener("load", () => {
-    progressToast.remove();
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
         const res = JSON.parse(xhr.responseText);
-        if (res.ok) {
+        if (res.ok && res.jobId) {
+          bar.style.width = "0%";
+          label.textContent = "Waiting for client transfer\u2026 0%";
+          meta.innerHTML = `
+            <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(0)} / ${formatBytes(res.totalBytes || file.size)}</div>
+            <div class="sp-progress-detail">To: ${escapeHtml(res.destinationPath || "unknown destination")}</div>
+            <div class="sp-progress-detail">Endpoint: ${escapeHtml(res.pullOrigin || "waiting for transfer endpoint")}</div>
+          `;
+          pollWallpaperJob(res.jobId);
+        } else if (res.ok) {
+          completed = true;
+          cleanup();
           showToast("Wallpaper changed successfully!", "success");
         } else {
+          completed = true;
+          cleanup();
           showToast(res.message || "Wallpaper change failed", "error", 6000);
         }
       } catch {
-        showToast("Wallpaper changed!", "success");
+        completed = true;
+        cleanup();
+        showToast("Wallpaper response was not valid JSON", "error", 6000);
       }
     } else {
       let msg = "Upload failed";
       try { msg = JSON.parse(xhr.responseText).message || msg; } catch {}
+      completed = true;
+      cleanup();
       showToast(msg, "error", 6000);
     }
   });
 
   xhr.addEventListener("error", () => {
-    progressToast.remove();
+    completed = true;
+    cleanup();
     showToast("Network error during upload", "error");
   });
 
   xhr.addEventListener("abort", () => {
-    progressToast.remove();
-    showToast("Upload cancelled", "info");
+    cleanup();
+    if (!completed) showToast("Upload cancelled", "info");
   });
 
   xhr.open("POST", `/api/clients/${clientId}/wallpaper`);
