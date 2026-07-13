@@ -289,9 +289,9 @@ export function handleFrame(info: ClientInfo, payload: any): boolean {
       if (globalAny.__webcamBroadcast) {
         handledByViewerRelay = globalAny.__webcamBroadcast(info.id, bytes, header);
       }
-    } else if (header?.hvnc) {
-      if (globalAny.__hvncBroadcast) {
-        handledByViewerRelay = globalAny.__hvncBroadcast(info.id, bytes, header);
+    } else if (header?.backstage) {
+      if (globalAny.__backstageBroadcast) {
+        handledByViewerRelay = globalAny.__backstageBroadcast(info.id, bytes, header);
       }
     } else if (globalAny.__rdBroadcast) {
       handledByViewerRelay = globalAny.__rdBroadcast(info.id, bytes, header);

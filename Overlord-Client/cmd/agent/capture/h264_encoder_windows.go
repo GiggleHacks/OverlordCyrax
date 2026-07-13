@@ -523,8 +523,8 @@ var (
 	h264Enc     h264FrameEncoder
 	h264LastErr error
 
-	hvncH264Mu  sync.Mutex
-	hvncH264Enc h264FrameEncoder
+	backstageH264Mu  sync.Mutex
+	backstageH264Enc h264FrameEncoder
 
 	webcamH264Mu  sync.Mutex
 	webcamH264Enc h264FrameEncoder
@@ -538,10 +538,10 @@ func encodeH264Frame(img *image.RGBA) ([]byte, error) {
 	return out, err
 }
 
-func encodeH264FrameHVNC(img *image.RGBA) ([]byte, error) {
-	hvncH264Mu.Lock()
-	defer hvncH264Mu.Unlock()
-	return encodeH264FrameWithEncoder(&hvncH264Enc, "backstage", img)
+func encodeH264Framebackstage(img *image.RGBA) ([]byte, error) {
+	backstageH264Mu.Lock()
+	defer backstageH264Mu.Unlock()
+	return encodeH264FrameWithEncoder(&backstageH264Enc, "backstage", img)
 }
 
 func encodeH264FrameWebcam(img *image.RGBA) ([]byte, error) {
@@ -624,10 +624,10 @@ func RequestDesktopH264Keyframe() {
 	resetH264Encoder()
 }
 
-func resetH264EncoderHVNC() {
-	hvncH264Mu.Lock()
-	defer hvncH264Mu.Unlock()
-	closeH264Encoder(&hvncH264Enc)
+func resetH264Encoderbackstage() {
+	backstageH264Mu.Lock()
+	defer backstageH264Mu.Unlock()
+	closeH264Encoder(&backstageH264Enc)
 }
 
 func closeH264Encoder(slot *h264FrameEncoder) {
@@ -1410,7 +1410,7 @@ func average2x2RGB(row0, row1 []byte, x int) (int, int, int) {
 
 func shutdownMediaFoundationForTest() {
 	closeH264Encoder(&h264Enc)
-	closeH264Encoder(&hvncH264Enc)
+	closeH264Encoder(&backstageH264Enc)
 	closeH264Encoder(&webcamH264Enc)
 	_, _, _ = procMFShutdown.Call()
 }

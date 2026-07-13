@@ -62,7 +62,7 @@ func VirtualKillAll() error {
 	return nil
 }
 
-func VirtualEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
+func VirtualEnumWindows() ([]BackstageWindowInfo, []BackstageMonitorInfo) {
 	return nil, nil
 }
 

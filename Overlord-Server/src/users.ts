@@ -507,7 +507,7 @@ export function setUserPluginAccessRulesBulk(
 export type FeatureName =
   | "console"
   | "remote_desktop"
-  | "hvnc"
+  | "backstage"
   | "webcam"
   | "file_browser"
   | "processes"
@@ -521,7 +521,7 @@ export type FeatureName =
 export const ALL_FEATURES: FeatureName[] = [
   "console",
   "remote_desktop",
-  "hvnc",
+  "backstage",
   "webcam",
   "file_browser",
   "processes",

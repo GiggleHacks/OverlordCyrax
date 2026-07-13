@@ -17,9 +17,9 @@ extern "C" {
 
 // Portable secure string helpers for MinGW compatibility
 #ifndef _MSC_VER
-#ifndef _HVNC_PORTABLE_CRT
-#define _HVNC_PORTABLE_CRT
-static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *src, size_t count) {
+#ifndef _backstage_PORTABLE_CRT
+#define _backstage_PORTABLE_CRT
+static inline void _backstage_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *src, size_t count) {
     if (!dst || dstSize == 0) return;
     size_t toCopy = (count < dstSize - 1) ? count : dstSize - 1;
     size_t i;
@@ -27,7 +27,7 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         dst[i] = src[i];
     dst[i] = L'\0';
 }
-#define wcsncpy_s(dst, dstSize, src, count) _hvnc_wcsncpy_s((dst), (dstSize), (src), (count))
+#define wcsncpy_s(dst, dstSize, src, count) _backstage_wcsncpy_s((dst), (dstSize), (src), (count))
 #define sprintf_s(buf, size, ...) snprintf((buf), (size), __VA_ARGS__)
 #endif
 #endif

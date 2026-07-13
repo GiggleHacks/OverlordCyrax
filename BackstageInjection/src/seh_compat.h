@@ -1,6 +1,6 @@
 // Compatibility header for building with MinGW (which lacks MSVC's __try/__except)
-#ifndef _HVNC_SEH_COMPAT_H
-#define _HVNC_SEH_COMPAT_H
+#ifndef _backstage_SEH_COMPAT_H
+#define _backstage_SEH_COMPAT_H
 
 #ifdef __MINGW32__
 #if defined(NDEBUG)
@@ -37,4 +37,4 @@
 #endif
 #endif // __MINGW32__
 
-#endif // _HVNC_SEH_COMPAT_H
+#endif // _backstage_SEH_COMPAT_H

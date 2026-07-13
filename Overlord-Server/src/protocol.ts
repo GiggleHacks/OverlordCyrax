@@ -190,7 +190,7 @@ export type FrameHeader = {
   fps: number;
   format: "jpeg" | "webp" | "raw" | "h264";
   hash?: string;
-  hvnc?: boolean;
+  backstage?: boolean;
   webcam?: boolean;
 };
 

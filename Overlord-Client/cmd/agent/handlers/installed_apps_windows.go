@@ -417,7 +417,7 @@ type appWithIcon struct {
 
 func getInstalledAppsWithIcons() []appWithIcon {
 	apps := enumerateInstalledApps()
-	log.Printf("hvnc: enumerated %d installed apps, extracting icons", len(apps))
+	log.Printf("backstage: enumerated %d installed apps, extracting icons", len(apps))
 
 	out := make([]appWithIcon, len(apps))
 	for i, app := range apps {

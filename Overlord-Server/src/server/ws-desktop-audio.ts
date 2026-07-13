@@ -13,7 +13,7 @@ import {
 } from "./webrtc-p2p-sessions";
 import {
   cleanupViewerP2P,
-} from "./ws-console-rd-hvnc";
+} from "./ws-console-rd-backstage";
 
 function sendDesktopAudioCommand(
   clientId: string,

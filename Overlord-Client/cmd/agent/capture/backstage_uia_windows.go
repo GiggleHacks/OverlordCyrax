@@ -825,7 +825,7 @@ func uiaInit() error {
 			return
 		}
 		uiaTreeWalker = uiaSingleton.GetControlViewWalker()
-		log.Printf("hvnc uia: IUIAutomation initialized successfully (walker=%v)", uiaTreeWalker != nil)
+		log.Printf("backstage uia: IUIAutomation initialized successfully (walker=%v)", uiaTreeWalker != nil)
 	})
 	return uiaInitErr
 }
@@ -860,7 +860,7 @@ func uiaEnsureWorker() {
 		uiaWorkerCh = make(chan func(), 64)
 		uiaWorkerDone = make(chan struct{})
 		go func() {
-			defer recoverAndLog("hvnc uia worker", nil)
+			defer recoverAndLog("backstage uia worker", nil)
 			uiaWorkerLoop()
 		}()
 	})
@@ -871,23 +871,23 @@ func uiaWorkerLoop() {
 	defer runtime.UnlockOSThread()
 	defer close(uiaWorkerDone)
 
-	hvncDesktopMu.Lock()
-	dh := hvncDesktopHandle
-	hvncDesktopMu.Unlock()
+	backstageDesktopMu.Lock()
+	dh := backstageDesktopHandle
+	backstageDesktopMu.Unlock()
 	if dh != 0 {
 		r, _, err := procSetThreadDesktop.Call(dh)
 		if r == 0 {
-			log.Printf("hvnc uia: worker SetThreadDesktop failed: %v", err)
+			log.Printf("backstage uia: worker SetThreadDesktop failed: %v", err)
 			for range uiaWorkerCh {
 			}
 			return
 		}
 	} else {
-		log.Printf("hvnc uia: warning — worker started before HVNC desktop exists")
+		log.Printf("backstage uia: warning — worker started before backstage desktop exists")
 	}
 
 	if err := uiaInit(); err != nil {
-		log.Printf("hvnc uia: worker init failed: %v", err)
+		log.Printf("backstage uia: worker init failed: %v", err)
 		for range uiaWorkerCh {
 		}
 		return

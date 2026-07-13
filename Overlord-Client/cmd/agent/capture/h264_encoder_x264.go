@@ -142,57 +142,57 @@ func closeH264EncoderLocked() {
 }
 
 var (
-	hvncH264Mu      sync.Mutex
-	hvncH264Enc     *x264.Encoder
-	hvncH264Buf     bytes.Buffer
-	hvncH264Width   int
-	hvncH264Height  int
-	hvncH264FPS     int
-	hvncH264Scratch []byte
+	backstageH264Mu      sync.Mutex
+	backstageH264Enc     *x264.Encoder
+	backstageH264Buf     bytes.Buffer
+	backstageH264Width   int
+	backstageH264Height  int
+	backstageH264FPS     int
+	backstageH264Scratch []byte
 )
 
-func encodeH264FrameHVNC(img *image.RGBA) ([]byte, error) {
+func encodeH264Framebackstage(img *image.RGBA) ([]byte, error) {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	hvncH264Mu.Lock()
-	defer hvncH264Mu.Unlock()
+	backstageH264Mu.Lock()
+	defer backstageH264Mu.Unlock()
 
-	if err := ensureHVNCH264EncoderLocked(width, height); err != nil {
+	if err := ensurebackstageH264EncoderLocked(width, height); err != nil {
 		return nil, err
 	}
 
-	hvncH264Buf.Reset()
-	if err := hvncH264Enc.Encode(img); err != nil {
+	backstageH264Buf.Reset()
+	if err := backstageH264Enc.Encode(img); err != nil {
 		return nil, err
 	}
 
-	n := hvncH264Buf.Len()
+	n := backstageH264Buf.Len()
 	if n == 0 {
 		return nil, nil
 	}
-	if cap(hvncH264Scratch) < n {
-		hvncH264Scratch = make([]byte, n, n+(n/4))
+	if cap(backstageH264Scratch) < n {
+		backstageH264Scratch = make([]byte, n, n+(n/4))
 	} else {
-		hvncH264Scratch = hvncH264Scratch[:n]
+		backstageH264Scratch = backstageH264Scratch[:n]
 	}
-	copy(hvncH264Scratch, hvncH264Buf.Bytes())
-	return hvncH264Scratch, nil
+	copy(backstageH264Scratch, backstageH264Buf.Bytes())
+	return backstageH264Scratch, nil
 }
 
-func resetH264EncoderHVNC() {
-	hvncH264Mu.Lock()
-	defer hvncH264Mu.Unlock()
-	closeHVNCH264EncoderLocked()
+func resetH264Encoderbackstage() {
+	backstageH264Mu.Lock()
+	defer backstageH264Mu.Unlock()
+	closebackstageH264EncoderLocked()
 }
 
-func ensureHVNCH264EncoderLocked(width, height int) error {
+func ensurebackstageH264EncoderLocked(width, height int) error {
 	fps := activeH264FPS()
-	if hvncH264Enc != nil && hvncH264Width == width && hvncH264Height == height && hvncH264FPS == fps {
+	if backstageH264Enc != nil && backstageH264Width == width && backstageH264Height == height && backstageH264FPS == fps {
 		return nil
 	}
-	closeHVNCH264EncoderLocked()
+	closebackstageH264EncoderLocked()
 	opts := &x264.Options{
 		Width:        width,
 		Height:       height,
@@ -204,26 +204,26 @@ func ensureHVNCH264EncoderLocked(width, height int) error {
 		RateConstant: 23,
 		LogLevel:     x264.LogError,
 	}
-	enc, err := x264.NewEncoder(&hvncH264Buf, opts)
+	enc, err := x264.NewEncoder(&backstageH264Buf, opts)
 	if err != nil {
 		return err
 	}
-	hvncH264Enc = enc
-	hvncH264Width = width
-	hvncH264Height = height
-	hvncH264FPS = fps
+	backstageH264Enc = enc
+	backstageH264Width = width
+	backstageH264Height = height
+	backstageH264FPS = fps
 	return nil
 }
 
-func closeHVNCH264EncoderLocked() {
-	if hvncH264Enc != nil {
-		_ = hvncH264Enc.Close()
-		hvncH264Enc = nil
+func closebackstageH264EncoderLocked() {
+	if backstageH264Enc != nil {
+		_ = backstageH264Enc.Close()
+		backstageH264Enc = nil
 	}
-	hvncH264Width = 0
-	hvncH264Height = 0
-	hvncH264FPS = 0
-	hvncH264Buf.Reset()
+	backstageH264Width = 0
+	backstageH264Height = 0
+	backstageH264FPS = 0
+	backstageH264Buf.Reset()
 }
 
 var (

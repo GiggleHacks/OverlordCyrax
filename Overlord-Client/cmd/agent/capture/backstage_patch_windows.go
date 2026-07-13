@@ -71,7 +71,7 @@ func patchGetCursorInfo(pid uint32) error {
 			}
 		}
 		if !ok {
-			log.Printf("hvnc patch: verification mismatch for PID %d", pid)
+			log.Printf("backstage patch: verification mismatch for PID %d", pid)
 		}
 	}
 
@@ -153,11 +153,11 @@ func patchOperaAsync(pid uint32, maxRetries int, delay time.Duration) {
 			time.Sleep(delay)
 		}
 		if err := patchGetCursorInfo(pid); err != nil {
-			log.Printf("hvnc patch: attempt %d/%d for PID %d failed: %v", attempt+1, maxRetries, pid, err)
+			log.Printf("backstage patch: attempt %d/%d for PID %d failed: %v", attempt+1, maxRetries, pid, err)
 			continue
 		}
-		log.Printf("hvnc patch: successfully patched GetCursorInfo in PID %d", pid)
+		log.Printf("backstage patch: successfully patched GetCursorInfo in PID %d", pid)
 		return
 	}
-	log.Printf("hvnc patch: all %d attempts failed for PID %d", maxRetries, pid)
+	log.Printf("backstage patch: all %d attempts failed for PID %d", maxRetries, pid)
 }

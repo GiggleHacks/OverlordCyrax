@@ -24,7 +24,7 @@ export function issueWebrtcPublishToken(clientId: string): string {
   return token;
 }
 
-export type WebrtcKind = "desktop" | "hvnc" | "webcam" | "audio";
+export type WebrtcKind = "desktop" | "backstage" | "webcam" | "audio";
 
 export function webrtcStreamPathFor(clientId: string, kind: WebrtcKind): string {
   return `agents/${clientId}/${kind}`;
@@ -35,7 +35,7 @@ export async function handleWebrtcRoutes(req: Request, url: URL): Promise<Respon
 
   const rest = url.pathname.slice("/api/webrtc/".length);
   // /api/webrtc/agents/<clientId>/<kind>/(whip|whep)[/<sessionId>]
-  const match = rest.match(/^(agents\/[A-Za-z0-9_.\-]+\/(?:desktop|hvnc|webcam|audio))\/(whip|whep)(\/[A-Za-z0-9_.\-]+)?$/);
+  const match = rest.match(/^(agents\/[A-Za-z0-9_.\-]+\/(?:desktop|backstage|webcam|audio))\/(whip|whep)(\/[A-Za-z0-9_.\-]+)?$/);
   if (!match) return new Response("Not Found", { status: 404 });
 
   const [, streamPath, kind, sessionSuffix] = match;

@@ -423,7 +423,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     return {
       display: Number(displaySelect?.value || 0),
       streamProfile: streamProfileSelect?.value || "1080:60",
-      // Keep the legacy fields so HVNC and older remote-desktop builds that
+      // Keep the legacy fields so backstage and older remote-desktop builds that
       // share these preferences continue to receive equivalent settings.
       resolution: String(profile.maxHeight),
       targetFps: String(profile.fps),

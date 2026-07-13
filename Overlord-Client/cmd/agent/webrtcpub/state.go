@@ -10,7 +10,7 @@ type Kind string
 
 const (
 	KindDesktop Kind = "desktop"
-	KindHVNC    Kind = "hvnc"
+	Kindbackstage    Kind = "backstage"
 	KindWebcam  Kind = "webcam"
 	KindAudio   Kind = "audio"
 )

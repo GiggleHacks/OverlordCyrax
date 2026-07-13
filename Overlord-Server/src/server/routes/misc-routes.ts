@@ -275,7 +275,7 @@ function summarizeCpuProfile(profile: any, durationMs: number) {
 
 const SHARED_UI_SETTING_FEATURES: Record<string, FeatureName> = {
   remote_desktop: "remote_desktop",
-  hvnc: "hvnc",
+  backstage: "backstage",
   webcam: "webcam",
 };
 
@@ -332,7 +332,7 @@ function sanitizeSharedUiSettings(scope: string, raw: unknown): Record<string, u
     assignIfDefined(out, "smoothing", pickSteppedNumber(input.smoothing, 0, 80, 5));
     assignIfDefined(out, "recordMode", pickString(input.recordMode, ["normal", "compact"]));
     assignIfDefined(out, "recordFps", pickString(input.recordFps, ["", "3", "5", "10", "15", "30", "60"]));
-  } else if (scope === "hvnc") {
+  } else if (scope === "backstage") {
     assignIfDefined(out, "resolution", pickString(input.resolution, ["720", "1080", "1440", "-1"]));
     assignIfDefined(out, "dxgi", pickBoolean(input.dxgi));
     assignIfDefined(out, "uia", pickBoolean(input.uia));

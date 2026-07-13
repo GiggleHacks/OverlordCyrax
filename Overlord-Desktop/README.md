@@ -8,7 +8,7 @@ A native desktop (fat) client for the Overlord server, built with [Tauri 2](http
 - Remembers your last server address across launches
 - TLS toggle for connecting to HTTPS or HTTP servers
 - Accepts self-signed certificates (Windows / WebView2 via `--ignore-certificate-errors`)
-- `window.open` from the web UI (audio, console, HVNC, etc.) opens native popup windows that inherit the parent's session
+- `window.open` from the web UI (audio, console, Backstage, etc.) opens native popup windows that inherit the parent's session
 - Cross-platform (macOS, Windows, Linux)
 
 ## Prerequisites
@@ -64,7 +64,7 @@ Defaults: port **5173**, TLS **enabled**.
 ## Notes
 
 - **Self-signed certs:** handled via WebView2's `--ignore-certificate-errors` flag (Windows). On macOS/Linux the system webview does not currently expose an equivalent flag through Tauri's config — issue a trusted cert (e.g. mkcert / Let's Encrypt) for production use on those platforms.
-- **Popups:** `window.open` calls from the web UI (audio, console, HVNC, etc.) are caught by Tauri's `on_new_window` handler and turned into real WebView2 popups. This is intentional — it's the only way the popup webview inherits the parent's auth cookie (which is `SameSite=Strict`).
+- **Popups:** `window.open` calls from the web UI (audio, console, Backstage, etc.) are caught by Tauri's `on_new_window` handler and turned into real WebView2 popups. This is intentional — it's the only way the popup webview inherits the parent's auth cookie (which is `SameSite=Strict`).
 - **Footprint:** ~10 MB installer vs. ~80 MB for an Electron equivalent.
 
 ## Project Layout
