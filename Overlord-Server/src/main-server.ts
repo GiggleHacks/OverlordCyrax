@@ -19,6 +19,7 @@ import { metrics } from "./metrics";
 import { getClientDbSyncStats } from "./client-db-sync";
 import { ensureDataDir } from "./paths";
 import { handleAuthRoutes } from "./server/routes/auth-routes";
+import { handleUiRoutes } from "./server/routes/ui-routes";
 import { handleAutoScriptsRoutes } from "./server/routes/auto-scripts-routes";
 import { handleSavedScriptsRoutes } from "./server/routes/saved-scripts-routes";
 import { handleEnrollmentRoutes, setPostApproveHook } from "./server/routes/enrollment-routes";
@@ -715,6 +716,7 @@ async function startServer() {
           ...routeDeps.registration,
           requestIP: (srv as any).requestIP,
         }),
+        (req, url, srv) => handleUiRoutes(req, url, srv as any),
         (req, url, srv) => handleAuthRoutes(req, url, srv as any),
         (req, url, srv) => handleOidcRoutes(req, url, srv as any),
         (req, url, srv) => handleNotificationsConfigRoutes(req, url, srv as any, routeDeps.notificationsConfig),

@@ -64,7 +64,7 @@ export const NAV_GROUPS = [
     children: [
       { href: "/metrics",       label: "Metrics",        icon: "fa-chart-line",      iconColor: "text-emerald-400", linkId: "metrics-link" },
       { href: "/graph",         label: "Graph",          icon: "fa-diagram-project", iconColor: "text-cyan-400",    linkId: "graph-link" },
-      { href: "/screenshots",   label: "Screenshot Wall", icon: "fa-images",         iconColor: "text-sky-400",     linkId: "screenshots-link",   hidden: true },
+      { href: "/screenshots",   label: "Screenshot Wall", icon: "fa-images",         iconColor: "text-sky-400",     linkId: "screenshots-link",   hidden: true, turboPrefetch: false },
     ],
   },
   {
@@ -83,10 +83,11 @@ export const NAV_GROUPS = [
 
 export function dropdownItem(child) {
   const hiddenCls = child.hidden ? " hidden" : "";
+  const prefetchAttr = child.turboPrefetch === false ? ' data-turbo-prefetch="false"' : "";
   const badgeHtml = child.hasBadge
     ? `<span id="enrollment-badge" class="nav-dd-badge hidden"></span>`
     : "";
-  return `<a href="${child.href}" id="${child.linkId}"
+  return `<a href="${child.href}" id="${child.linkId}"${prefetchAttr}
       class="nav-dd-item${hiddenCls}" data-link-id="${child.linkId}">
       <i class="fa-solid ${child.icon} ${child.iconColor} nav-dd-item-icon"></i>
       <span>${child.label}</span>

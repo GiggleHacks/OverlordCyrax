@@ -1,3 +1,5 @@
+import cytoscape from "/vendor/cytoscape/cytoscape.esm.min.mjs";
+
 const container = document.getElementById("client-graph");
 const searchInput = document.getElementById("graph-search");
 const statusSelect = document.getElementById("graph-status");
@@ -12,6 +14,7 @@ const detailActions = document.getElementById("graph-detail-actions");
 let cy = null;
 let currentGraph = null;
 let searchTimer = null;
+let graphPageActive = true;
 const LARGE_GRAPH_ANIMATION_CLIENTS = 30000;
 
 const typeColors = {
@@ -215,16 +218,12 @@ function selectNode(node) {
 }
 
 function renderGraph(graph) {
+  if (!graphPageActive || !container?.isConnected) return;
   currentGraph = graph;
   setSummary(graph.summary);
 
-  if (!window.cytoscape) {
-    if (summaryEl) summaryEl.textContent = "Cytoscape failed to load";
-    return;
-  }
-
   if (!cy) {
-    cy = window.cytoscape({
+    cy = cytoscape({
       container,
       elements: graphElements(graph),
       minZoom: 0.18,
@@ -305,7 +304,7 @@ function renderGraph(graph) {
 }
 
 async function loadGraph() {
-  if (!container) return;
+  if (!graphPageActive || !container) return;
   if (summaryEl) summaryEl.textContent = "Loading...";
   const params = new URLSearchParams({
     limit: "350",
@@ -314,10 +313,12 @@ async function loadGraph() {
   });
   const res = await fetch(`/api/client-graph?${params}`, { credentials: "include" });
   if (!res.ok) {
+    if (!graphPageActive) return;
     if (summaryEl) summaryEl.textContent = `Graph unavailable (${res.status})`;
     return;
   }
-  renderGraph(await res.json());
+  const graph = await res.json();
+  if (graphPageActive) renderGraph(graph);
 }
 
 function debounceLoad() {
@@ -332,10 +333,19 @@ searchInput?.addEventListener("input", debounceLoad);
 statusSelect?.addEventListener("change", loadGraph);
 refreshBtn?.addEventListener("click", loadGraph);
 fitBtn?.addEventListener("click", () => cy?.fit(undefined, 32));
-window.addEventListener("resize", () => {
+const handleResize = () => {
   cy?.resize();
   cy?.fit(undefined, 32);
-});
+};
+window.addEventListener("resize", handleResize);
+
+window.addEventListener("pagehide", () => {
+  graphPageActive = false;
+  clearTimeout(searchTimer);
+  window.removeEventListener("resize", handleResize);
+  cy?.destroy();
+  cy = null;
+}, { once: true });
 
 bindInspectorActions();
 loadGraph();

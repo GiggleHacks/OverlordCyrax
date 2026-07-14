@@ -155,6 +155,24 @@ copyFile(
   path.join(NM, "chart.js", "dist", "chart.umd.js"),
   path.join(VENDOR, "chart.js", "chart.umd.js"),
 );
+const chartEntry = `
+export { default } from '${path.join(NM, "chart.js", "auto", "auto.js").replace(/\\/g, "/")}';
+`;
+const chartTmp = path.join(ROOT, "scripts", "_chart-entry.ts");
+await Bun.write(chartTmp, chartEntry);
+const chartBuild = await Bun.build({
+  entrypoints: [chartTmp],
+  minify: true,
+  target: "browser",
+  format: "esm",
+});
+if (chartBuild.success) {
+  await Bun.write(path.join(VENDOR, "chart.js", "chart.esm.js"), chartBuild.outputs[0]);
+} else {
+  console.error("Chart.js bundle failed:", chartBuild.logs);
+  process.exit(1);
+}
+rmSync(chartTmp, { force: true });
 
 /* ── Monaco Editor ───────────────────────────────────────────────── */
 
@@ -193,8 +211,8 @@ copyFile(
 
 console.log("Copying Cytoscape.js ...");
 copyFile(
-  path.join(NM, "cytoscape", "dist", "cytoscape.min.js"),
-  path.join(VENDOR, "cytoscape", "cytoscape.min.js"),
+  path.join(NM, "cytoscape", "dist", "cytoscape.esm.min.mjs"),
+  path.join(VENDOR, "cytoscape", "cytoscape.esm.min.mjs"),
 );
 
 /* ── Hotwire Turbo ───────────────────────────────────────────────── */
@@ -203,6 +221,14 @@ console.log("Copying Hotwire Turbo ...");
 copyFile(
   path.join(NM, "@hotwired", "turbo", "dist", "turbo.es2017-esm.js"),
   path.join(VENDOR, "hotwired", "turbo.es2017-esm.js"),
+);
+
+/* ── Hotwire Stimulus ────────────────────────────────────────────── */
+
+console.log("Copying Hotwire Stimulus ...");
+copyFile(
+  path.join(NM, "@hotwired", "stimulus", "dist", "stimulus.js"),
+  path.join(VENDOR, "hotwired", "stimulus.js"),
 );
 
 /* ── highlight.js (bundle core + languages) ──────────────────────── */

@@ -45,7 +45,7 @@ function cleanupPageResources() {
   pageTrackingEnabled = false;
   window.dispatchEvent(new Event("pagehide"));
 
-  for (const id of tracked.intervals) original.clearInterval(id);
+  for (const id of tracked.intervals) original.clearInterval.call(window, id);
   for (const entry of tracked.events) {
     original.removeEventListener.call(entry.target, entry.type, entry.listener, entry.options);
   }
@@ -225,8 +225,8 @@ export function setupTurboNavigation({ onPathChange } = {}) {
 
   installPageResourceTracker();
   config.drive.progressBarDelay = 150;
-  // Existing forms already have explicit fetch handlers. Turbo owns navigation only.
-  config.forms.mode = "off";
+  // Existing forms keep their explicit fetch handlers. New Turbo Frames opt in per form.
+  config.forms.mode = "optin";
   cache.exemptPageFromCache();
 
   document.getElementById("top-nav")?.setAttribute("data-turbo-permanent", "");

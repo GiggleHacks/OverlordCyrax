@@ -1,3 +1,5 @@
+import Chart from "/vendor/chart.js/chart.esm.js";
+
 let clientsChart = null;
 let commandsChart = null;
 let bandwidthChart = null;
@@ -29,6 +31,8 @@ let countryGlobeHoverEntry = null;
 let countryGlobeSortedFeatures = [];
 let countryGlobeLastSpinFrameAt = 0;
 let countryGlobeLastHoverFrameAt = 0;
+let metricsPollTimer = null;
+let metricsPageActive = true;
 
 const GEOJSON_URL = "/vendor/geo-countries/countries.geojson";
 const MAX_CHART_POINTS = 240;
@@ -1806,6 +1810,7 @@ function updateCharts(history, snapshot) {
 }
 
 async function fetchMetrics() {
+  if (!metricsPageActive) return;
   try {
     const response = await fetch(`/api/metrics?historyLimit=${MAX_CHART_POINTS}`, {
       credentials: "include",
@@ -1821,11 +1826,13 @@ async function fetchMetrics() {
     }
 
     const data = await response.json();
+    if (!metricsPageActive) return;
     updateMetrics(data.snapshot, data.debug);
     updateCharts(data.history, data.snapshot);
 
     document.getElementById("status-text").textContent = "Live";
   } catch (err) {
+    if (!metricsPageActive) return;
     console.error("Error fetching metrics:", err);
     document.getElementById("status-text").textContent = "Error";
   }
@@ -1834,12 +1841,14 @@ async function fetchMetrics() {
 async function checkAuth() {
   try {
     const res = await fetch("/api/auth/me", { credentials: "include" });
+    if (!metricsPageActive) return;
     if (!res.ok) {
       window.location.href = "/";
       return;
     }
 
     const data = await res.json();
+    if (!metricsPageActive) return;
     document.getElementById("username-display").textContent = data.username;
 
     const roleBadge = document.getElementById("role-badge");
@@ -1895,16 +1904,18 @@ async function checkAuth() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
+async function initMetricsPage() {
   await checkAuth();
+  if (!metricsPageActive) return;
 
   initCharts();
 
   await initCountryMap();
+  if (!metricsPageActive) return;
 
   await fetchMetrics();
 
-  setInterval(fetchMetrics, METRICS_POLL_INTERVAL_MS);
+  metricsPollTimer = setInterval(fetchMetrics, METRICS_POLL_INTERVAL_MS);
 
   const logoutBtn = document.getElementById("logout-btn");
   if (logoutBtn && !logoutBtn.dataset.boundLogout) {
@@ -1929,4 +1940,37 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     });
   }
-});
+}
+
+function teardownMetricsPage() {
+  metricsPageActive = false;
+  if (metricsPollTimer !== null) clearInterval(metricsPollTimer);
+  metricsPollTimer = null;
+  if (countryGlobeFrame !== null) cancelAnimationFrame(countryGlobeFrame);
+  countryGlobeFrame = null;
+  countryGlobeResizeObserver?.disconnect();
+  countryGlobeResizeObserver = null;
+  countryGlobeCtx = null;
+  countryGlobeCanvas = null;
+  for (const chart of [
+    clientsChart,
+    commandsChart,
+    bandwidthChart,
+    httpRequestsChart,
+    httpChart,
+    memoryChart,
+    eventLoopChart,
+    sessionsChart,
+    osChart,
+  ]) {
+    chart?.destroy();
+  }
+}
+
+window.addEventListener("pagehide", teardownMetricsPage, { once: true });
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initMetricsPage, { once: true });
+} else {
+  void initMetricsPage();
+}

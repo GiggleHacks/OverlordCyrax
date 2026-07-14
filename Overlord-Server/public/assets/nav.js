@@ -12,6 +12,7 @@ import { createAdaptiveNavController } from "./nav/layout.js";
 import { applyUserRoleUI, applyThumbnailWallVisibility } from "./nav/role-ui.js";
 import { loadPluginNavItems } from "./nav/plugins-loader.js";
 import { init as initCommandPalette } from "./command-palette.js";
+import "./stimulus/application.js";
 import {
   runWithoutPageTracking,
   setupTurboNavigation,
