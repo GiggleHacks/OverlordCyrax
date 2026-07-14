@@ -9,6 +9,7 @@ import {
   normalizeSolRpcUrl,
   saveSolRpcEndpointUrls,
 } from "../../sol-rpc-endpoints";
+import { testSolRpcEndpoint } from "../../sol-rpc-test";
 
 let _solana: typeof import("@solana/web3.js") | null = null;
 async function getSolana() {
@@ -72,6 +73,20 @@ export async function handleSolRoutes(
 
     try { requirePermission(user, "system:configure"); }
     catch (error) { return error instanceof Response ? error : new Response("Forbidden", { status: 403 }); }
+
+    if (req.method === "POST" && url.pathname === "/api/sol/rpc-endpoints/test") {
+      const records = getSolRpcEndpoints();
+      const results = await Promise.all(records.map(async (record) => ({
+        ...record,
+        ...await testSolRpcEndpoint(record.url),
+      })));
+      return Response.json({
+        tested: results.length,
+        passed: results.filter((result) => result.ok).length,
+        failed: results.filter((result) => !result.ok).length,
+        results,
+      });
+    }
 
     if (req.method === "POST" && url.pathname === "/api/sol/rpc-endpoints") {
       const body = await req.json();

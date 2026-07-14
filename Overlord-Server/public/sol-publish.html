@@ -135,9 +135,14 @@
                 <h2 class="text-base font-semibold">RPC endpoint pool</h2>
                 <p class="text-xs text-slate-400">Shared by future client builds.</p>
               </div>
+              <button type="button" id="test-all-rpc-btn"
+                class="ml-auto shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 text-xs font-semibold transition-colors disabled:opacity-50">
+                <i class="fa-solid fa-vial"></i> Test all
+              </button>
             </div>
 
             <div id="rpc-endpoint-list" class="space-y-2"></div>
+            <div id="rpc-test-summary" class="hidden rounded-lg border px-3 py-2 text-xs"></div>
 
             <div class="pt-3 border-t border-slate-800 space-y-2">
               <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500" for="new-rpc-url">Add endpoint</label>

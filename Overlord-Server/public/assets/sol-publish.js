@@ -15,10 +15,14 @@ const rpcEndpointList = document.getElementById("rpc-endpoint-list");
 const newRpcInput = document.getElementById("new-rpc-url");
 const addRpcBtn = document.getElementById("add-rpc-btn");
 const rpcManagerError = document.getElementById("rpc-manager-error");
+const testAllRpcBtn = document.getElementById("test-all-rpc-btn");
+const rpcTestSummary = document.getElementById("rpc-test-summary");
 
-if (!rpcSelect || !customRpcWrapper || !customRpcInput || !privateKeyInput || !toggleKeyBtn || !serverUrlInput || !previewBtn || !publishBtn || !outputSection || !outputDiv || !walletInfo || !walletAddress || !rpcEndpointList || !newRpcInput || !addRpcBtn || !rpcManagerError) {
+if (!rpcSelect || !customRpcWrapper || !customRpcInput || !privateKeyInput || !toggleKeyBtn || !serverUrlInput || !previewBtn || !publishBtn || !outputSection || !outputDiv || !walletInfo || !walletAddress || !rpcEndpointList || !newRpcInput || !addRpcBtn || !rpcManagerError || !testAllRpcBtn || !rpcTestSummary) {
   return;
 }
+
+let rpcTestResults = new Map();
 
 function normalizeRpcEndpoints(value) {
   const seen = new Set();
@@ -75,8 +79,11 @@ function renderRpcEndpointManager(records) {
     return;
   }
   records.forEach((record) => {
+    const testResult = rpcTestResults.get(record.id);
     const row = document.createElement("div");
-    row.className = "group flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950/60 p-1.5";
+    row.className = `group flex flex-wrap items-center gap-1 rounded-lg border bg-slate-950/60 p-1.5 ${
+      testResult ? (testResult.ok ? "border-emerald-500/40" : "border-red-500/40") : "border-slate-800"
+    }`;
     const input = document.createElement("input");
     input.type = "url";
     input.value = record.url;
@@ -94,9 +101,50 @@ function renderRpcEndpointManager(records) {
     remove.innerHTML = '<i class="fa-solid fa-trash"></i>';
     remove.addEventListener("click", () => mutateRpcEndpoint(`/api/sol/rpc-endpoints/${record.id}`, "DELETE"));
     row.append(input, save, remove);
+    if (testResult) {
+      const status = document.createElement("div");
+      status.className = `basis-full px-2 pb-1 text-[11px] ${testResult.ok ? "text-emerald-300" : "text-red-300"}`;
+      status.title = testResult.ok ? `Latest blockhash: ${testResult.blockhash}` : testResult.error;
+      status.innerHTML = testResult.ok
+        ? `<i class="fa-solid fa-circle-check mr-1"></i>Valid response · ${testResult.latencyMs} ms · slot ${testResult.slot.toLocaleString()} · block height ${testResult.lastValidBlockHeight.toLocaleString()}`
+        : `<i class="fa-solid fa-circle-xmark mr-1"></i>${escapeHtml(testResult.error || "RPC test failed")} · ${testResult.latencyMs} ms`;
+      row.appendChild(status);
+    }
     rpcEndpointList.appendChild(row);
   });
 }
+
+function escapeHtml(value) {
+  const element = document.createElement("span");
+  element.textContent = String(value);
+  return element.innerHTML;
+}
+
+testAllRpcBtn.addEventListener("click", async () => {
+  setRpcManagerError();
+  rpcTestSummary.classList.add("hidden");
+  testAllRpcBtn.disabled = true;
+  testAllRpcBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Testing...';
+  try {
+    const res = await fetch("/api/sol/rpc-endpoints/test", {
+      method: "POST",
+      credentials: "include",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Failed to test RPC endpoints");
+    rpcTestResults = new Map((data.results || []).map((result) => [result.id, result]));
+    rpcTestSummary.textContent = `${data.passed} of ${data.tested} endpoints returned a valid Solana blockhash${data.failed ? `; ${data.failed} failed` : "."}`;
+    rpcTestSummary.className = `rounded-lg border px-3 py-2 text-xs ${
+      data.failed ? "border-amber-500/30 bg-amber-500/5 text-amber-200" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-200"
+    }`;
+    await loadRpcEndpoints();
+  } catch (error) {
+    setRpcManagerError(error?.message || "Failed to test RPC endpoints");
+  } finally {
+    testAllRpcBtn.disabled = false;
+    testAllRpcBtn.innerHTML = '<i class="fa-solid fa-vial"></i> Test all';
+  }
+});
 
 async function mutateRpcEndpoint(path, method, body) {
   setRpcManagerError();
@@ -110,6 +158,8 @@ async function mutateRpcEndpoint(path, method, body) {
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || "Failed to save RPC endpoints");
     newRpcInput.value = "";
+    rpcTestResults.clear();
+    rpcTestSummary.classList.add("hidden");
     await loadRpcEndpoints();
   } catch (error) {
     setRpcManagerError(error?.message || "Failed to save RPC endpoints");
