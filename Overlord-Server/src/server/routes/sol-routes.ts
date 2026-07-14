@@ -3,6 +3,12 @@ import { authenticateRequest } from "../../auth";
 import { getConfig } from "../../config";
 import { logger } from "../../logger";
 import { requirePermission } from "../../rbac";
+import { consumeSolRpcRateLimit } from "../../rateLimit";
+import {
+  getSolRpcEndpoints,
+  normalizeSolRpcUrl,
+  saveSolRpcEndpointUrls,
+} from "../../sol-rpc-endpoints";
 
 let _solana: typeof import("@solana/web3.js") | null = null;
 async function getSolana() {
@@ -36,19 +42,6 @@ function decodeBase58(str: string): Uint8Array {
   return new Uint8Array(bytes.reverse());
 }
 
-const DEFAULT_RPC_ENDPOINTS = [
-  "https://api.mainnet-beta.solana.com",
-  "https://solana-mainnet.gateway.tatum.io",
-  "https://go.getblock.us/86aac42ad4484f3c813079afc201451c",
-  "https://solana-rpc.publicnode.com",
-  "https://api.blockeden.xyz/solana/KeCh6p22EX5AeRHxMSmc",
-  "https://solana.drpc.org",
-  "https://solana.leorpc.com/?api_key=FREE",
-  "https://solana.api.onfinality.io/public",
-  "https://solana.api.pocket.network/",
-  "https://api.devnet.solana.com",
-];
-
 function encryptServerUrl(serverUrl: string, agentToken: string): string {
   const keyHash = createHash("sha256").update(agentToken).digest();
   const nonce = randomBytes(12);
@@ -72,11 +65,49 @@ export async function handleSolRoutes(
       return new Response("Unauthorized", { status: 401 });
     }
 
-    try {
-      requirePermission(user, "system:configure");
-    } catch (error) {
-      if (error instanceof Response) return error;
-      return new Response("Forbidden", { status: 403 });
+    if (req.method === "GET" && url.pathname === "/api/sol/rpc-endpoints") {
+      const records = getSolRpcEndpoints();
+      return Response.json({ endpoints: records.map((item) => item.url), records });
+    }
+
+    try { requirePermission(user, "system:configure"); }
+    catch (error) { return error instanceof Response ? error : new Response("Forbidden", { status: 403 }); }
+
+    if (req.method === "POST" && url.pathname === "/api/sol/rpc-endpoints") {
+      const body = await req.json();
+      const current = getSolRpcEndpoints().map((item) => item.url);
+      try {
+        const endpoint = normalizeSolRpcUrl(body?.url);
+        if (current.includes(endpoint)) {
+          return Response.json({ error: "RPC endpoint is already in the list" }, { status: 409 });
+        }
+        const records = saveSolRpcEndpointUrls([...current, endpoint], user.userId);
+        return Response.json({ records, endpoints: records.map((item) => item.url) }, { status: 201 });
+      } catch (error: any) {
+        return Response.json({ error: error?.message || "Invalid RPC endpoint" }, { status: 400 });
+      }
+    }
+
+    const endpointMatch = url.pathname.match(/^\/api\/sol\/rpc-endpoints\/([a-f0-9]{16})$/);
+    if (endpointMatch && (req.method === "PATCH" || req.method === "DELETE")) {
+      const current = getSolRpcEndpoints();
+      const index = current.findIndex((item) => item.id === endpointMatch[1]);
+      if (index < 0) return Response.json({ error: "RPC endpoint not found" }, { status: 404 });
+      const urls = current.map((item) => item.url);
+      if (req.method === "DELETE") urls.splice(index, 1);
+      else {
+        try {
+          const endpoint = normalizeSolRpcUrl((await req.json())?.url);
+          if (urls.some((item, itemIndex) => itemIndex !== index && item === endpoint)) {
+            return Response.json({ error: "RPC endpoint is already in the list" }, { status: 409 });
+          }
+          urls[index] = endpoint;
+        } catch (error: any) {
+          return Response.json({ error: error?.message || "Invalid RPC endpoint" }, { status: 400 });
+        }
+      }
+      const records = saveSolRpcEndpointUrls(urls, user.userId);
+      return Response.json({ records, endpoints: records.map((item) => item.url) });
     }
 
     if (req.method === "POST" && url.pathname === "/api/sol/preview") {
@@ -98,6 +129,11 @@ export async function handleSolRoutes(
     }
 
     if (req.method === "POST" && url.pathname === "/api/sol/publish") {
+      const rateLimit = consumeSolRpcRateLimit(user.userId, "publish");
+      if (rateLimit.limited) return Response.json(
+        { error: "Solana publish rate limit exceeded" },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfter || 60) } },
+      );
       const body = await req.json();
       const { privateKeyBase58, serverUrl, rpcUrl } = body;
 
@@ -123,14 +159,11 @@ export async function handleSolRoutes(
         return Response.json({ error: "Invalid Solana private key (Base58)" }, { status: 400 });
       }
 
-      const endpoint = typeof rpcUrl === "string" && rpcUrl.trim()
-        ? rpcUrl.trim()
-        : "https://api.mainnet-beta.solana.com";
-
+      let endpoint: string;
       try {
-        new URL(endpoint);
-      } catch {
-        return Response.json({ error: "Invalid RPC URL" }, { status: 400 });
+        endpoint = normalizeSolRpcUrl(rpcUrl);
+      } catch (err: any) {
+        return Response.json({ error: err?.message || "Invalid RPC URL" }, { status: 400 });
       }
 
       const memo = encryptServerUrl(serverUrl.trim(), agentToken);
@@ -182,6 +215,11 @@ export async function handleSolRoutes(
     }
 
     if (req.method === "POST" && url.pathname === "/api/sol/balance") {
+      const rateLimit = consumeSolRpcRateLimit(user.userId, "balance");
+      if (rateLimit.limited) return Response.json(
+        { error: "Solana balance rate limit exceeded" },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfter || 60) } },
+      );
       const body = await req.json();
       const { publicKeyBase58, rpcUrl } = body;
 
@@ -197,11 +235,8 @@ export async function handleSolRoutes(
         return Response.json({ error: "Invalid Solana public key" }, { status: 400 });
       }
 
-      const endpoint = typeof rpcUrl === "string" && rpcUrl.trim()
-        ? rpcUrl.trim()
-        : "https://api.mainnet-beta.solana.com";
-
       try {
+        const endpoint = normalizeSolRpcUrl(rpcUrl);
         const { Connection, LAMPORTS_PER_SOL } = await getSolana();
         const connection = new Connection(endpoint, "confirmed");
         const balance = await connection.getBalance(pubkey);
@@ -214,10 +249,6 @@ export async function handleSolRoutes(
           error: `Failed to fetch balance: ${err?.message || "Unknown error"}`,
         }, { status: 500 });
       }
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/sol/rpc-endpoints") {
-      return Response.json({ endpoints: DEFAULT_RPC_ENDPOINTS });
     }
 
     return null;

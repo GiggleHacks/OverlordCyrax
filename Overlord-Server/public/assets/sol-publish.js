@@ -1,16 +1,4 @@
 (() => {
-const DEFAULT_RPC_ENDPOINTS = [
-  "https://api.mainnet-beta.solana.com",
-  "https://solana-mainnet.gateway.tatum.io",
-  "https://solana-rpc.publicnode.com",
-  "https://api.blockeden.xyz/solana/KeCh6p22EX5AeRHxMSmc",
-  "https://solana.drpc.org",
-  "https://solana.leorpc.com/?api_key=FREE",
-  "https://solana.api.onfinality.io/public",
-  "https://solana.api.pocket.network/",
-  "https://api.devnet.solana.com",
-];
-
 const rpcSelect = document.getElementById("rpc-url");
 const customRpcWrapper = document.getElementById("custom-rpc-wrapper");
 const customRpcInput = document.getElementById("custom-rpc-url");
@@ -23,8 +11,12 @@ const outputSection = document.getElementById("output-section");
 const outputDiv = document.getElementById("output");
 const walletInfo = document.getElementById("wallet-info");
 const walletAddress = document.getElementById("wallet-address");
+const rpcEndpointList = document.getElementById("rpc-endpoint-list");
+const newRpcInput = document.getElementById("new-rpc-url");
+const addRpcBtn = document.getElementById("add-rpc-btn");
+const rpcManagerError = document.getElementById("rpc-manager-error");
 
-if (!rpcSelect || !customRpcWrapper || !customRpcInput || !privateKeyInput || !toggleKeyBtn || !serverUrlInput || !previewBtn || !publishBtn || !outputSection || !outputDiv || !walletInfo || !walletAddress) {
+if (!rpcSelect || !customRpcWrapper || !customRpcInput || !privateKeyInput || !toggleKeyBtn || !serverUrlInput || !previewBtn || !publishBtn || !outputSection || !outputDiv || !walletInfo || !walletAddress || !rpcEndpointList || !newRpcInput || !addRpcBtn || !rpcManagerError) {
   return;
 }
 
@@ -48,23 +40,89 @@ function appendRpcOption(value, label = value) {
 }
 
 async function loadRpcEndpoints() {
+  const selected = rpcSelect.value;
   rpcSelect.innerHTML = "";
-  let endpoints = [];
+  let records = [];
   try {
     const res = await fetch("/api/sol/rpc-endpoints", { credentials: "include" });
     if (res.ok) {
       const data = await res.json();
-      endpoints = normalizeRpcEndpoints(data?.endpoints);
+      const urls = normalizeRpcEndpoints(data?.endpoints);
+      records = Array.isArray(data?.records)
+        ? data.records.filter((item) => item && typeof item.id === "string" && urls.includes(item.url))
+        : urls.map((url) => ({ id: "", url }));
     }
   } catch {}
-
-  if (endpoints.length === 0) {
-    endpoints = DEFAULT_RPC_ENDPOINTS;
-  }
-
-  normalizeRpcEndpoints(endpoints).forEach((ep) => appendRpcOption(ep));
+  records.forEach((item) => appendRpcOption(item.url));
   appendRpcOption("__custom__", "Custom RPC endpoint...");
+  rpcSelect.value = records.some((item) => item.url === selected) ? selected : (records[0]?.url || "__custom__");
+  customRpcWrapper.classList.toggle("hidden", rpcSelect.value !== "__custom__");
+  renderRpcEndpointManager(records);
 }
+
+function setRpcManagerError(message = "") {
+  rpcManagerError.textContent = message;
+  rpcManagerError.classList.toggle("hidden", !message);
+}
+
+function renderRpcEndpointManager(records) {
+  rpcEndpointList.innerHTML = "";
+  if (records.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "rounded-lg border border-dashed border-slate-700 px-3 py-4 text-center text-xs text-slate-500";
+    empty.textContent = "No saved endpoints. Add one below or use a custom endpoint for this publish.";
+    rpcEndpointList.appendChild(empty);
+    return;
+  }
+  records.forEach((record) => {
+    const row = document.createElement("div");
+    row.className = "group flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950/60 p-1.5";
+    const input = document.createElement("input");
+    input.type = "url";
+    input.value = record.url;
+    input.className = "flex-1 min-w-0 px-2 py-1.5 bg-transparent border border-transparent rounded text-xs font-mono text-slate-300 focus:outline-none focus:border-sky-500/60 focus:bg-slate-950";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "inline-flex items-center justify-center w-8 h-8 shrink-0 rounded-md text-slate-500 hover:text-sky-300 hover:bg-sky-500/10 transition-colors";
+    save.title = "Save endpoint";
+    save.innerHTML = '<i class="fa-solid fa-floppy-disk"></i>';
+    save.addEventListener("click", () => mutateRpcEndpoint(`/api/sol/rpc-endpoints/${record.id}`, "PATCH", { url: input.value }));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "inline-flex items-center justify-center w-8 h-8 shrink-0 rounded-md text-slate-500 hover:text-red-300 hover:bg-red-500/10 transition-colors";
+    remove.title = "Delete endpoint";
+    remove.innerHTML = '<i class="fa-solid fa-trash"></i>';
+    remove.addEventListener("click", () => mutateRpcEndpoint(`/api/sol/rpc-endpoints/${record.id}`, "DELETE"));
+    row.append(input, save, remove);
+    rpcEndpointList.appendChild(row);
+  });
+}
+
+async function mutateRpcEndpoint(path, method, body) {
+  setRpcManagerError();
+  try {
+    const res = await fetch(path, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      credentials: "include",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Failed to save RPC endpoints");
+    newRpcInput.value = "";
+    await loadRpcEndpoints();
+  } catch (error) {
+    setRpcManagerError(error?.message || "Failed to save RPC endpoints");
+  }
+}
+
+addRpcBtn.addEventListener("click", () => mutateRpcEndpoint("/api/sol/rpc-endpoints", "POST", { url: newRpcInput.value }));
+newRpcInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addRpcBtn.click();
+  }
+});
 
 loadRpcEndpoints();
 
@@ -122,8 +180,8 @@ async function checkWalletBalance() {
 function showOutput(text, isError = false) {
   outputSection.classList.remove("hidden");
   outputDiv.textContent = text;
-  outputDiv.className = `p-3 bg-slate-800/60 border rounded-lg text-sm font-mono break-all whitespace-pre-wrap max-h-64 overflow-y-auto ${
-    isError ? "border-red-700/60 text-red-300" : "border-slate-700 text-slate-200"
+  outputDiv.className = `p-4 bg-slate-950/70 border rounded-lg text-sm font-mono break-all whitespace-pre-wrap max-h-72 overflow-y-auto ${
+    isError ? "border-red-500/40 text-red-300" : "border-slate-800 text-slate-200"
   }`;
 }
 

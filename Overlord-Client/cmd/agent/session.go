@@ -57,8 +57,8 @@ func runClient(cfg config.Config) {
 	var loggedTLS bool
 	var lastDisconnect time.Time
 	var lastSolRefresh time.Time
-	solInitialWait := 2 * time.Minute
-	solRefreshInterval := 2*time.Minute + time.Duration(rand.Intn(60))*time.Second
+	solInitialWait := 2*time.Minute + time.Duration(rand.Intn(60))*time.Second
+	solRefreshInterval := 5*time.Minute + time.Duration(rand.Intn(300))*time.Second
 
 	for {
 

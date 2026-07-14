@@ -162,6 +162,16 @@ export function consumeUnauthorizedRateLimit(ip: string): { limited: boolean; re
   return consumeRequestRateLimit(`unauthorized:${ip}`, "Unauthorized request", policy);
 }
 
+export function consumeSolRpcRateLimit(
+  userId: number,
+  action: "balance" | "publish",
+): { limited: boolean; retryAfter?: number } {
+  const policy = action === "publish"
+    ? makeRequestPolicy("SOL_PUBLISH", { maxRequests: 3, windowMs: 5 * 60 * 1000, lockoutMs: 5 * 60 * 1000 })
+    : makeRequestPolicy("SOL_BALANCE", { maxRequests: 12, windowMs: 60 * 1000, lockoutMs: 60 * 1000 });
+  return consumeRequestRateLimit(`sol-${action}:${userId}`, `Solana ${action}`, policy);
+}
+
 export function clearRequestRateLimitsForTests(): void {
   requestRateLimitStore.clear();
 }

@@ -29,6 +29,7 @@ import { resolveRuntimeRoot } from "../runtime-paths";
 import { createUploadPull } from "../file-transfer-state";
 import { handleBuildProfileRoutes } from "./build-profile-routes";
 import { sanitizeInitialClientTag } from "../build-config-sanitize";
+import { getSolRpcEndpointUrls, normalizeSolRpcUrls } from "../../sol-rpc-endpoints";
 
 type RequestIpProvider = {
   requestIP: (req: Request) => { address?: string } | null | undefined;
@@ -287,8 +288,22 @@ export async function handleBuildRoutes(
         }
         safeSolAddress = trimmedAddr;
 
-        if (typeof solRpcEndpoints === "string" && solRpcEndpoints.trim()) {
-          const endpoints = solRpcEndpoints.split("\n").map((e: string) => e.trim()).filter(Boolean);
+        const requestedEndpoints = typeof solRpcEndpoints === "string" && solRpcEndpoints.trim()
+          ? solRpcEndpoints.split("\n").map((e: string) => e.trim()).filter(Boolean)
+          : getSolRpcEndpointUrls();
+        if (requestedEndpoints.length === 0) {
+          return Response.json(
+            { error: "Solana memo mode requires at least one RPC endpoint" },
+            { status: 400 },
+          );
+        }
+        if (requestedEndpoints.length > 0) {
+          let endpoints: string[];
+          try {
+            endpoints = normalizeSolRpcUrls(requestedEndpoints);
+          } catch (error: any) {
+            return Response.json({ error: error?.message || "Invalid RPC endpoints" }, { status: 400 });
+          }
           for (const ep of endpoints) {
             try {
               const parsed = new URL(ep);

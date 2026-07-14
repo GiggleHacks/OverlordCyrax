@@ -53,6 +53,20 @@ let currentUsername = null;
 let showAllBuilds = false;
 let buildPlugins = [];
 
+async function loadSolRpcEndpoints() {
+  const field = document.getElementById("sol-rpc-endpoints");
+  if (!field || field.value.trim()) return;
+  try {
+    const res = await fetch("/api/sol/rpc-endpoints", { credentials: "include" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const endpoints = Array.isArray(data?.endpoints)
+      ? data.endpoints.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    field.value = endpoints.join("\n");
+  } catch {}
+}
+
 async function loadServerVersion() {
   try {
     const res = await fetch("/api/version", { credentials: "include" });
@@ -937,22 +951,7 @@ if (solMemoCheckbox && solSettings) {
       updateServerUrlPlaceholder();
     }
 
-    if (isSol) {
-      const rpcField = document.getElementById("sol-rpc-endpoints");
-      if (rpcField && !rpcField.value.trim()) {
-        rpcField.value = [
-          "https://api.mainnet-beta.solana.com",
-          "https://solana-mainnet.gateway.tatum.io",
-          "https://go.getblock.us/86aac42ad4484f3c813079afc201451c",
-          "https://solana-rpc.publicnode.com",
-          "https://api.blockeden.xyz/solana/KeCh6p22EX5AeRHxMSmc",
-          "https://solana.drpc.org",
-          "https://solana.leorpc.com/?api_key=FREE",
-          "https://solana.api.onfinality.io/public",
-          "https://solana.api.pocket.network/",
-        ].join("\n");
-      }
-    }
+    if (isSol) loadSolRpcEndpoints();
   });
 }
 
@@ -1634,6 +1633,7 @@ async function init() {
     }
 
     await loadServerVersion();
+    await loadSolRpcEndpoints();
     await loadSavedBuilds();
     await loadBuildProfiles();
 
