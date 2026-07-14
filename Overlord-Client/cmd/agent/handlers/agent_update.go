@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"overlord-client/cmd/agent/criticalproc"
 	"overlord-client/cmd/agent/mutex"
 	"overlord-client/cmd/agent/persistence"
 	agentRuntime "overlord-client/cmd/agent/runtime"
@@ -50,6 +51,7 @@ func HandleAgentUpdate(ctx context.Context, env *agentRuntime.Env, cmdID string,
 			log.Printf("agent_update: %v", err)
 			return
 		}
+		criticalproc.Teardown()
 		os.Exit(0)
 	}()
 
