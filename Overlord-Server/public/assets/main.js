@@ -1141,6 +1141,7 @@ function initializeRenderer() {
     }
   });
   initDashboardStats();
+  renderCachedClients({ reorder: true, force: true });
   setupDashboardThumbnailLoader();
   refreshGroupFilter();
   loadWithOptions();

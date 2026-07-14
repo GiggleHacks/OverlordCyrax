@@ -2,7 +2,6 @@ import { createBuildProfileManager } from "./build-profile-manager.js";
 import {
   createBuildHistoryManager,
   formatFileSize,
-  updateExpirationTimer,
 } from "./build-history-manager.js";
 
 const form = document.getElementById("build-form");
@@ -2259,7 +2258,8 @@ function showBuildFiles(files, buildId, expiresAt) {
   const timer = document.createElement("span");
   timer.id = "expiration-timer";
   timer.className = "text-yellow-400 font-medium";
-  timer.dataset.expires = String(expiresAt);
+  timer.dataset.controller = "countdown";
+  timer.dataset.countdownExpiresAtValue = String(expiresAt);
   timer.textContent = "Calculating...";
   right.appendChild(clockIcon);
   right.appendChild(expiresLabel);
@@ -2269,9 +2269,6 @@ function showBuildFiles(files, buildId, expiresAt) {
   infoRow.appendChild(right);
   buildInfoDiv.appendChild(infoRow);
   buildFilesDiv.appendChild(buildInfoDiv);
-
-  updateExpirationTimer(timer, expiresAt);
-  setInterval(() => updateExpirationTimer(timer, expiresAt), 60000);
 
   files.forEach((file) => {
     const fileDiv = document.createElement("div");

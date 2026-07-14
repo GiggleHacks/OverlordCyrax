@@ -40,18 +40,23 @@
                 class="block w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer" />
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
+              <div data-controller="toggle">
                 <div class="flex items-center gap-1.5 mb-1">
                   <label class="block text-sm font-medium text-slate-300">Password (optional)</label>
-                  <button type="button" id="password-info-btn"
+                  <button type="button" id="password-info-btn" data-action="toggle#toggle" aria-expanded="false" aria-controls="password-info-panel"
                     class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-slate-200 text-xs transition-colors"
                     title="How to download with a password">
                     <i class="fa-solid fa-question"></i>
                   </button>
                 </div>
-                <input type="password" id="upload-password" placeholder="Leave empty for no password"
-                  class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/50" />
-                <div id="password-info-panel" class="hidden mt-2 p-3 bg-slate-800/80 border border-slate-700 rounded-lg text-xs text-slate-400">
+                <div class="relative" data-controller="reveal">
+                  <input type="password" id="upload-password" placeholder="Leave empty for no password" data-reveal-target="input"
+                    class="w-full pr-10 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/50" />
+                  <button type="button" data-action="reveal#toggle" aria-label="Show value" aria-pressed="false" class="absolute inset-y-0 right-0 px-3 text-slate-400 hover:text-slate-200">
+                    <i class="fa-solid fa-eye" data-reveal-target="icon"></i>
+                  </button>
+                </div>
+                <div id="password-info-panel" data-toggle-target="content" class="hidden mt-2 p-3 bg-slate-800/80 border border-slate-700 rounded-lg text-xs text-slate-400">
                   <p class="mb-1.5 text-slate-300 font-medium">Downloading password-protected files:</p>
                   <p class="mb-1">Use the <code class="px-1 py-0.5 bg-slate-900 rounded text-rose-300">X-Download-Password</code> header:</p>
                   <pre class="mt-1 mb-2 p-2 bg-slate-900 rounded text-emerald-300 overflow-x-auto select-all">curl -H "X-Download-Password: yourpass" https://host/api/file-share/&lt;id&gt;/download -o file.ext</pre>
@@ -127,8 +132,13 @@
         <div class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-slate-300 mb-1">Password</label>
-            <input type="password" id="edit-password" placeholder="Leave empty to remove password"
-              class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/50" />
+            <div class="relative" data-controller="reveal">
+              <input type="password" id="edit-password" placeholder="Leave empty to remove password" data-reveal-target="input"
+                class="w-full pr-10 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/50" />
+              <button type="button" data-action="reveal#toggle" aria-label="Show value" aria-pressed="false" class="absolute inset-y-0 right-0 px-3 text-slate-400 hover:text-slate-200">
+                <i class="fa-solid fa-eye" data-reveal-target="icon"></i>
+              </button>
+            </div>
             <p class="text-xs text-slate-500 mt-1">Enter new password or leave blank to remove</p>
           </div>
           <div>

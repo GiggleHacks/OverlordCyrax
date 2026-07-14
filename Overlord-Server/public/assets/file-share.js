@@ -23,12 +23,6 @@ uploadInfinite?.addEventListener("change", () => {
 });
 if (uploadMaxDownloads) uploadMaxDownloads.disabled = true;
 
-const passwordInfoBtn = document.getElementById("password-info-btn");
-const passwordInfoPanel = document.getElementById("password-info-panel");
-passwordInfoBtn?.addEventListener("click", () => {
-  passwordInfoPanel?.classList.toggle("hidden");
-});
-
 async function loadCurrentUser() {
   try {
     const res = await fetch("/api/auth/me");
@@ -113,12 +107,14 @@ async function loadFiles() {
           <td class="px-6 py-4">
             <div class="flex items-center justify-end gap-2">
               <button class="action-btn px-2.5 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition-colors"
-                data-action="copy-link" data-file-id="${f.id}" title="Copy download link">
+                data-controller="clipboard" data-action="clipboard#copy"
+                data-clipboard-text-value="${getDownloadUrl(f.id)}"
+                data-clipboard-success-message-value="Download link copied to clipboard!" title="Copy download link">
                 <i class="fa-solid fa-link"></i>
               </button>
               ${canManage ? `
                 <button class="action-btn px-2.5 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition-colors"
-                  data-action="edit" data-file-id="${f.id}" 
+                  data-file-action="edit" data-file-id="${f.id}"
                   data-has-password="${f.hasPassword ? 1 : 0}"
                   data-max-downloads="${f.maxDownloads !== null ? f.maxDownloads : ''}"
                   data-expires-at="${f.expiresAt || ''}"
@@ -127,7 +123,9 @@ async function loadFiles() {
                   <i class="fa-solid fa-pen-to-square"></i>
                 </button>
                 <button class="action-btn px-2.5 py-1.5 text-sm bg-red-900/40 hover:bg-red-800/60 text-red-200 rounded border border-red-700/60 transition-colors"
-                  data-action="delete" data-file-id="${f.id}" data-filename="${escapeHtml(f.filename)}" title="Delete file">
+                  data-controller="confirm" data-action="confirm#confirm"
+                  data-confirm-message-value="Delete this file? This cannot be undone."
+                  data-file-action="delete" data-file-id="${f.id}" title="Delete file">
                   <i class="fa-solid fa-trash"></i>
                 </button>
               ` : ""}
@@ -137,57 +135,21 @@ async function loadFiles() {
       })
       .join("");
 
-    attachActionListeners();
   } catch (err) {
     console.error("Load files error:", err);
     fileList.innerHTML = `<tr><td colspan="7" class="px-6 py-12 text-center text-red-400">Failed to load files</td></tr>`;
   }
 }
 
-function attachActionListeners() {
-  fileList.addEventListener("click", (e) => {
-    const btn = e.target.closest(".action-btn");
-    if (!btn) return;
+fileList?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-file-action]");
+  if (!btn) return;
 
-    const action = btn.dataset.action;
-    const fileId = btn.dataset.fileId;
+  if (btn.dataset.fileAction === "edit") openEditModal(btn);
+  if (btn.dataset.fileAction === "delete") deleteFile(btn.dataset.fileId);
+});
 
-    switch (action) {
-      case "copy-link":
-        copyDownloadLink(fileId);
-        break;
-      case "edit":
-        openEditModal(btn);
-        break;
-      case "delete":
-        deleteFile(fileId, btn.dataset.filename);
-        break;
-    }
-  });
-}
-
-function copyDownloadLink(fileId) {
-  const url = getDownloadUrl(fileId);
-  navigator.clipboard.writeText(url).then(() => {
-    if (window.showToast) {
-      window.showToast("Download link copied to clipboard!", "success");
-    }
-  }).catch(() => {
-    const input = document.createElement("input");
-    input.value = url;
-    document.body.appendChild(input);
-    input.select();
-    document.execCommand("copy");
-    document.body.removeChild(input);
-    if (window.showToast) {
-      window.showToast("Download link copied!", "success");
-    }
-  });
-}
-
-async function deleteFile(fileId, filename) {
-  if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return;
-
+async function deleteFile(fileId) {
   try {
     const res = await fetch(`/api/file-share/${fileId}`, { method: "DELETE" });
     if (res.ok) {

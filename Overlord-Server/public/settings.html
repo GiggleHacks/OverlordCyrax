@@ -878,7 +878,12 @@
             </label>
             <label class="block">
               <span class="text-sm text-slate-300">Client secret <span class="text-rose-400" aria-hidden="true">*</span><span class="sr-only">required unless client auth method is none</span></span>
-              <input id="oidc-client-secret" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing secret" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              <div class="relative" data-controller="reveal">
+                <input id="oidc-client-secret" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing secret" data-reveal-target="input" class="mt-1 w-full pr-10 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                <button type="button" data-action="reveal#toggle" aria-label="Show value" aria-pressed="false" class="absolute inset-y-0 right-0 mt-1 px-3 text-slate-400 hover:text-slate-200">
+                  <i class="fa-solid fa-eye" data-reveal-target="icon"></i>
+                </button>
+              </div>
               <p id="oidc-secret-hint" class="text-xs text-slate-500 mt-1">No client secret is currently saved.</p>
             </label>
           </div>

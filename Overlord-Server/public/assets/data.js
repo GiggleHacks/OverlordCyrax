@@ -108,6 +108,7 @@ function moveClientCardImmediately(msg) {
 
 export function registerRenderer(fn) {
   render = fn;
+  state.lastDigest = "";
 }
 
 function clientQueryParams(page = state.page) {

@@ -1,3 +1,5 @@
+import { runWithoutPageTracking } from "./turbo-navigation.js";
+
 // ── Context menu data ─────────────────────────────────────────────────────────
 const MENU_GROUPS = [
   {
@@ -254,7 +256,6 @@ menuStyle.textContent = `
   #ctx-main { border-radius: 8px 8px 0 0; }
 }
 `;
-document.head.appendChild(menuStyle);
 
 // ── Build DOM ─────────────────────────────────────────────────────────────────
 function buildItemHTML(item) {
@@ -282,9 +283,11 @@ const subPanelsHTML =
 
 const menu = document.createElement("div");
 menu.id = "command-menu";
+menu.setAttribute("data-turbo-permanent", "");
 menu.setAttribute("role", "menu");
 menu.setAttribute("aria-hidden", "true");
 menu.innerHTML = `<div id="ctx-main">${mainRowsHTML}</div><div id="ctx-sub">${subPanelsHTML}</div>`;
+menu.prepend(menuStyle);
 document.body.appendChild(menu);
 
 const ctxMain = menu.querySelector("#ctx-main");
@@ -363,32 +366,34 @@ function refitMobileMenu() {
 }
 
 ctxMain.querySelectorAll(".ctx-row").forEach(rowEl => {
-  rowEl.addEventListener("mouseenter", () => {
+  runWithoutPageTracking(() => rowEl.addEventListener("mouseenter", () => {
     if (isMobileMenu()) return;
     if (rowEl.disabled || rowEl.getAttribute("aria-disabled") === "true") return;
     const groupId = rowEl.dataset.groupToggle;
     if (groupId) showSubmenu(groupId, rowEl);
-  });
+  }));
 });
 
 // Debounced hide — prevents the 5px gap between panels from closing the submenu
 function scheduleHide() { if (!isMobileMenu()) _hideTimer = setTimeout(hideSubmenu, 150); }
 function cancelHide()   { clearTimeout(_hideTimer); _hideTimer = null; }
 
-ctxMain.addEventListener("mouseleave", scheduleHide);
-ctxMain.addEventListener("mouseenter", cancelHide);
-ctxSub.addEventListener("mouseenter",  cancelHide);
-ctxSub.addEventListener("mouseleave",  scheduleHide);
+runWithoutPageTracking(() => {
+  ctxMain.addEventListener("mouseleave", scheduleHide);
+  ctxMain.addEventListener("mouseenter", cancelHide);
+  ctxSub.addEventListener("mouseenter", cancelHide);
+  ctxSub.addEventListener("mouseleave", scheduleHide);
+});
 
 // Touch / mobile: tap to toggle group
 ctxMain.querySelectorAll(".ctx-row").forEach(rowEl => {
-  rowEl.addEventListener("click", (e) => {
+  runWithoutPageTracking(() => rowEl.addEventListener("click", (e) => {
     const groupId = rowEl.dataset.groupToggle;
     if (!groupId) return;
     if (rowEl.disabled || rowEl.getAttribute("aria-disabled") === "true") return;
     e.stopPropagation();
     if (activeGroupId === groupId) { hideSubmenu(); } else { showSubmenu(groupId, rowEl); }
-  });
+  }));
 });
 
 const modal = document.createElement("div");

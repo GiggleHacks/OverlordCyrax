@@ -22,6 +22,7 @@ const persistentIds = [
   "chat-bubble",
   "chat-panel",
   "cert-trust-banner",
+  "command-menu",
 ];
 
 function normalizeUrl(value, base = window.location.href) {

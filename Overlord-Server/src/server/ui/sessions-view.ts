@@ -46,7 +46,7 @@ function renderSessionRow(
     <td class="px-3 py-2 text-slate-400 text-xs"><time data-sessions-target="time" data-format="relative" data-timestamp="${session.lastActivity}" datetime="${new Date(session.lastActivity * 1000).toISOString()}">—</time></td>
     <td class="px-3 py-2 text-xs">${status}${currentBadge}</td>
     <td class="px-3 py-2 text-right">
-      ${canRevoke ? `<form method="post" action="/ui/settings/sessions/${encodeURIComponent(session.id)}/revoke" data-turbo="true" data-action="submit->sessions#confirm" data-confirm-message="${escapeHtml(confirmation)}" class="inline">
+      ${canRevoke ? `<form method="post" action="/ui/settings/sessions/${encodeURIComponent(session.id)}/revoke" data-turbo="true" data-controller="confirm" data-action="submit->confirm#confirm" data-confirm-message-value="${escapeHtml(confirmation)}" class="inline">
         <button type="submit" class="px-2.5 py-1.5 rounded bg-red-700/80 hover:bg-red-600 text-white text-xs disabled:opacity-50">
           <i class="fa-solid fa-right-from-bracket mr-1"></i>Revoke
         </button>
@@ -80,7 +80,7 @@ export function renderSessionsFrame(
         <a href="/ui/settings/sessions" class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm transition-colors">
           <i class="fa-solid fa-rotate"></i>Refresh
         </a>
-        <form method="post" action="/ui/settings/sessions/inactive" data-turbo="true" data-action="submit->sessions#confirm" data-confirm-message="Remove all expired and revoked sessions?">
+        <form method="post" action="/ui/settings/sessions/inactive" data-turbo="true" data-controller="confirm" data-action="submit->confirm#confirm" data-confirm-message-value="Remove all expired and revoked sessions?">
           <button type="submit" class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-900/40 hover:bg-red-800/60 text-red-100 border border-red-700/60 text-sm transition-colors disabled:opacity-50">
             <i class="fa-solid fa-broom"></i>Remove Inactive
           </button>

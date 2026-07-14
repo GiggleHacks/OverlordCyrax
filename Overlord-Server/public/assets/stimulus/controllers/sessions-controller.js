@@ -12,13 +12,6 @@ export default class extends Controller {
     window.clearInterval(this.clock);
   }
 
-  confirm(event) {
-    const message = event.currentTarget.dataset.confirmMessage;
-    if (message && !window.confirm(message)) {
-      event.preventDefault();
-    }
-  }
-
   updateTimes() {
     const now = Math.floor(Date.now() / 1000);
     for (const element of this.timeTargets) {
