@@ -221,6 +221,11 @@ function collectBuildPluginSettings() {
 function setBuildField(field, value) {
   const fieldMap = {
     useDonut: "#donut-mode",
+    donutSingleThreaded: "#donut-single-threaded",
+    donutExitMode: "#donut-exit-mode",
+    donutEntropy: "#donut-entropy",
+    donutPreserveHeaders: "#donut-preserve-headers",
+    donutResumeOffset: "#donut-resume-offset",
     useLinuxShellcode: "#linux-shellcode-mode",
     shellcodeConsole: "#shellcode-console",
     useSgn: "#sgn-mode",
@@ -529,6 +534,11 @@ function collectFormSettings() {
     outputExtension: document.getElementById("output-extension")?.value ?? ".exe",
     cryptableMode: document.getElementById("cryptable-mode")?.checked ?? false,
     useDonut: document.getElementById("donut-mode")?.checked ?? false,
+    donutSingleThreaded: document.getElementById("donut-single-threaded")?.checked ?? false,
+    donutExitMode: parseInt(document.getElementById("donut-exit-mode")?.value, 10) || undefined,
+    donutEntropy: parseInt(document.getElementById("donut-entropy")?.value, 10) || undefined,
+    donutPreserveHeaders: document.getElementById("donut-preserve-headers")?.checked ?? false,
+    donutResumeOffset: parseInt(document.getElementById("donut-resume-offset")?.value, 10) || undefined,
     useLinuxShellcode: document.getElementById("linux-shellcode-mode")?.checked ?? false,
     shellcodeConsole: document.getElementById("shellcode-console")?.checked ?? false,
     useSgn: document.getElementById("sgn-mode")?.checked ?? false,
@@ -606,6 +616,11 @@ function applyFormSettings(settings) {
     setCb("#donut-mode", settings.useDonut);
     if (settings.useDonut) applyDonutMode(true);
   }
+  if (settings.donutSingleThreaded !== undefined) setCb("#donut-single-threaded", settings.donutSingleThreaded);
+  if (settings.donutExitMode !== undefined) setVal("donut-exit-mode", settings.donutExitMode);
+  if (settings.donutEntropy !== undefined) setVal("donut-entropy", settings.donutEntropy);
+  if (settings.donutPreserveHeaders !== undefined) setCb("#donut-preserve-headers", settings.donutPreserveHeaders);
+  if (settings.donutResumeOffset !== undefined) setVal("donut-resume-offset", settings.donutResumeOffset);
   if (settings.useLinuxShellcode !== undefined) {
     setCb("#linux-shellcode-mode", settings.useLinuxShellcode);
     if (settings.useLinuxShellcode) applyLinuxShellcodeMode(true);
@@ -1815,6 +1830,11 @@ form?.addEventListener("submit", async (e) => {
       : undefined,
     iosBundleId: platforms.some(p => p.startsWith('ios-')) ? (form.querySelector("#ios-bundle-id")?.value.trim() || undefined) : undefined,
     useDonut: document.getElementById("donut-mode")?.checked || false,
+    donutSingleThreaded: document.getElementById("donut-single-threaded")?.checked || false,
+    donutExitMode: parseInt(document.getElementById("donut-exit-mode")?.value, 10) || undefined,
+    donutEntropy: parseInt(document.getElementById("donut-entropy")?.value, 10) || undefined,
+    donutPreserveHeaders: document.getElementById("donut-preserve-headers")?.checked || false,
+    donutResumeOffset: parseInt(document.getElementById("donut-resume-offset")?.value, 10) || undefined,
     useLinuxShellcode: document.getElementById("linux-shellcode-mode")?.checked || false,
     shellcodeConsole: document.getElementById("shellcode-console")?.checked || false,
     useSgn: document.getElementById("sgn-mode")?.checked || false,

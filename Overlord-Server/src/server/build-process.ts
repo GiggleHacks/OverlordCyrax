@@ -117,6 +117,11 @@ type BuildProcessConfig = {
   sleepSeconds?: number;
   boundFiles?: BoundFile[];
   useDonut?: boolean;
+  donutSingleThreaded?: boolean;
+  donutExitMode?: number;
+  donutEntropy?: number;
+  donutPreserveHeaders?: boolean;
+  donutResumeOffset?: number;
   useLinuxShellcode?: boolean;
   shellcodeConsole?: boolean;
   useSgn?: boolean;
@@ -1873,7 +1878,13 @@ func runBoundFiles() {
             }),
             sendToStream,
           );
-          const ok = await runDonut(filePath, binPath, donutArch, sendToStream);
+          const ok = await runDonut(filePath, binPath, donutArch, sendToStream, {
+            singleThreaded: config.donutSingleThreaded,
+            exitMode: config.donutExitMode,
+            entropy: config.donutEntropy,
+            preserveHeaders: config.donutPreserveHeaders,
+            resumeOffset: config.donutResumeOffset,
+          });
           if (!ok) throw new Error(`Donut shellcode conversion failed for ${platform}`);
           try { fs.unlinkSync(filePath); } catch {}
           finalOutputName = scOutputName;

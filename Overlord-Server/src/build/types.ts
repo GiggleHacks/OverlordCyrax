@@ -46,6 +46,11 @@ export type BuildConfig = {
   solRpcEndpoints?: string;
   iosBundleId?: string;
   useDonut?: boolean;
+  donutSingleThreaded?: boolean;
+  donutExitMode?: number;
+  donutEntropy?: number;
+  donutPreserveHeaders?: boolean;
+  donutResumeOffset?: number;
   useLinuxShellcode?: boolean;
   shellcodeConsole?: boolean;
   useSgn?: boolean;
