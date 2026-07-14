@@ -152,6 +152,35 @@ function initAccordions() {
   });
 }
 
+function initBuilderTabs() {
+  const tabs = document.querySelectorAll(".builder-tab[data-builder-tab]");
+  const panels = document.querySelectorAll("[data-builder-panel]");
+
+  function switchTab(tabName) {
+    tabs.forEach((t) => {
+      t.setAttribute("aria-selected", t.dataset.builderTab === tabName ? "true" : "false");
+    });
+    panels.forEach((p) => {
+      if (p.dataset.builderPanel === tabName) {
+        p.removeAttribute("hidden");
+      } else {
+        p.setAttribute("hidden", "");
+      }
+    });
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      switchTab(tab.dataset.builderTab);
+    });
+  });
+
+  const defaultTab = document.querySelector('.builder-tab[aria-selected="true"]');
+  if (defaultTab) {
+    switchTab(defaultTab.dataset.builderTab);
+  }
+}
+
 function updateWindowsSectionVisibility() {
   const windowsSection = document.getElementById("windows-settings-section");
   if (!windowsSection) return;
@@ -849,6 +878,7 @@ function applyLinuxShellcodeMode(enabled) {
 
 restoreFormSettings();
 initAccordions();
+initBuilderTabs();
 loadBuildPlugins();
 updateWindowsSectionVisibility();
 updateShellcodeCheckboxVisibility();
