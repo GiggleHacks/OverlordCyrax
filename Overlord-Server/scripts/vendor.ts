@@ -197,6 +197,14 @@ copyFile(
   path.join(VENDOR, "cytoscape", "cytoscape.min.js"),
 );
 
+/* ── Hotwire Turbo ───────────────────────────────────────────────── */
+
+console.log("Copying Hotwire Turbo ...");
+copyFile(
+  path.join(NM, "@hotwired", "turbo", "dist", "turbo.es2017-esm.js"),
+  path.join(VENDOR, "hotwired", "turbo.es2017-esm.js"),
+);
+
 /* ── highlight.js (bundle core + languages) ──────────────────────── */
 
 console.log("Bundling highlight.js ...");

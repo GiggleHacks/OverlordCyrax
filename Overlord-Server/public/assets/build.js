@@ -2294,6 +2294,7 @@ function showBuildFiles(files, buildId, expiresAt) {
 
     const downloadBtn = document.createElement("a");
     downloadBtn.href = `/api/build/download/${encodeURIComponent(file.name)}`;
+    downloadBtn.download = "";
     downloadBtn.className =
       "inline-flex items-center gap-1 px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors";
     downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download';
