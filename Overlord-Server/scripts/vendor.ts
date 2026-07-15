@@ -155,6 +155,24 @@ copyFile(
   path.join(NM, "chart.js", "dist", "chart.umd.js"),
   path.join(VENDOR, "chart.js", "chart.umd.js"),
 );
+const chartEntry = `
+export { default } from '${path.join(NM, "chart.js", "auto", "auto.js").replace(/\\/g, "/")}';
+`;
+const chartTmp = path.join(ROOT, "scripts", "_chart-entry.ts");
+await Bun.write(chartTmp, chartEntry);
+const chartBuild = await Bun.build({
+  entrypoints: [chartTmp],
+  minify: true,
+  target: "browser",
+  format: "esm",
+});
+if (chartBuild.success) {
+  await Bun.write(path.join(VENDOR, "chart.js", "chart.esm.js"), chartBuild.outputs[0]);
+} else {
+  console.error("Chart.js bundle failed:", chartBuild.logs);
+  process.exit(1);
+}
+rmSync(chartTmp, { force: true });
 
 /* ── Monaco Editor ───────────────────────────────────────────────── */
 
@@ -193,8 +211,24 @@ copyFile(
 
 console.log("Copying Cytoscape.js ...");
 copyFile(
-  path.join(NM, "cytoscape", "dist", "cytoscape.min.js"),
-  path.join(VENDOR, "cytoscape", "cytoscape.min.js"),
+  path.join(NM, "cytoscape", "dist", "cytoscape.esm.min.mjs"),
+  path.join(VENDOR, "cytoscape", "cytoscape.esm.min.mjs"),
+);
+
+/* ── Hotwire Turbo ───────────────────────────────────────────────── */
+
+console.log("Copying Hotwire Turbo ...");
+copyFile(
+  path.join(NM, "@hotwired", "turbo", "dist", "turbo.es2017-esm.js"),
+  path.join(VENDOR, "hotwired", "turbo.es2017-esm.js"),
+);
+
+/* ── Hotwire Stimulus ────────────────────────────────────────────── */
+
+console.log("Copying Hotwire Stimulus ...");
+copyFile(
+  path.join(NM, "@hotwired", "stimulus", "dist", "stimulus.js"),
+  path.join(VENDOR, "hotwired", "stimulus.js"),
 );
 
 /* ── highlight.js (bundle core + languages) ──────────────────────── */
@@ -214,11 +248,51 @@ import powershell from '${path.join(NM, "highlight.js", "lib", "languages", "pow
 import python from '${path.join(NM, "highlight.js", "lib", "languages", "python.js").replace(/\\/g, "/")}';
 import go from '${path.join(NM, "highlight.js", "lib", "languages", "go.js").replace(/\\/g, "/")}';
 import rust from '${path.join(NM, "highlight.js", "lib", "languages", "rust.js").replace(/\\/g, "/")}';
+import javascript from '${path.join(NM, "highlight.js", "lib", "languages", "javascript.js").replace(/\\/g, "/")}';
+import typescript from '${path.join(NM, "highlight.js", "lib", "languages", "typescript.js").replace(/\\/g, "/")}';
+import json from '${path.join(NM, "highlight.js", "lib", "languages", "json.js").replace(/\\/g, "/")}';
+import xml from '${path.join(NM, "highlight.js", "lib", "languages", "xml.js").replace(/\\/g, "/")}';
+import css from '${path.join(NM, "highlight.js", "lib", "languages", "css.js").replace(/\\/g, "/")}';
+import scss from '${path.join(NM, "highlight.js", "lib", "languages", "scss.js").replace(/\\/g, "/")}';
+import yaml from '${path.join(NM, "highlight.js", "lib", "languages", "yaml.js").replace(/\\/g, "/")}';
+import markdown from '${path.join(NM, "highlight.js", "lib", "languages", "markdown.js").replace(/\\/g, "/")}';
+import sql from '${path.join(NM, "highlight.js", "lib", "languages", "sql.js").replace(/\\/g, "/")}';
+import ini from '${path.join(NM, "highlight.js", "lib", "languages", "ini.js").replace(/\\/g, "/")}';
+import dockerfile from '${path.join(NM, "highlight.js", "lib", "languages", "dockerfile.js").replace(/\\/g, "/")}';
+import makefile from '${path.join(NM, "highlight.js", "lib", "languages", "makefile.js").replace(/\\/g, "/")}';
+import diff from '${path.join(NM, "highlight.js", "lib", "languages", "diff.js").replace(/\\/g, "/")}';
+import nginx from '${path.join(NM, "highlight.js", "lib", "languages", "nginx.js").replace(/\\/g, "/")}';
+import c from '${path.join(NM, "highlight.js", "lib", "languages", "c.js").replace(/\\/g, "/")}';
+import cpp from '${path.join(NM, "highlight.js", "lib", "languages", "cpp.js").replace(/\\/g, "/")}';
+import csharp from '${path.join(NM, "highlight.js", "lib", "languages", "csharp.js").replace(/\\/g, "/")}';
+import java from '${path.join(NM, "highlight.js", "lib", "languages", "java.js").replace(/\\/g, "/")}';
+import ruby from '${path.join(NM, "highlight.js", "lib", "languages", "ruby.js").replace(/\\/g, "/")}';
+import php from '${path.join(NM, "highlight.js", "lib", "languages", "php.js").replace(/\\/g, "/")}';
 hljs.registerLanguage('bash', bash);
 hljs.registerLanguage('powershell', powershell);
 hljs.registerLanguage('python', python);
 hljs.registerLanguage('go', go);
 hljs.registerLanguage('rust', rust);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('scss', scss);
+hljs.registerLanguage('yaml', yaml);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('ini', ini);
+hljs.registerLanguage('dockerfile', dockerfile);
+hljs.registerLanguage('makefile', makefile);
+hljs.registerLanguage('diff', diff);
+hljs.registerLanguage('nginx', nginx);
+hljs.registerLanguage('c', c);
+hljs.registerLanguage('cpp', cpp);
+hljs.registerLanguage('csharp', csharp);
+hljs.registerLanguage('java', java);
+hljs.registerLanguage('ruby', ruby);
+hljs.registerLanguage('php', php);
 globalThis.hljs = hljs;
 `;
 const hljsTmp = path.join(ROOT, "scripts", "_hljs-entry.ts");

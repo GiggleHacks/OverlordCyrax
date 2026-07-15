@@ -12,12 +12,13 @@ import { createAdaptiveNavController } from "./nav/layout.js";
 import { applyUserRoleUI, applyThumbnailWallVisibility } from "./nav/role-ui.js";
 import { loadPluginNavItems } from "./nav/plugins-loader.js";
 import { init as initCommandPalette } from "./command-palette.js";
+import "./stimulus/application.js";
 import {
-  installPageResourceTracker,
   runWithoutPageTracking,
-  setupSoftNavigation,
-  startPageTracking,
-} from "./soft-nav.js";
+  setupTurboNavigation,
+  turboVisit,
+} from "./turbo-navigation.js";
+import { showOnboardingIfNeeded } from "./onboarding.js";
 
 const host = document.getElementById("top-nav");
 if (host) {
@@ -112,11 +113,7 @@ if (host) {
   if (refs.accountSettingsBtn && !refs.accountSettingsBtn.dataset.boundSettings) {
     refs.accountSettingsBtn.dataset.boundSettings = "true";
     refs.accountSettingsBtn.addEventListener("click", () => {
-      if (window.overlordSoftNavigate) {
-        window.overlordSoftNavigate("/settings");
-      } else {
-        window.location.href = "/settings";
-      }
+      turboVisit("/settings");
     });
   }
 
@@ -160,32 +157,6 @@ if (host) {
     }
   });
 
-  const prefetchedPages = new Set();
-  const prefetchPage = (href) => {
-    try {
-      const url = new URL(href, window.location.href);
-      if (url.origin !== window.location.origin) return;
-      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
-      const key = `${url.pathname}${url.search}`;
-      if (prefetchedPages.has(key)) return;
-      prefetchedPages.add(key);
-      const link = document.createElement("link");
-      link.rel = "prefetch";
-      link.as = "document";
-      link.href = key;
-      document.head.appendChild(link);
-    } catch {}
-  };
-
-  host.addEventListener("pointerenter", (event) => {
-    const link = event.target?.closest?.("a[href]");
-    if (link) prefetchPage(link.getAttribute("href"));
-  }, true);
-  host.addEventListener("focusin", (event) => {
-    const link = event.target?.closest?.("a[href]");
-    if (link) prefetchPage(link.getAttribute("href"));
-  });
-
   async function loadCurrentUser() {
     try {
       const res = await fetch("/api/auth/me", { credentials: "include" });
@@ -195,6 +166,7 @@ if (host) {
       const user = await res.json();
       applyUserRoleUI(user, refs);
       applyThumbnailWallVisibility(user);
+      showOnboardingIfNeeded(user);
 
       if (user.role === "admin" || user.role === "operator") {
         try {
@@ -243,14 +215,12 @@ if (host) {
     });
   });
 
-  installPageResourceTracker();
-  setupSoftNavigation(host, {
+  setupTurboNavigation({
     onPathChange: (path) => {
       applyActivePath(path);
       applyBranding();
     },
   });
-  startPageTracking();
 }
 
 async function applyBranding() {

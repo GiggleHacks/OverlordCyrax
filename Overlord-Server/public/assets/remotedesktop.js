@@ -78,8 +78,8 @@ import { initSidePanel } from "./side-panel.js";
   const kbdCtrl = document.getElementById("kbdCtrl");
   const cursorCtrl = document.getElementById("cursorCtrl");
   const duplicationCtrl = document.getElementById("duplicationCtrl");
-  const resolutionSelect = document.getElementById("resolutionSelect");
-  const targetFpsSelect = document.getElementById("targetFpsSelect");
+  const streamProfileSelect = document.getElementById("streamProfileSelect");
+  const streamProfileDetail = document.getElementById("streamProfileDetail");
   const smoothingSlider = document.getElementById("smoothingSlider");
   const smoothingValue = document.getElementById("smoothingValue");
   const qualitySlider = document.getElementById("qualitySlider");
@@ -389,6 +389,7 @@ import { initSidePanel } from "./side-panel.js";
   }
 
   let savedDisplay = null;
+  let savedStreamProfile = null;
 
   function setSelectValue(select, value) {
     if (!select || value === undefined || value === null) return false;
@@ -407,8 +408,11 @@ import { initSidePanel } from "./side-panel.js";
   function applySharedSettings(settings) {
     if (!settings || typeof settings !== "object") return;
     savedDisplay = Number.isFinite(Number(settings.display)) ? Number(settings.display) : savedDisplay;
-    setSelectValue(resolutionSelect, settings.resolution);
-    setSelectValue(targetFpsSelect, settings.targetFps);
+    savedStreamProfile = settings.streamProfile ||
+      ((settings.resolution !== undefined && settings.targetFps !== undefined)
+        ? `${settings.resolution}:${settings.targetFps}`
+        : savedStreamProfile);
+    setSelectValue(streamProfileSelect, savedStreamProfile);
     setSelectValue(webrtcMode, settings.webrtcMode);
     setSelectValue(audioTransport, settings.audioTransport);
     setSelectValue(recordMode, settings.recordMode);
@@ -435,10 +439,14 @@ import { initSidePanel } from "./side-panel.js";
   }
 
   function readSharedSettings() {
+    const profile = selectedStreamProfile();
     return {
       display: Number(displaySelect?.value || 0),
-      resolution: resolutionSelect?.value || "720",
-      targetFps: targetFpsSelect?.value || "30",
+      streamProfile: streamProfileSelect?.value || "1080:60",
+      // Keep the legacy fields so backstage and older remote-desktop builds that
+      // share these preferences continue to receive equivalent settings.
+      resolution: String(profile.maxHeight),
+      targetFps: String(profile.fps),
       quality: Number(qualitySlider?.value || 90),
       preferH264: !!prefersH264,
       webrtcMode: getWebrtcMode(),
@@ -927,8 +935,7 @@ import { initSidePanel } from "./side-panel.js";
         pushInputToggles();
         pushCaptureToggles();
         if (qualitySlider) pushQuality(qualitySlider.value);
-        pushTargetFps();
-        pushResolution();
+        pushStreamProfile();
         if (shouldRequestStart) {
           if (mode === "relayed") {
             sendCmd("desktop_start", { webrtc: true });
@@ -1064,7 +1071,7 @@ import { initSidePanel } from "./side-panel.js";
       desiredStreaming,
       display: displaySelect?.value ?? "",
       quality: qualitySlider?.value ?? "",
-      resolution: resolutionSelect?.value ?? "",
+      streamProfile: streamProfileSelect?.value ?? "",
       transport: getWebrtcMode(),
       lastFrameAgeMs: lastFrameAt ? Math.round(performance.now() - lastFrameAt) : null,
     });
@@ -1221,6 +1228,7 @@ import { initSidePanel } from "./side-panel.js";
       if (client) {
         populateDisplays(client.monitors, client.monitorInfo);
         applySavedDisplay();
+        if (ws && ws.readyState === WebSocket.OPEN) requestEncoderCapabilities();
       }
       if (duplicationCtrl) {
         const os = (client?.os || "").toLowerCase();
@@ -1303,35 +1311,75 @@ import { initSidePanel } from "./side-panel.js";
     });
   }
 
-  function pushResolution() {
-    if (resolutionSelect) {
-      const maxHeight = parseInt(resolutionSelect.value, 10);
-      console.debug("rd: pushResolution maxHeight=", maxHeight);
-      sendCmd("desktop_set_resolution", { maxHeight: maxHeight });
-    }
+  function selectedStreamProfile() {
+    const [heightValue, fpsValue] = String(streamProfileSelect?.value || "1080:60").split(":");
+    const maxHeight = Number.parseInt(heightValue, 10);
+    const fps = Number.parseInt(fpsValue, 10);
+    return {
+      maxHeight: Number.isFinite(maxHeight) ? maxHeight : 1080,
+      fps: Number.isFinite(fps) ? Math.max(1, Math.min(240, fps)) : 60,
+    };
   }
 
-  function selectedTargetFps() {
-    const fps = Math.min(60, Number(targetFpsSelect?.value || 30));
-    return Number.isFinite(fps) ? Math.max(1, Math.min(240, Math.floor(fps))) : 120;
+  function pushStreamProfile() {
+    const profile = selectedStreamProfile();
+    console.debug("rd: pushStreamProfile", profile);
+    sendCmd("desktop_set_profile", profile);
   }
 
-  function pushTargetFps() {
-    const fps = selectedTargetFps();
-    console.debug("rd: pushTargetFps fps=", fps);
-    sendCmd("desktop_set_fps", { fps });
-  }
-
-  if (resolutionSelect) {
-    resolutionSelect.addEventListener("change", function () {
-      pushResolution();
-      sharedSettingsSaver.scheduleSave();
+  function requestEncoderCapabilities() {
+    if (streamProfileDetail) streamProfileDetail.textContent = "Checking hardware encoder profiles…";
+    sendCmd("desktop_encoder_capabilities", {
+      display: Number.parseInt(displaySelect?.value || "0", 10) || 0,
     });
   }
 
-  if (targetFpsSelect) {
-    targetFpsSelect.addEventListener("change", function () {
-      pushTargetFps();
+  function applyEncoderCapabilities(msg) {
+    if (!msg || !Array.isArray(msg.profiles) || !streamProfileSelect) return;
+    const selectedDisplay = Number.parseInt(displaySelect?.value || "0", 10) || 0;
+    if (Number.isFinite(Number(msg.display)) && Number(msg.display) !== selectedDisplay) return;
+    const previous = streamProfileSelect.value;
+    streamProfileSelect.innerHTML = "";
+    for (const profile of msg.profiles) {
+      const maxHeight = Number(profile.maxHeight);
+      const fps = Number(profile.fps);
+      if (!Number.isFinite(maxHeight) || !Number.isFinite(fps)) continue;
+      const option = document.createElement("option");
+      option.value = `${maxHeight}:${fps}`;
+      option.textContent = String(profile.label || `${fps} FPS - ${Number(profile.height) || maxHeight}p`);
+      const providers = Array.isArray(profile.providers) ? profile.providers.join(", ") : "";
+      if (providers) {
+        option.title = `Available through ${providers}`;
+        option.dataset.providers = providers;
+      }
+      streamProfileSelect.appendChild(option);
+    }
+    if (!streamProfileSelect.options.length) {
+      const option = document.createElement("option");
+      option.value = "1080:60";
+      option.textContent = "60 FPS - 1080p";
+      streamProfileSelect.appendChild(option);
+    }
+    if (!setSelectValue(streamProfileSelect, savedStreamProfile) &&
+        !setSelectValue(streamProfileSelect, previous) &&
+        !setSelectValue(streamProfileSelect, "1080:60")) {
+      streamProfileSelect.selectedIndex = 0;
+    }
+    savedStreamProfile = streamProfileSelect.value;
+    if (streamProfileDetail) {
+      const providers = streamProfileSelect.selectedOptions[0]?.dataset?.providers || "";
+      streamProfileDetail.textContent = providers ? `Available through ${providers}.` :
+        (msg.detail || (msg.probed ? "Profiles tested on this display adapter." : "Safe fallback profiles shown."));
+    }
+    if (desiredStreaming) pushStreamProfile();
+  }
+
+  if (streamProfileSelect) {
+    streamProfileSelect.addEventListener("change", function () {
+      savedStreamProfile = streamProfileSelect.value;
+      const providers = streamProfileSelect.selectedOptions[0]?.dataset?.providers || "";
+      if (streamProfileDetail && providers) streamProfileDetail.textContent = `Available through ${providers}.`;
+      pushStreamProfile();
       sharedSettingsSaver.scheduleSave();
     });
   }
@@ -1341,6 +1389,7 @@ import { initSidePanel } from "./side-panel.js";
     sendCmd("desktop_select_display", {
       display: parseInt(displaySelect.value, 10),
     });
+    requestEncoderCapabilities();
     sharedSettingsSaver.scheduleSave();
   });
 
@@ -1367,8 +1416,7 @@ import { initSidePanel } from "./side-panel.js";
       desiredStreaming,
       display: displaySelect?.value ?? "",
       quality: qualitySlider?.value ?? "",
-      resolution: resolutionSelect?.value ?? "",
-      targetFps: targetFpsSelect?.value ?? "",
+      streamProfile: streamProfileSelect?.value ?? "",
       prefersH264,
       duplication: !!duplicationCtrl?.checked,
       clientOs,
@@ -1391,8 +1439,7 @@ import { initSidePanel } from "./side-panel.js";
     if (prefersH264 && !useSoftwareH264()) {
       ensureDuplicationForH264();
     }
-    pushTargetFps();
-    pushResolution();
+    pushStreamProfile();
     desiredStreaming = true;
     lastFrameAt = 0;
     firstFrameLogged = false;
@@ -1945,6 +1992,10 @@ import { initSidePanel } from "./side-panel.js";
       }
 
       const msg = decodeMsgpack(buf);
+      if (msg && msg.type === "desktop_encoder_capabilities") {
+        applyEncoderCapabilities(msg);
+        return;
+      }
       if (msg && msg.type === "status" && msg.status) {
         handleStatus(msg);
         return;
@@ -1980,6 +2031,10 @@ import { initSidePanel } from "./side-panel.js";
     }
 
     const msg = decodeMsgpack(ev.data);
+    if (msg && msg.type === "desktop_encoder_capabilities") {
+      applyEncoderCapabilities(msg);
+      return;
+    }
     if (msg && msg.type === "status" && msg.status) {
       handleStatus(msg);
       return;
@@ -2021,8 +2076,7 @@ import { initSidePanel } from "./side-panel.js";
           display: parseInt(displaySelect.value, 10) || 0,
         });
       }
-      pushTargetFps();
-      pushResolution();
+      pushStreamProfile();
       const mode = getWebrtcMode();
       if (mode === "relayed") {
         sendCmd("desktop_start", { webrtc: true });
@@ -2036,6 +2090,7 @@ import { initSidePanel } from "./side-panel.js";
       setStreamState("idle", "Stopped");
     }
     sendCmd("desktop_record_status", {});
+    requestEncoderCapabilities();
     fetchClientInfo().then(() => {
       if (displaySelect && displaySelect.value) {
         console.debug("rd: initial select display", displaySelect.value);

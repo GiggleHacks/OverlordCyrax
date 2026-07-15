@@ -2,7 +2,7 @@ import type { ServerWebSocket } from "bun";
 import { v4 as uuidv4 } from "uuid";
 import type { SocketData } from "../sessions/types";
 
-export type P2PKind = "desktop" | "hvnc" | "webcam" | "audio";
+export type P2PKind = "desktop" | "backstage" | "webcam" | "audio";
 
 export type P2PSession = {
   viewer: ServerWebSocket<SocketData>;

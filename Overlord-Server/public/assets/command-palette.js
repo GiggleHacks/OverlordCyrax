@@ -4,7 +4,7 @@ import { osBadge } from "./viewUtils.js";
 
 const ALL_PER_CLIENT_ACTIONS = [
   { key: "console",    feature: "console",        label: "Console",        icon: "fa-terminal",     color: "text-emerald-400", href: (id) => `/${id}/console` },
-  { key: "hvnc",       feature: "hvnc",           label: "HVNC",           icon: "fa-desktop",      color: "text-fuchsia-400", href: (id) => `/hvnc?clientId=${id}` },
+  { key: "backstage",       feature: "backstage",           label: "backstage",           icon: "fa-desktop",      color: "text-fuchsia-400", href: (id) => `/backstage?clientId=${id}` },
   { key: "rdp",        feature: "remote_desktop", label: "Remote Desktop", icon: "fa-display",      color: "text-sky-400",     href: (id) => `/remotedesktop?clientId=${id}` },
   { key: "files",      feature: "file_browser",   label: "File Browser",   icon: "fa-folder-open",  color: "text-cyan-400",    href: (id) => `/${id}/files` },
   { key: "processes",  feature: "processes",      label: "Processes",      icon: "fa-microchip",    color: "text-orange-400",  href: (id) => `/${id}/processes` },
@@ -278,7 +278,7 @@ function close() {
 function navigate(href, newTab = false) {
   pushRecent(href);
   if (newTab) window.open(href, "_blank", "noopener");
-  else if (window.overlordSoftNavigate) window.overlordSoftNavigate(href);
+  else if (window.Turbo?.visit) window.Turbo.visit(href);
   else window.location.href = href;
   close();
 }

@@ -439,8 +439,8 @@ function applyMenuSupportRules(clientId) {
     btn.title = enabled ? "" : reason;
   };
 
-  const hvncBtn = menu.querySelector('[data-open="Backstage"]');
-  setAvailability(hvncBtn, isOnline && isWindows, isOnline ? "Backstage is only supported on Windows clients." : "Client is offline");
+  const backstageBtn = menu.querySelector('[data-open="Backstage"]');
+  setAvailability(backstageBtn, isOnline && isWindows, isOnline ? "Backstage is only supported on Windows clients." : "Client is offline");
 
   const hiddenBtn = menu.querySelector('[data-open="Virtual"]');
   setAvailability(hiddenBtn, isOnline && isWindows, isOnline ? "Virtual mode is only supported on Windows clients." : "Client is offline");
@@ -500,8 +500,8 @@ function applyMenuSupportRules(clientId) {
 const MENU_OPEN_TO_FEATURE = {
   console: "console",
   remotedesktop: "remote_desktop",
-  Backstage: "hvnc",
-  Hidden: "hvnc",
+  Backstage: "backstage",
+  Hidden: "backstage",
   webcam: "webcam",
   files: "file_browser",
   processes: "processes",
@@ -1135,13 +1135,11 @@ function initializeRenderer() {
   registerRenderer((data, options) => {
     renderMerge(data, options);
     if (onlineAsciiStatus) onlineAsciiStatus.textContent = String(Number(data?.online) || 0).padStart(3, "0");
-    if (isUnfilteredClientView()) {
-      updateDashboardStatsFromClients(data);
-    }
     if (!options?.fromPluginDashboard) {
       refreshDashboardPluginContributions(data?.items || []);
     }
   });
+  renderCachedClients({ reorder: true, force: true });
   setupDashboardThumbnailLoader();
   refreshGroupFilter();
   loadWithOptions();
@@ -2067,14 +2065,14 @@ menu.addEventListener("click", async (e) => {
     return;
   }
   if (open === "Backstage") {
-    window.open(`/hvnc?clientId=${contextCard}`, "_blank", "noopener");
+    window.open(`/backstage?clientId=${contextCard}`, "_blank", "noopener");
     closeMenu(clearContext);
     return;
   }
   if (open === "Virtual") {
-    // mode=hidden is understood by older hvnc.js builds; current builds treat
+    // mode=hidden is understood by older backstage.js builds; current builds treat
     // it as the virtual-monitor mode compatibility alias.
-    window.open(`/hvnc?clientId=${contextCard}&mode=hidden`, "_blank", "noopener");
+    window.open(`/backstage?clientId=${contextCard}&mode=hidden`, "_blank", "noopener");
     closeMenu(clearContext);
     return;
   }

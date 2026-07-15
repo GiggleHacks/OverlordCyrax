@@ -16,6 +16,8 @@ import (
 	"sync"
 	"unsafe"
 
+	"overlord-client/cmd/agent/wininterop"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -238,7 +240,7 @@ func extractFileThumbnailJPEG(path string, edge int) ([]byte, int, int, error) {
 			outErr = fmt.Errorf("SHCreateItemFromParsingName failed: 0x%x", hr)
 			return
 		}
-		factory := (*iShellItemImageFactory)(unsafe.Pointer(itemPtr))
+		factory := (*iShellItemImageFactory)(wininterop.Pointer(itemPtr))
 		defer callRelease(factory.Vtbl.Release, itemPtr)
 
 		flags := uint32(siigbfThumbnailOnly | siigbfBiggerSizeOk)

@@ -538,7 +538,7 @@ window.configureClientAccess = async function (userId, username, role) {
 const FEATURE_LABELS = {
   console: { label: "Console", icon: "fa-terminal" },
   remote_desktop: { label: "Remote Desktop", icon: "fa-desktop" },
-  hvnc: { label: "HVNC", icon: "fa-window-restore" },
+  backstage: { label: "backstage", icon: "fa-window-restore" },
   webcam: { label: "Webcam", icon: "fa-video" },
   file_browser: { label: "File Browser", icon: "fa-folder-open" },
   processes: { label: "Processes", icon: "fa-microchip" },

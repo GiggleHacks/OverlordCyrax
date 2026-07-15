@@ -106,7 +106,7 @@ const QUERY_CLIENT_PAGES: QueryClientPageDef[] = [
   { path: "/viewer",        file: "viewer.html" },
   { path: "/remotedesktop", file: "remotedesktop.html" },
   { path: "/webcam",        file: "webcam.html" },
-  { path: "/hvnc",          file: "hvnc.html" },
+  { path: "/backstage",          file: "backstage.html" },
   { path: "/voice",         file: "voice.html" },
   { path: "/winre",         file: "winre.html" },
 ];

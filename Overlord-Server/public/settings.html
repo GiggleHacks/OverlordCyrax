@@ -273,56 +273,23 @@
         <p id="settings-message" class="hidden text-sm rounded-lg px-3 py-2 border"></p>
       </section>
 
-      <!-- Active Sessions -->
-      <section id="section-sessions" class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-4 settings-section">
-        <div class="flex items-center justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <div class="flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-              <i class="fa-solid fa-desktop text-emerald-400"></i>
-            </div>
-            <div>
-              <h2 class="text-lg font-semibold">Active Sessions</h2>
-              <p class="text-sm text-slate-400">View and manage your active login sessions.</p>
-            </div>
+      <!-- Active Sessions: server-rendered and managed independently by Turbo. -->
+      <turbo-frame
+        id="section-sessions"
+        src="/ui/settings/sessions"
+        loading="lazy"
+        class="block bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-4 settings-section"
+      >
+        <div class="flex items-center gap-3">
+          <div class="flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+            <i class="fa-solid fa-desktop text-emerald-400"></i>
           </div>
-          <button
-            id="refresh-sessions-btn"
-            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm transition-colors"
-            type="button"
-          >
-            <i class="fa-solid fa-rotate"></i>Refresh
-          </button>
-          <button
-            id="remove-inactive-sessions-btn"
-            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-900/40 hover:bg-red-800/60 text-red-100 border border-red-700/60 text-sm transition-colors"
-            type="button"
-          >
-            <i class="fa-solid fa-broom"></i>Remove Inactive
-          </button>
+          <div>
+            <h2 class="text-lg font-semibold">Active Sessions</h2>
+            <p class="text-sm text-slate-400">Loading sessions…</p>
+          </div>
         </div>
-
-        <div class="overflow-x-auto border border-slate-800 rounded-lg">
-          <table class="w-full text-sm">
-            <thead class="bg-slate-800/60 text-slate-300">
-              <tr>
-                <th class="text-left px-3 py-2">IP</th>
-                <th class="text-left px-3 py-2">Browser / Client</th>
-                <th class="text-left px-3 py-2">Created</th>
-                <th class="text-left px-3 py-2">Last Active</th>
-                <th class="text-left px-3 py-2">Status</th>
-                <th class="text-right px-3 py-2">Action</th>
-              </tr>
-            </thead>
-            <tbody id="sessions-table-body" class="divide-y divide-slate-800">
-              <tr>
-                <td colspan="6" class="px-3 py-6 text-center text-slate-400">Loading...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <p id="sessions-message" class="hidden text-sm rounded-lg px-3 py-2 border"></p>
-      </section>
+      </turbo-frame>
 
       <!-- Dashboard Preferences -->
       <section id="section-prefs" class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-4 settings-section">
@@ -925,7 +892,12 @@
             </label>
             <label class="block">
               <span class="text-sm text-slate-300">Client secret <span class="text-rose-400" aria-hidden="true">*</span><span class="sr-only">required unless client auth method is none</span></span>
-              <input id="oidc-client-secret" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing secret" class="mt-1 w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              <div class="relative" data-controller="reveal">
+                <input id="oidc-client-secret" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing secret" data-reveal-target="input" class="mt-1 w-full pr-10 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                <button type="button" data-action="reveal#toggle" aria-label="Show value" aria-pressed="false" class="absolute inset-y-0 right-0 mt-1 px-3 text-slate-400 hover:text-slate-200">
+                  <i class="fa-solid fa-eye" data-reveal-target="icon"></i>
+                </button>
+              </div>
               <p id="oidc-secret-hint" class="text-xs text-slate-500 mt-1">No client secret is currently saved.</p>
             </label>
           </div>
@@ -1104,7 +1076,7 @@
             <button id="reg-key-generate-btn" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 transition-colors text-white text-sm font-medium">
               <i class="fa-solid fa-plus"></i>Generate
             </button>
-            <a id="reg-key-export-btn" href="/api/registration/keys/export" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors text-white text-sm font-medium">
+            <a id="reg-key-export-btn" href="/api/registration/keys/export" download data-turbo="false" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors text-white text-sm font-medium">
               <i class="fa-solid fa-file-export"></i>Export
             </a>
           </div>

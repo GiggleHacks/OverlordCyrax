@@ -11,12 +11,12 @@ import {
   getRdSessionsByClient,
   getRdSessionCount,
   hasRdSessionsForClient,
-  addHvncSession,
-  getHvncSession,
-  deleteHvncSession,
-  getHvncSessionsByClient,
-  hasHvncSessionsForClient,
-  getHvncSessionCount,
+  addbackstageSession,
+  getbackstageSession,
+  deletebackstageSession,
+  getbackstageSessionsByClient,
+  hasbackstageSessionsForClient,
+  getbackstageSessionCount,
   addFileBrowserSession,
   getFileBrowserSession,
   deleteFileBrowserSession,
@@ -135,18 +135,18 @@ describe("sessionManager - remote desktop sessions", () => {
   });
 });
 
-describe("sessionManager - HVNC sessions", () => {
-  test("add, get, and delete HVNC session", () => {
+describe("sessionManager - backstage sessions", () => {
+  test("add, get, and delete backstage session", () => {
     const ws = mockWs();
-    addHvncSession({ id: "hvnc-1", clientId: "c-hvnc", viewer: ws, createdAt: Date.now() });
+    addbackstageSession({ id: "backstage-1", clientId: "c-backstage", viewer: ws, createdAt: Date.now() });
 
-    expect(getHvncSession("hvnc-1")).toBeDefined();
-    expect(hasHvncSessionsForClient("c-hvnc")).toBe(true);
-    expect(getHvncSessionsByClient("c-hvnc").length).toBe(1);
-    expect(getHvncSessionCount()).toBeGreaterThanOrEqual(1);
+    expect(getbackstageSession("backstage-1")).toBeDefined();
+    expect(hasbackstageSessionsForClient("c-backstage")).toBe(true);
+    expect(getbackstageSessionsByClient("c-backstage").length).toBe(1);
+    expect(getbackstageSessionCount()).toBeGreaterThanOrEqual(1);
 
-    expect(deleteHvncSession("hvnc-1")).toBe(true);
-    expect(getHvncSession("hvnc-1")).toBeUndefined();
+    expect(deletebackstageSession("backstage-1")).toBe(true);
+    expect(getbackstageSession("backstage-1")).toBeUndefined();
   });
 });
 

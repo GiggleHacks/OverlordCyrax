@@ -95,7 +95,7 @@ describe("/api/auth/me featurePermissions", () => {
       expect(body.featurePermissions.webcam).toBe(false);
       expect(body.featurePermissions.file_browser).toBe(false);
       expect(body.featurePermissions.console).toBe(true);
-      expect(body.featurePermissions.hvnc).toBe(true);
+      expect(body.featurePermissions.backstage).toBe(true);
     } finally {
       deleteUser(auth.userId);
     }
@@ -210,10 +210,10 @@ describe("/api/auth/feature-check", () => {
   test("both feature and client denied returns both reasons", async () => {
     const auth = await createTokenFor("operator");
     try {
-      setUserFeaturePermission(auth.userId, "hvnc", false);
+      setUserFeaturePermission(auth.userId, "backstage", false);
       // client_scope stays "none" => no access
 
-      const url = new URL("https://localhost/api/auth/feature-check?feature=hvnc&clientId=client-x");
+      const url = new URL("https://localhost/api/auth/feature-check?feature=backstage&clientId=client-x");
       const res = await handleAuthRoutes(
         new Request(url, {
           method: "GET",

@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { getConfig, updateOidcConfig, updateSecurityConfig, type Config } from "../../config";
-import { createUser } from "../../users";
+import { createUser, deleteUser } from "../../users";
 import { createOidcLoginRedirect, resolveOidcUser } from "../oidc";
 import { getOidcLocalMfaBlockReason, handleOidcRoutes } from "./oidc-routes";
 
@@ -11,6 +11,7 @@ const server = {
 let originalOidc: Config["oidc"];
 let originalSecurity: Config["security"];
 const originalFetch = globalThis.fetch;
+const createdUserIds: number[] = [];
 
 beforeAll(() => {
   originalOidc = { ...getConfig().oidc, scopes: [...getConfig().oidc.scopes] };
@@ -21,6 +22,13 @@ afterAll(async () => {
   globalThis.fetch = originalFetch;
   await updateOidcConfig(originalOidc);
   await updateSecurityConfig(originalSecurity);
+});
+
+afterEach(() => {
+  while (createdUserIds.length > 0) {
+    const id = createdUserIds.pop();
+    if (typeof id === "number") deleteUser(id);
+  }
 });
 
 describe("OIDC routes", () => {
@@ -86,6 +94,7 @@ describe("OIDC routes", () => {
   test("email linking does not fall back to local usernames", async () => {
     const username = `oidc_link_${Date.now().toString(36)}`;
     const created = await createUser(username, "Aa1!VeryLongTestPassword_2026", "operator", "test");
+    if (typeof created.userId === "number") createdUserIds.push(created.userId);
     expect(created.success).toBe(true);
 
     const oidc: Config["oidc"] = {

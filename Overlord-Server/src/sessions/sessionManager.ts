@@ -23,11 +23,11 @@ export type DashboardViewer = {
 const consoleSessions = new Map<string, ConsoleSession>();
 const rdSessions = new Map<string, RemoteDesktopViewer>();
 const webcamSessions = new Map<string, RemoteDesktopViewer>();
-const hvncSessions = new Map<string, RemoteDesktopViewer>(); // HVNC uses same structure as RD
+const backstageSessions = new Map<string, RemoteDesktopViewer>(); // backstage uses same structure as RD
 const consoleSessionsByClient = new Map<string, Set<string>>();
 const rdSessionsByClient = new Map<string, Set<string>>();
 const webcamSessionsByClient = new Map<string, Set<string>>();
-const hvncSessionsByClient = new Map<string, Set<string>>();
+const backstageSessionsByClient = new Map<string, Set<string>>();
 const fileBrowserSessions = new Map<string, FileBrowserViewer>();
 const processSessions = new Map<string, ProcessViewer>();
 const fileBrowserSessionsByClient = new Map<string, Set<string>>();
@@ -196,53 +196,53 @@ export function getAllRdSessions(): Map<string, RemoteDesktopViewer> {
   return rdSessions;
 }
 
-// ==================== HVNC SESSION MANAGEMENT ====================
+// ==================== backstage SESSION MANAGEMENT ====================
 
-export function addHvncSession(session: RemoteDesktopViewer): void {
-  hvncSessions.set(session.id, session);
-  addSessionToClientIndex(hvncSessionsByClient, session.clientId, session.id);
+export function addbackstageSession(session: RemoteDesktopViewer): void {
+  backstageSessions.set(session.id, session);
+  addSessionToClientIndex(backstageSessionsByClient, session.clientId, session.id);
 }
 
-export function getHvncSession(
+export function getbackstageSession(
   sessionId: string,
 ): RemoteDesktopViewer | undefined {
-  return hvncSessions.get(sessionId);
+  return backstageSessions.get(sessionId);
 }
 
-export function deleteHvncSession(sessionId: string): boolean {
-  const existing = hvncSessions.get(sessionId);
+export function deletebackstageSession(sessionId: string): boolean {
+  const existing = backstageSessions.get(sessionId);
   if (!existing) return false;
-  hvncSessions.delete(sessionId);
-  removeSessionFromClientIndex(hvncSessionsByClient, existing.clientId, sessionId);
+  backstageSessions.delete(sessionId);
+  removeSessionFromClientIndex(backstageSessionsByClient, existing.clientId, sessionId);
   return true;
 }
 
-export function getHvncSessionsByClient(clientId: string): RemoteDesktopViewer[] {
-  return getHvncSessionsForClient(clientId);
+export function getbackstageSessionsByClient(clientId: string): RemoteDesktopViewer[] {
+  return getbackstageSessionsForClient(clientId);
 }
 
-export function getHvncSessionsForClient(clientId: string): RemoteDesktopViewer[] {
-  const ids = hvncSessionsByClient.get(clientId);
+export function getbackstageSessionsForClient(clientId: string): RemoteDesktopViewer[] {
+  const ids = backstageSessionsByClient.get(clientId);
   if (!ids || ids.size === 0) return [];
   const sessions: RemoteDesktopViewer[] = [];
   for (const id of ids) {
-    const session = hvncSessions.get(id);
+    const session = backstageSessions.get(id);
     if (session) sessions.push(session);
   }
   return sessions;
 }
 
-export function hasHvncSessionsForClient(clientId: string): boolean {
-  const ids = hvncSessionsByClient.get(clientId);
+export function hasbackstageSessionsForClient(clientId: string): boolean {
+  const ids = backstageSessionsByClient.get(clientId);
   return Boolean(ids && ids.size > 0);
 }
 
-export function getAllHvncSessions(): Map<string, RemoteDesktopViewer> {
-  return hvncSessions;
+export function getAllbackstageSessions(): Map<string, RemoteDesktopViewer> {
+  return backstageSessions;
 }
 
-export function getHvncSessionCount(): number {
-  return hvncSessions.size;
+export function getbackstageSessionCount(): number {
+  return backstageSessions.size;
 }
 
 // ==================== FILE BROWSER SESSION MANAGEMENT ====================

@@ -85,6 +85,8 @@ let defaultWebhookTemplate = "";
 let defaultTelegramTemplate = "";
 let webhookTemplateEditor = null;
 let notificationTable = null;
+let pageActive = true;
+const subscriptionCleanups = [];
 
 function tryFormatJsonText(text) {
   const source = String(text || "").trim();
@@ -336,12 +338,17 @@ function entryMatchesSearch(entry, query) {
 }
 
 function applyTableView() {
+  if (!pageActive) return;
   const q = tableState.search.trim().toLowerCase();
   const all = Array.from(tableState.entries.values());
   const filtered = q ? all.filter((entry) => entryMatchesSearch(entry, q)) : all;
   filtered.sort(compareEntries);
   const rows = filtered.map(entryToRow);
-  if (notificationTable) notificationTable.replaceData(rows);
+  if (notificationTable && tableEl?.isConnected) {
+    void notificationTable.replaceData(rows).catch((err) => {
+      if (pageActive) console.error("Failed to update notification table:", err);
+    });
+  }
 
   if (emptyState) {
     if (all.length === 0) {
@@ -894,24 +901,25 @@ function connect() {
   startNotificationClient();
   if (panel) markAllNotificationsRead();
 
-  subscribeStatus((status) => {
+  subscriptionCleanups.push(subscribeStatus((status) => {
     if (status === "connected") setStatus("Connected", "ok");
     if (status === "error") setStatus("Error", "error");
     if (status === "disconnected") setStatus("Disconnected", "warn");
-  });
+  }));
 
-  subscribeReady((history) => {
+  subscriptionCleanups.push(subscribeReady((history) => {
+    if (!pageActive) return;
     clearTable();
     for (const item of history) {
       upsertEntry(item, "notification", false);
     }
     applyTableView();
     markAllNotificationsRead();
-  });
+  }));
 
-  subscribeNotifications((item) => addNotification(item, true));
-  subscribeClientEvents((item) => addClientEvent(item));
-  subscribeNotificationsCleared((clientId) => removeEntriesForClient(clientId));
+  subscriptionCleanups.push(subscribeNotifications((item) => addNotification(item, true)));
+  subscriptionCleanups.push(subscribeClientEvents((item) => addClientEvent(item)));
+  subscriptionCleanups.push(subscribeNotificationsCleared((clientId) => removeEntriesForClient(clientId)));
 }
 
 const CLIENT_EVENT_BADGE = {
@@ -1166,3 +1174,14 @@ wireTableControls();
 wireClientIdToggle();
 initRoleUi();
 connect();
+
+window.addEventListener("pagehide", () => {
+  pageActive = false;
+  for (const unsubscribe of subscriptionCleanups.splice(0)) unsubscribe();
+  webhookTemplateEditor?.dispose?.();
+  webhookTemplateEditor = null;
+  try {
+    notificationTable?.destroy();
+  } catch {}
+  notificationTable = null;
+}, { once: true });

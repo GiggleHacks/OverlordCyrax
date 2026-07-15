@@ -8,6 +8,7 @@ export type MessageKind =
   | "command"
   | "command_result"
   | "command_progress"
+  | "desktop_encoder_capabilities"
   | "client_logs_result"
   | "screenshot_result"
   | "frame"
@@ -204,7 +205,7 @@ export type FrameHeader = {
   fps: number;
   format: "jpeg" | "webp" | "raw" | "h264";
   hash?: string;
-  hvnc?: boolean;
+  backstage?: boolean;
   webcam?: boolean;
 };
 

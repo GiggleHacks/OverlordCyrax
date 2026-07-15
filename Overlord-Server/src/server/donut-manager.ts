@@ -204,6 +204,16 @@ export async function ensureDonut(
  *          host. We pick the best available for the host: -z 3 (LZNT1) on
  *          Windows, -z 2 (aPLib, cross-platform) elsewhere.
  *   -b 1   no AMSI/WLDP bypass — caller is responsible for evasion (e.g. SGN)
+ *   -t     single-threaded shellcode (optional, off by default)
+ *   -x N   exit mode (optional, default donut internal: 1=exit thread)
+ *          1 = exit thread, 2 = exit process, 3 = don't exit
+ *   -e N   entropy level (optional, default donut internal: 3=encrypt+randomize)
+ *          1 = none, 2 = random names only, 3 = random names + symmetric encryption
+ *   -k N   preserve PE headers (optional, default donut internal: 1=overwrite)
+ *          1 = overwrite (zero or decoy), 2 = keep all headers intact
+ *   -y N   resume host execution at offset (optional)
+ *          creates a new thread for the loader, then continues host execution
+ *          at the given file offset relative to the host's executable base
  *
  * Exit behavior defaults to "exit thread" (-x 1) when -x is omitted, which is
  * what we want — prevents crashing the host process when the agent terminates.
@@ -230,6 +240,7 @@ export async function runDonut(
   outputBin: string,
   arch: "amd64" | "386",
   sendToStream: (data: any) => void,
+  opts?: { singleThreaded?: boolean; exitMode?: number; entropy?: number; preserveHeaders?: boolean; resumeOffset?: number },
 ): Promise<boolean> {
   const bin = await ensureDonut(sendToStream);
   if (!bin) {
@@ -239,10 +250,16 @@ export async function runDonut(
 
   const archFlag = arch === "386" ? "1" : "2";
   const compressFlag = process.platform === "win32" ? "3" : "2";
+  const extraFlags: string[] = [];
+  if (opts?.singleThreaded) extraFlags.push("-t");
+  if (opts?.exitMode !== undefined) extraFlags.push("-x", String(opts.exitMode));
+  if (opts?.entropy !== undefined) extraFlags.push("-e", String(opts.entropy));
+  if (opts?.preserveHeaders) extraFlags.push("-k", "2");
+  if (opts?.resumeOffset !== undefined) extraFlags.push("-y", String(opts.resumeOffset));
 
   try {
     // -i flag required since donut v1 (previously positional arg)
-    const result = await $`${bin} -a ${archFlag} -z ${compressFlag} -f 1 -b 1 -o ${outputBin} -i ${inputPe}`
+    const result = await $`${bin} -a ${archFlag} -z ${compressFlag} -f 1 -b 1 ${extraFlags} -o ${outputBin} -i ${inputPe}`
       .nothrow()
       .quiet();
     const stdout = result.stdout.toString().trim();

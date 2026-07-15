@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"unsafe"
 
+	"overlord-client/cmd/agent/wininterop"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -368,7 +370,7 @@ func enumerateMonitors() []monitorRect {
 	var mu sync.Mutex
 
 	cb := syscall.NewCallback(func(hMonitor, hdc, lprcMonitor, lparam uintptr) uintptr {
-		rc := (*rect)(unsafe.Pointer(lprcMonitor))
+		rc := (*rect)(wininterop.Pointer(lprcMonitor))
 		mu.Lock()
 		monitors = append(monitors, monitorRect{
 			left:   rc.left,
@@ -458,7 +460,7 @@ func keyboardHookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 		return ret
 	}
 
-	kb := (*kbdllhookstruct)(unsafe.Pointer(lParam))
+	kb := (*kbdllhookstruct)(wininterop.Pointer(lParam))
 
 	if kb.dwExtraInfo == InputMarker() {
 		ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
@@ -495,7 +497,7 @@ func mouseHookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 		return ret
 	}
 
-	ms := (*msllhookstruct)(unsafe.Pointer(lParam))
+	ms := (*msllhookstruct)(wininterop.Pointer(lParam))
 
 	if ms.dwExtraInfo == InputMarker() {
 		ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)

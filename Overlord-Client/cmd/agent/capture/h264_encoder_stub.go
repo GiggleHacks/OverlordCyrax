@@ -23,9 +23,9 @@ func resetH264Encoder() {}
 
 func RequestDesktopH264Keyframe() {}
 
-func resetH264EncoderHVNC() {}
+func resetH264Encoderbackstage() {}
 
-func encodeH264FrameHVNC(_ *image.RGBA) ([]byte, error) {
+func encodeH264Framebackstage(_ *image.RGBA) ([]byte, error) {
 	return nil, errors.New("h264 support not available (cgo disabled)")
 }
 

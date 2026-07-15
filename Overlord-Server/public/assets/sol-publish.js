@@ -1,16 +1,4 @@
 (() => {
-const DEFAULT_RPC_ENDPOINTS = [
-  "https://api.mainnet-beta.solana.com",
-  "https://solana-mainnet.gateway.tatum.io",
-  "https://solana-rpc.publicnode.com",
-  "https://api.blockeden.xyz/solana/KeCh6p22EX5AeRHxMSmc",
-  "https://solana.drpc.org",
-  "https://solana.leorpc.com/?api_key=FREE",
-  "https://solana.api.onfinality.io/public",
-  "https://solana.api.pocket.network/",
-  "https://api.devnet.solana.com",
-];
-
 const rpcSelect = document.getElementById("rpc-url");
 const customRpcWrapper = document.getElementById("custom-rpc-wrapper");
 const customRpcInput = document.getElementById("custom-rpc-url");
@@ -23,10 +11,18 @@ const outputSection = document.getElementById("output-section");
 const outputDiv = document.getElementById("output");
 const walletInfo = document.getElementById("wallet-info");
 const walletAddress = document.getElementById("wallet-address");
+const rpcEndpointList = document.getElementById("rpc-endpoint-list");
+const newRpcInput = document.getElementById("new-rpc-url");
+const addRpcBtn = document.getElementById("add-rpc-btn");
+const rpcManagerError = document.getElementById("rpc-manager-error");
+const testAllRpcBtn = document.getElementById("test-all-rpc-btn");
+const rpcTestSummary = document.getElementById("rpc-test-summary");
 
-if (!rpcSelect || !customRpcWrapper || !customRpcInput || !privateKeyInput || !toggleKeyBtn || !serverUrlInput || !previewBtn || !publishBtn || !outputSection || !outputDiv || !walletInfo || !walletAddress) {
+if (!rpcSelect || !customRpcWrapper || !customRpcInput || !privateKeyInput || !toggleKeyBtn || !serverUrlInput || !previewBtn || !publishBtn || !outputSection || !outputDiv || !walletInfo || !walletAddress || !rpcEndpointList || !newRpcInput || !addRpcBtn || !rpcManagerError || !testAllRpcBtn || !rpcTestSummary) {
   return;
 }
+
+let rpcTestResults = new Map();
 
 function normalizeRpcEndpoints(value) {
   const seen = new Set();
@@ -48,23 +44,135 @@ function appendRpcOption(value, label = value) {
 }
 
 async function loadRpcEndpoints() {
+  const selected = rpcSelect.value;
   rpcSelect.innerHTML = "";
-  let endpoints = [];
+  let records = [];
   try {
     const res = await fetch("/api/sol/rpc-endpoints", { credentials: "include" });
     if (res.ok) {
       const data = await res.json();
-      endpoints = normalizeRpcEndpoints(data?.endpoints);
+      const urls = normalizeRpcEndpoints(data?.endpoints);
+      records = Array.isArray(data?.records)
+        ? data.records.filter((item) => item && typeof item.id === "string" && urls.includes(item.url))
+        : urls.map((url) => ({ id: "", url }));
     }
   } catch {}
-
-  if (endpoints.length === 0) {
-    endpoints = DEFAULT_RPC_ENDPOINTS;
-  }
-
-  normalizeRpcEndpoints(endpoints).forEach((ep) => appendRpcOption(ep));
+  records.forEach((item) => appendRpcOption(item.url));
   appendRpcOption("__custom__", "Custom RPC endpoint...");
+  rpcSelect.value = records.some((item) => item.url === selected) ? selected : (records[0]?.url || "__custom__");
+  customRpcWrapper.classList.toggle("hidden", rpcSelect.value !== "__custom__");
+  renderRpcEndpointManager(records);
 }
+
+function setRpcManagerError(message = "") {
+  rpcManagerError.textContent = message;
+  rpcManagerError.classList.toggle("hidden", !message);
+}
+
+function renderRpcEndpointManager(records) {
+  rpcEndpointList.innerHTML = "";
+  if (records.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "rounded-lg border border-dashed border-slate-700 px-3 py-4 text-center text-xs text-slate-500";
+    empty.textContent = "No saved endpoints. Add one below or use a custom endpoint for this publish.";
+    rpcEndpointList.appendChild(empty);
+    return;
+  }
+  records.forEach((record) => {
+    const testResult = rpcTestResults.get(record.id);
+    const row = document.createElement("div");
+    row.className = `group flex flex-wrap items-center gap-1 rounded-lg border bg-slate-950/60 p-1.5 ${
+      testResult ? (testResult.ok ? "border-emerald-500/40" : "border-red-500/40") : "border-slate-800"
+    }`;
+    const input = document.createElement("input");
+    input.type = "url";
+    input.value = record.url;
+    input.className = "flex-1 min-w-0 px-2 py-1.5 bg-transparent border border-transparent rounded text-xs font-mono text-slate-300 focus:outline-none focus:border-sky-500/60 focus:bg-slate-950";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "inline-flex items-center justify-center w-8 h-8 shrink-0 rounded-md text-slate-500 hover:text-sky-300 hover:bg-sky-500/10 transition-colors";
+    save.title = "Save endpoint";
+    save.innerHTML = '<i class="fa-solid fa-floppy-disk"></i>';
+    save.addEventListener("click", () => mutateRpcEndpoint(`/api/sol/rpc-endpoints/${record.id}`, "PATCH", { url: input.value }));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "inline-flex items-center justify-center w-8 h-8 shrink-0 rounded-md text-slate-500 hover:text-red-300 hover:bg-red-500/10 transition-colors";
+    remove.title = "Delete endpoint";
+    remove.innerHTML = '<i class="fa-solid fa-trash"></i>';
+    remove.addEventListener("click", () => mutateRpcEndpoint(`/api/sol/rpc-endpoints/${record.id}`, "DELETE"));
+    row.append(input, save, remove);
+    if (testResult) {
+      const status = document.createElement("div");
+      status.className = `basis-full px-2 pb-1 text-[11px] ${testResult.ok ? "text-emerald-300" : "text-red-300"}`;
+      status.title = testResult.ok ? `Latest blockhash: ${testResult.blockhash}` : testResult.error;
+      status.innerHTML = testResult.ok
+        ? `<i class="fa-solid fa-circle-check mr-1"></i>Valid response · ${testResult.latencyMs} ms · slot ${testResult.slot.toLocaleString()} · block height ${testResult.lastValidBlockHeight.toLocaleString()}`
+        : `<i class="fa-solid fa-circle-xmark mr-1"></i>${escapeHtml(testResult.error || "RPC test failed")} · ${testResult.latencyMs} ms`;
+      row.appendChild(status);
+    }
+    rpcEndpointList.appendChild(row);
+  });
+}
+
+function escapeHtml(value) {
+  const element = document.createElement("span");
+  element.textContent = String(value);
+  return element.innerHTML;
+}
+
+testAllRpcBtn.addEventListener("click", async () => {
+  setRpcManagerError();
+  rpcTestSummary.classList.add("hidden");
+  testAllRpcBtn.disabled = true;
+  testAllRpcBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Testing...';
+  try {
+    const res = await fetch("/api/sol/rpc-endpoints/test", {
+      method: "POST",
+      credentials: "include",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Failed to test RPC endpoints");
+    rpcTestResults = new Map((data.results || []).map((result) => [result.id, result]));
+    rpcTestSummary.textContent = `${data.passed} of ${data.tested} endpoints returned a valid Solana blockhash${data.failed ? `; ${data.failed} failed` : "."}`;
+    rpcTestSummary.className = `rounded-lg border px-3 py-2 text-xs ${
+      data.failed ? "border-amber-500/30 bg-amber-500/5 text-amber-200" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-200"
+    }`;
+    await loadRpcEndpoints();
+  } catch (error) {
+    setRpcManagerError(error?.message || "Failed to test RPC endpoints");
+  } finally {
+    testAllRpcBtn.disabled = false;
+    testAllRpcBtn.innerHTML = '<i class="fa-solid fa-vial"></i> Test all';
+  }
+});
+
+async function mutateRpcEndpoint(path, method, body) {
+  setRpcManagerError();
+  try {
+    const res = await fetch(path, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      credentials: "include",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Failed to save RPC endpoints");
+    newRpcInput.value = "";
+    rpcTestResults.clear();
+    rpcTestSummary.classList.add("hidden");
+    await loadRpcEndpoints();
+  } catch (error) {
+    setRpcManagerError(error?.message || "Failed to save RPC endpoints");
+  }
+}
+
+addRpcBtn.addEventListener("click", () => mutateRpcEndpoint("/api/sol/rpc-endpoints", "POST", { url: newRpcInput.value }));
+newRpcInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addRpcBtn.click();
+  }
+});
 
 loadRpcEndpoints();
 
@@ -122,8 +230,8 @@ async function checkWalletBalance() {
 function showOutput(text, isError = false) {
   outputSection.classList.remove("hidden");
   outputDiv.textContent = text;
-  outputDiv.className = `p-3 bg-slate-800/60 border rounded-lg text-sm font-mono break-all whitespace-pre-wrap max-h-64 overflow-y-auto ${
-    isError ? "border-red-700/60 text-red-300" : "border-slate-700 text-slate-200"
+  outputDiv.className = `p-4 bg-slate-950/70 border rounded-lg text-sm font-mono break-all whitespace-pre-wrap max-h-72 overflow-y-auto ${
+    isError ? "border-red-500/40 text-red-300" : "border-slate-800 text-slate-200"
   }`;
 }
 

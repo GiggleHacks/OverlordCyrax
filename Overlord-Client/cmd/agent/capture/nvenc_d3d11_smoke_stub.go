@@ -2,6 +2,12 @@
 
 package capture
 
+import (
+	"fmt"
+	"time"
+	"unsafe"
+)
+
 type NVENCD3D11SmokeOptions struct {
 	Width   int `json:"width"`
 	Height  int `json:"height"`
@@ -35,4 +41,8 @@ func RunNVENCD3D11Smoke(opts NVENCD3D11SmokeOptions) NVENCD3D11SmokeResult {
 		Error:   "NVENC D3D11 smoke requires Windows with cgo enabled",
 		Message: "NVENC D3D11 smoke requires Windows with cgo enabled",
 	}
+}
+
+func probeNativeD3D11TextureProfile(_, _ unsafe.Pointer, _, _, _, _, _ int, _ uint32) (time.Duration, error) {
+	return 0, fmt.Errorf("NVENC D3D11 support is not compiled in")
 }

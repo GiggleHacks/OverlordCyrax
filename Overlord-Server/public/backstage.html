@@ -114,9 +114,9 @@
                   </button>
                 </div>
                 <div class="flex items-center gap-2">
-                  <label class="text-sm text-slate-300 w-20" for="hvncResolutionSelect">Resolution</label>
+                  <label class="text-sm text-slate-300 w-20" for="backstageResolutionSelect">Resolution</label>
                   <select
-                    id="hvncResolutionSelect"
+                    id="backstageResolutionSelect"
                     class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
                   >
                     <option value="720">720p</option>
@@ -235,21 +235,21 @@
           </div>
         </div>
         <div
-          id="hvncContextMenu"
+          id="backstageContextMenu"
           class="hidden fixed z-50 min-w-[220px] max-h-[80vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900/95 text-sm text-slate-200 shadow-xl"
         >
           <!-- Options -->
           <div class="px-3 pt-2 pb-1 text-xs uppercase tracking-wide text-slate-500">Options</div>
           <label class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-slate-800/70 select-none">
-            <input type="checkbox" id="hvncCloneToggle" checked class="accent-violet-500 w-4 h-4 rounded" />
+            <input type="checkbox" id="backstageCloneToggle" checked class="accent-violet-500 w-4 h-4 rounded" />
             <span class="text-xs text-slate-300">Clone profile</span>
           </label>
           <label class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-slate-800/70 select-none">
-            <input type="checkbox" id="hvncCloneLiteToggle" class="accent-violet-500 w-4 h-4 rounded" />
+            <input type="checkbox" id="backstageCloneLiteToggle" class="accent-violet-500 w-4 h-4 rounded" />
             <span class="text-xs text-slate-300">Lite clone (no extensions)</span>
           </label>
           <label class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-slate-800/70 select-none">
-            <input type="checkbox" id="hvncKillIfRunningToggle" class="accent-violet-500 w-4 h-4 rounded" />
+            <input type="checkbox" id="backstageKillIfRunningToggle" class="accent-violet-500 w-4 h-4 rounded" />
             <span class="text-xs text-slate-300">Kill browser if running</span>
           </label>
           <div class="my-1 border-t border-slate-700/60"></div>
@@ -360,15 +360,15 @@
             object-fit: contain;
             margin: auto;
           }
-          #hvncContextMenu.hidden {
+          #backstageContextMenu.hidden {
             display: none;
           }
-          #hvncContextMenu button.browser-unavailable {
+          #backstageContextMenu button.browser-unavailable {
             opacity: 0.35;
             pointer-events: none;
             cursor: default;
           }
-          #hvncContextMenu button.browser-unavailable::after {
+          #backstageContextMenu button.browser-unavailable::after {
             content: " (not found)";
             font-size: 0.65rem;
             color: #94a3b8;
@@ -433,6 +433,6 @@
     <script defer src="/vendor/msgpackr/msgpackr.js"></script>
     <script defer src="/assets/remotedesktop-settings-menu.js"></script>
     <script type="module" src="/assets/nav.js"></script>
-    <script type="module" src="/assets/hvnc.js"></script>
+    <script type="module" src="/assets/backstage.js"></script>
   </body>
 </html>

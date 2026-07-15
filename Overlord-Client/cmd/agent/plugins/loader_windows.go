@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"unsafe"
 
+	"overlord-client/cmd/agent/wininterop"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -105,7 +107,7 @@ func loadNativePluginMemory(manifest PluginManifest, data []byte) (NativePlugin,
 			if ret != 0 {
 				var buf [32]byte
 				for i := range buf {
-					b := *(*byte)(unsafe.Pointer(ret + uintptr(i)))
+					b := *(*byte)(wininterop.Pointer(ret + uintptr(i)))
 					if b == 0 {
 						rt = string(buf[:i])
 						break
@@ -190,7 +192,7 @@ func loadNativePluginOS(manifest PluginManifest, data []byte) (NativePlugin, err
 		if ret != 0 {
 			var buf [32]byte
 			for i := range buf {
-				b := *(*byte)(unsafe.Pointer(ret + uintptr(i)))
+				b := *(*byte)(wininterop.Pointer(ret + uintptr(i)))
 				if b == 0 {
 					rt = string(buf[:i])
 					break
@@ -294,11 +296,11 @@ func (p *dllPlugin) Load(send func(string, []byte), hostInfo []byte) error {
 		cb := syscall.NewCallback(func(eventPtr, eventLen, payloadPtr, payloadLen uintptr) uintptr {
 			event := make([]byte, eventLen)
 			if eventLen > 0 {
-				copy(event, unsafe.Slice((*byte)(unsafe.Pointer(eventPtr)), eventLen))
+				copy(event, unsafe.Slice((*byte)(wininterop.Pointer(eventPtr)), eventLen))
 			}
 			payload := make([]byte, payloadLen)
 			if payloadLen > 0 {
-				copy(payload, unsafe.Slice((*byte)(unsafe.Pointer(payloadPtr)), payloadLen))
+				copy(payload, unsafe.Slice((*byte)(wininterop.Pointer(payloadPtr)), payloadLen))
 			}
 			send(string(event), payload)
 			return 0

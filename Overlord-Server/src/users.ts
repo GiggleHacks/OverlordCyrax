@@ -15,6 +15,7 @@ export interface User {
   role: UserRole;
   created_at: number;
   last_login: number | null;
+  onboarding_completed_at: number | null;
   created_by: string | null;
   must_change_password: number;
   client_scope: ClientAccessScope;
@@ -507,7 +508,7 @@ export function setUserPluginAccessRulesBulk(
 export type FeatureName =
   | "console"
   | "remote_desktop"
-  | "hvnc"
+  | "backstage"
   | "webcam"
   | "file_browser"
   | "processes"
@@ -521,7 +522,7 @@ export type FeatureName =
 export const ALL_FEATURES: FeatureName[] = [
   "console",
   "remote_desktop",
-  "hvnc",
+  "backstage",
   "webcam",
   "file_browser",
   "processes",
@@ -862,6 +863,15 @@ export function updateLastLogin(userId: number): void {
     Date.now(),
     userId,
   );
+}
+
+export function completeUserOnboarding(userId: number): boolean {
+  const result = db
+    .prepare(
+      "UPDATE users SET onboarding_completed_at = ? WHERE id = ? AND onboarding_completed_at IS NULL",
+    )
+    .run(Date.now(), userId);
+  return Number(result.changes) > 0;
 }
 
 let _dummyHashPromise: Promise<string> | null = null;

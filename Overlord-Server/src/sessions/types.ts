@@ -5,7 +5,7 @@ export type SocketRole =
   | ClientRole
   | "console_viewer"
   | "rd_viewer"
-  | "hvnc_viewer"
+  | "backstage_viewer"
   | "webcam_viewer"
   | "file_browser_viewer"
   | "process_viewer"
@@ -24,6 +24,7 @@ export type SocketData = {
   userRole?: string;
   userId?: number;
   username?: string;
+  authTokenHash?: string;
   wasKnown?: boolean;
   autoTasksRan?: boolean;
   autoDeploysRan?: boolean;

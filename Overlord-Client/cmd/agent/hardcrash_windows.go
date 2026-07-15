@@ -5,7 +5,8 @@ package main
 import (
 	"fmt"
 	"syscall"
-	"unsafe"
+
+	"overlord-client/cmd/agent/wininterop"
 
 	"golang.org/x/sys/windows"
 )
@@ -32,9 +33,9 @@ func installHardCrashReporter() {
 	hardCrashCallback = syscall.NewCallback(func(info uintptr) uintptr {
 		detail := "unhandled native exception"
 		if info != 0 {
-			ptrs := (*exceptionPointers)(unsafe.Pointer(info))
+			ptrs := (*exceptionPointers)(wininterop.Pointer(info))
 			if ptrs.ExceptionRecord != 0 {
-				rec := (*exceptionRecord)(unsafe.Pointer(ptrs.ExceptionRecord))
+				rec := (*exceptionRecord)(wininterop.Pointer(ptrs.ExceptionRecord))
 				detail = fmt.Sprintf("exception=0x%08x address=0x%x flags=0x%x", rec.ExceptionCode, rec.ExceptionAddress, rec.ExceptionFlags)
 			}
 		}

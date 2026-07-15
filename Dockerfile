@@ -97,7 +97,7 @@ RUN mkdir -p dist-clients && \
       echo "Using pre-built MSVC BackstageInjection DLL"; \
     else \
       chmod +x scripts/build-backstage-dll.sh && \
-      HVNC_SRC_DIR=BackstageInjection/src HVNC_OUT_DIR=dist-clients bash scripts/build-backstage-dll.sh || \
+      BACKSTAGE_SRC_DIR=BackstageInjection/src BACKSTAGE_OUT_DIR=dist-clients bash scripts/build-backstage-dll.sh || \
       echo "WARNING: BackstageInjection DLL not available (build with MSVC on Windows)"; \
     fi
 
@@ -105,7 +105,7 @@ RUN if [ -f dist-clients/BackstageCapture.x64.dll ]; then \
       echo "Using pre-built MSVC BackstageCapture DLL"; \
     else \
       chmod +x scripts/build-backstage-capture-dll.sh && \
-      HVNC_CAPTURE_SRC_DIR=BackstageCapture/src HVNC_CAPTURE_OUT_DIR=dist-clients bash scripts/build-backstage-capture-dll.sh || \
+      BACKSTAGE_CAPTURE_SRC_DIR=BackstageCapture/src BACKSTAGE_CAPTURE_OUT_DIR=dist-clients bash scripts/build-backstage-capture-dll.sh || \
       echo "WARNING: BackstageCapture DLL not available (build with MSVC on Windows)"; \
     fi
 
