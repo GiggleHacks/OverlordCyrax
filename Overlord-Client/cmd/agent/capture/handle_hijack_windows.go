@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"overlord-client/cmd/agent/wininterop"
 )
 
 func copyFileCount(src, dst string) (int64, error) {
@@ -250,7 +252,7 @@ func readFileFromHandle(handle uintptr) []byte {
 	defer procUnmapViewOfFile.Call(baseAddr)
 
 	data := make([]byte, fileSize)
-	copy(data, unsafe.Slice((*byte)(unsafe.Pointer(baseAddr)), fileSize))
+	copy(data, unsafe.Slice((*byte)(wininterop.Pointer(baseAddr)), fileSize))
 	return data
 }
 

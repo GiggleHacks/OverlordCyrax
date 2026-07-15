@@ -14,6 +14,8 @@ import (
 	"time"
 	"unsafe"
 
+	"overlord-client/cmd/agent/wininterop"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -1017,7 +1019,7 @@ func (e *mfH264Encoder) processOutput() ([]byte, error) {
 	var status uint32
 	hr = e.transform.ProcessOutput(0, 1, &output, &status)
 	if output.events != 0 {
-		(*iunknown)(unsafe.Pointer(output.events)).Release()
+		(*iunknown)(wininterop.Pointer(output.events)).Release()
 	}
 	switch hr {
 	case 0:
