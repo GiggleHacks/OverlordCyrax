@@ -23,6 +23,7 @@ const prevBtn = document.getElementById("prev");
 const nextBtn = document.getElementById("next");
 const pageJumpForm = document.getElementById("page-jump-form");
 const pageJumpInput = document.getElementById("page-jump-input");
+const pageSizeSelect = document.getElementById("page-size");
 const searchInput = document.getElementById("search");
 const sortSelect = document.getElementById("sort");
 const filterStatusSelect = document.getElementById("filter-status");
@@ -61,6 +62,8 @@ const PREF_FILTER_COUNTRY_KEY = "overlord_filter_country";
 const PREF_FILTER_GROUP_KEY = "overlord_filter_group";
 const PREF_FILTER_WEBCAM_KEY = "overlord_filter_webcam";
 const PREF_DISPLAY_FIELDS_KEY = "overlord_display_fields";
+const PREF_PAGE_SIZE_KEY = "overlord_page_size";
+const PAGE_SIZE_OPTIONS = [12, 24, 48, 96, 200];
 const DEFAULT_DISPLAY_FIELDS = {
   user: true,
   ip: true,
@@ -1211,6 +1214,16 @@ searchInput?.addEventListener("input", (e) => {
   debouncedSearch();
 });
 
+pageSizeSelect?.addEventListener("change", (e) => {
+  const pageSize = Number(e.target.value);
+  if (!PAGE_SIZE_OPTIONS.includes(pageSize)) return;
+  state.pageSize = pageSize;
+  localStorage.setItem(PREF_PAGE_SIZE_KEY, String(pageSize));
+  state.page = 1;
+  state.lastDigest = "";
+  loadWithOptions({ force: true, reorder: true });
+});
+
 sortSelect?.addEventListener("change", (e) => {
   state.sort = e.target.value;
   localStorage.setItem(PREF_SORT_KEY, state.sort);
@@ -1268,6 +1281,12 @@ import("./country-picker.js").then(({ initCountryPicker }) => {
 });
 
 (function restoreFilterStatus() {
+  const savedPageSize = Number(localStorage.getItem(PREF_PAGE_SIZE_KEY));
+  if (PAGE_SIZE_OPTIONS.includes(savedPageSize)) {
+    state.pageSize = savedPageSize;
+    if (pageSizeSelect) pageSizeSelect.value = String(savedPageSize);
+  }
+
   const savedStatus = localStorage.getItem(PREF_FILTER_STATUS_KEY);
   const validStatuses = ["all", "online", "offline"];
   if (savedStatus && validStatuses.includes(savedStatus)) {
@@ -1490,11 +1509,14 @@ bulkMuteBtn?.addEventListener("click", () => bulkSetMuted(true));
 bulkUnmuteBtn?.addEventListener("click", () => bulkSetMuted(false));
 
 bulkWebcamsBtn?.addEventListener("click", () => {
-  const ids = [...selectedClients].filter((id) => document.querySelector(`[data-client-row][data-id="${CSS.escape(id)}"]`)?.dataset.hasWebcam === "true").slice(0, 12);
+  const ids = [...selectedClients]
+    .filter((id) => document.querySelector(`[data-client-row][data-id="${CSS.escape(id)}"]`)?.dataset.hasWebcam === "true")
+    .slice(0, 200);
   if (!ids.length) return alert("Select one or more online clients with webcams first.");
   const overlay = document.createElement("div");
   overlay.className = "webcam-bulk-confirm";
-  overlay.innerHTML = `<section><div class="webcam-bulk-preview"><i></i><i></i><i></i><i></i><i></i><i></i></div><h2>Open tiled webcam view?</h2><p>${ids.length} selected webcam${ids.length === 1 ? "" : "s"} will begin streaming in a tiled layout. Selecting a tile stops the others and opens its focused view.</p><div><button data-cancel>Cancel</button><button data-confirm>View Webcams</button></div></section>`;
+  const performanceNote = ids.length > 12 ? " Large webcam arrays can use significant browser and network resources." : "";
+  overlay.innerHTML = `<section><div class="webcam-bulk-preview"><i></i><i></i><i></i><i></i><i></i><i></i></div><h2>Open tiled webcam view?</h2><p>${ids.length} selected webcam${ids.length === 1 ? "" : "s"} will begin streaming in a tiled layout. Selecting a tile stops the others and opens its focused view.${performanceNote}</p><div><button data-cancel>Cancel</button><button data-confirm>View Webcams</button></div></section>`;
   overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
   overlay.querySelector("[data-confirm]").onclick = () => location.assign(`/webcams?clientIds=${encodeURIComponent(ids.join(","))}`);
   document.body.append(overlay);

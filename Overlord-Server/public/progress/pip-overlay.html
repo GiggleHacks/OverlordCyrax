@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PiP OVERLAY // TASK MONITOR</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0c;
+      color: #c8c8c8;
+      font-family: "Consolas", "Courier New", monospace;
+      font-size: 13px;
+      min-height: 100vh;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    .frame {
+      max-width: 760px;
+      margin: 0 auto;
+      border: 1px solid #2a1a3a;
+      background: #0d0d10;
+      box-shadow: 0 0 40px rgba(180, 0, 255, 0.08);
+    }
+    .titlebar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      border-bottom: 1px solid #2a1a3a;
+      background: #120a18;
+      color: #e040fb;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .titlebar .blink { color: #39ff14; animation: blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .body { padding: 16px 14px 20px; }
+    .meta { color: #6b7280; margin-bottom: 14px; font-size: 11px; }
+    .meta span { color: #22d3ee; }
+    .bar-wrap {
+      height: 18px;
+      border: 1px solid #3b1f4a;
+      background: #08060c;
+      margin: 10px 0 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #6b21a8, #22d3ee 55%, #39ff14);
+      transition: width 0.35s ease;
+      box-shadow: 0 0 12px rgba(34, 211, 238, 0.35);
+    }
+    .pct { color: #fbbf24; font-size: 12px; margin-bottom: 16px; }
+    .spark {
+      height: 28px;
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      margin-bottom: 18px;
+      padding: 4px;
+      border: 1px solid #1f2937;
+      background: #08080c;
+    }
+    .spark i {
+      display: block;
+      width: 6px;
+      background: #22d3ee;
+      opacity: 0.75;
+      transition: height 0.3s ease, background 0.3s;
+    }
+    .steps { list-style: none; }
+    .steps li {
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      gap: 10px;
+      padding: 6px 4px;
+      border-bottom: 1px solid #15151c;
+      color: #6b7280;
+    }
+    .steps li.done { color: #39ff14; }
+    .steps li.active { color: #e040fb; }
+    .steps li.fail { color: #f43f5e; }
+    .steps .mark { color: inherit; }
+    .steps .eta { color: #4b5563; font-size: 11px; }
+    .log {
+      margin-top: 16px;
+      max-height: 180px;
+      overflow: auto;
+      border: 1px solid #1f2937;
+      background: #07070a;
+      padding: 8px 10px;
+      color: #9ca3af;
+      font-size: 11px;
+    }
+    .log div { margin-bottom: 3px; }
+    .log .t { color: #6b21a8; margin-right: 8px; }
+    .log .ok { color: #39ff14; }
+    .log .info { color: #22d3ee; }
+    .log .warn { color: #fbbf24; }
+    .footer {
+      margin-top: 14px;
+      color: #4b5563;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="titlebar">
+      <span>C:\OVERLORD\TASKS\PIP_OVERLAY.EXE</span>
+      <span class="blink" id="statusBlink">RUNNING_</span>
+    </div>
+    <div class="body">
+      <div class="meta">TASK <span>Fix PiP webcam overlay</span> · VER <span id="ver">2.4.26</span> · ELAPSED <span id="elapsed">0s</span></div>
+      <div class="bar-wrap"><div class="bar-fill" id="bar"></div></div>
+      <div class="pct" id="pct">PROGRESS: 0%</div>
+      <div class="spark" id="spark"></div>
+      <ul class="steps" id="steps"></ul>
+      <div class="log" id="log"></div>
+      <div class="footer">// REAL PROGRESS · POLL status.json · DO NOT SIMULATE</div>
+    </div>
+  </div>
+  <script>
+    const STEPS = [
+      { id: "progress", label: "Boot progress monitor" },
+      { id: "pip-js", label: "Create pip-overlay.js controller" },
+      { id: "viewer-html", label: "Restructure viewer.html overlay DOM" },
+      { id: "viewer-js", label: "Wire viewer.js mode + events" },
+      { id: "css", label: "Polish main.css PiP styles" },
+      { id: "tests", label: "Update tests + bump version" },
+      { id: "deploy", label: "Deploy to ratbox docker" },
+      { id: "telegram", label: "Telegram completion ping" },
+    ];
+    const stepsEl = document.getElementById("steps");
+    const spark = document.getElementById("spark");
+    for (let i = 0; i < 48; i++) {
+      const bar = document.createElement("i");
+      bar.style.height = "4px";
+      spark.appendChild(bar);
+    }
+    STEPS.forEach((s) => {
+      const li = document.createElement("li");
+      li.dataset.id = s.id;
+      li.innerHTML = `<span class="mark">·</span><span>${s.label}</span><span class="eta">WAIT</span>`;
+      stepsEl.appendChild(li);
+    });
+    const started = Date.now();
+    function fmt(ms) {
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      return m ? `${m}m ${s % 60}s` : `${s}s`;
+    }
+    async function tick() {
+      document.getElementById("elapsed").textContent = fmt(Date.now() - started);
+      try {
+        const res = await fetch("./status.json?t=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) throw new Error("no status");
+        const data = await res.json();
+        const pct = Math.max(0, Math.min(100, Number(data.percent) || 0));
+        document.getElementById("bar").style.width = pct + "%";
+        document.getElementById("pct").textContent = `PROGRESS: ${pct}%` + (data.phase ? `  ·  ${data.phase}` : "");
+        if (data.version) document.getElementById("ver").textContent = data.version;
+        const done = new Set(data.completed || []);
+        const active = data.active || "";
+        const failed = new Set(data.failed || []);
+        stepsEl.querySelectorAll("li").forEach((li) => {
+          const id = li.dataset.id;
+          li.className = "";
+          const mark = li.querySelector(".mark");
+          const eta = li.querySelector(".eta");
+          if (failed.has(id)) {
+            li.classList.add("fail");
+            mark.textContent = "x";
+            eta.textContent = "FAIL";
+          } else if (done.has(id)) {
+            li.classList.add("done");
+            mark.textContent = "+";
+            eta.textContent = "DONE";
+          } else if (id === active) {
+            li.classList.add("active");
+            mark.textContent = ">";
+            eta.textContent = "WORK";
+          } else {
+            mark.textContent = "·";
+            eta.textContent = "WAIT";
+          }
+        });
+        const sparks = spark.querySelectorAll("i");
+        const hist = data.sparkline || [];
+        sparks.forEach((el, i) => {
+          const v = hist[i] != null ? hist[i] : Math.max(2, Math.round((pct / 100) * 22 * ((i + 3) % 7) / 7));
+          el.style.height = Math.max(2, Math.min(22, v)) + "px";
+          el.style.background = v > 16 ? "#39ff14" : v > 10 ? "#22d3ee" : "#a855f7";
+        });
+        const log = document.getElementById("log");
+        if (Array.isArray(data.log)) {
+          log.innerHTML = data.log.slice(-40).map((line) => {
+            const cls = line.level === "ok" ? "ok" : line.level === "warn" ? "warn" : "info";
+            return `<div><span class="t">${line.t || ""}</span><span class="${cls}">${line.msg || ""}</span></div>`;
+          }).join("");
+          log.scrollTop = log.scrollHeight;
+        }
+        if (data.done) {
+          document.getElementById("statusBlink").textContent = "COMPLETE";
+          document.getElementById("statusBlink").style.animation = "none";
+          document.getElementById("statusBlink").style.color = "#39ff14";
+        }
+      } catch (e) {
+        // keep polling
+      }
+    }
+    tick();
+    setInterval(tick, 800);
+  </script>
+</body>
+</html>

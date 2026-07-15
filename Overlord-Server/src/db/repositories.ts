@@ -618,6 +618,7 @@ export function listClients(filters: ListFilters): ListResult {
     requireBuildOwner,
     allowedClientIds,
     deniedClientIds,
+    requestedClientIds,
     groupFilter,
     webcamFilter,
   } = filters;
@@ -661,6 +662,15 @@ export function listClients(filters: ListFilters): ListResult {
 
   if (requireBuildOwner) {
     where.push("c.built_by_user_id IS NOT NULL");
+  }
+
+  if (Array.isArray(requestedClientIds)) {
+    if (requestedClientIds.length === 0) {
+      where.push("1=0");
+    } else {
+      where.push(`c.id IN (${requestedClientIds.map(() => "?").join(",")})`);
+      params.push(...requestedClientIds);
+    }
   }
 
   if (Array.isArray(allowedClientIds)) {

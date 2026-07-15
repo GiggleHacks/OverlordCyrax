@@ -70,6 +70,7 @@ export type ListFilters = {
   requireBuildOwner?: boolean;
   allowedClientIds?: string[];
   deniedClientIds?: string[];
+  requestedClientIds?: string[];
   groupFilter?: string;
   webcamFilter?: string;
 };

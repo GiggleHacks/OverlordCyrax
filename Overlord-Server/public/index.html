@@ -280,6 +280,16 @@
         </div>
         <div id="grid" class="clients-grid min-h-[420px]" data-layout="rows"></div>
         <div id="pagination" class="flex items-center justify-center gap-3 py-4" style="visibility:hidden">
+          <label class="page-size-control" for="page-size">
+            <span>Show</span>
+            <select id="page-size" aria-label="Clients shown per page">
+              <option value="12">12</option>
+              <option value="24">24</option>
+              <option value="48">48</option>
+              <option value="96">96</option>
+              <option value="200">200</option>
+            </select>
+          </label>
           <button
             id="prev"
             class="px-4 py-2 rounded-lg border border-slate-700/60 bg-slate-800/70 hover:bg-slate-700/70 text-slate-300 disabled:opacity-40"

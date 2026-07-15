@@ -223,6 +223,89 @@ if (host) {
   });
 }
 
+const BRAND_TYPEWRITER_KEY = "overlord_brand_typewriter";
+
+function prefersReducedMotion() {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
+function consumeBrandTypewriterFlag() {
+  try {
+    if (sessionStorage.getItem(BRAND_TYPEWRITER_KEY) !== "1") return false;
+    sessionStorage.removeItem(BRAND_TYPEWRITER_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function typeText(el, fullText, delayMs = 38) {
+  return new Promise((resolve) => {
+    if (!el) {
+      resolve();
+      return;
+    }
+    const text = String(fullText || "");
+    el.textContent = "";
+    el.classList.add("is-typing");
+    const cursor = document.createElement("span");
+    cursor.className = "nav-brand-type-cursor";
+    cursor.setAttribute("aria-hidden", "true");
+    cursor.textContent = "█";
+    el.appendChild(cursor);
+
+    let i = 0;
+    const tick = () => {
+      if (i >= text.length) {
+        cursor.remove();
+        el.classList.remove("is-typing");
+        el.textContent = text;
+        resolve();
+        return;
+      }
+      el.textContent = text.slice(0, i + 1);
+      el.appendChild(cursor);
+      i += 1;
+      setTimeout(tick, delayMs);
+    };
+    tick();
+  });
+}
+
+async function playBrandTypewriter(navName, versionText) {
+  const nameEl =
+    document.getElementById("nav-brand-name") ||
+    document.getElementById("nav-mobile-brand-name");
+  const versionEls = [...document.querySelectorAll("[data-server-version]")];
+  const primaryVersion =
+    (nameEl && nameEl.parentElement?.querySelector("[data-server-version]")) ||
+    versionEls[0] ||
+    null;
+
+  // Instant fill non-primary brand slots so layout stays consistent.
+  for (const el of document.querySelectorAll("#nav-brand-name, #nav-mobile-brand-name")) {
+    if (el !== nameEl) el.textContent = navName;
+  }
+  for (const el of versionEls) {
+    if (el !== primaryVersion) el.textContent = versionText;
+  }
+
+  if (!nameEl) return;
+  const stack = nameEl.closest(".nav-brand-stack");
+  stack?.classList.add("is-typing");
+  await typeText(nameEl, navName, 36);
+  if (primaryVersion) {
+    await typeText(primaryVersion, versionText, 42);
+  }
+  stack?.classList.remove("is-typing");
+  stack?.classList.add("nav-brand-typed");
+  setTimeout(() => stack?.classList.remove("nav-brand-typed"), 900);
+}
+
 async function applyBranding() {
   try {
     const res = await fetch("/api/login/branding");
@@ -254,12 +337,27 @@ async function applyBranding() {
     }
 
     const navName = brand.navName || brand.productName || "Overlord 2.0";
-    for (const el of document.querySelectorAll("#nav-brand-name, #nav-mobile-brand-name")) {
-      el.textContent = navName;
+    const shouldType = consumeBrandTypewriterFlag() && !prefersReducedMotion();
+
+    let versionText = "v…";
+    try {
+      const verRes = await fetch("/api/version", { credentials: "include" });
+      if (verRes.ok) {
+        const data = await verRes.json();
+        if (data?.version) versionText = `v${data.version}`;
+      }
+    } catch {}
+
+    if (shouldType) {
+      await playBrandTypewriter(navName, versionText);
+    } else {
+      for (const el of document.querySelectorAll("#nav-brand-name, #nav-mobile-brand-name")) {
+        el.textContent = navName;
+      }
+      document.querySelectorAll("[data-server-version]").forEach((el) => {
+        el.textContent = versionText;
+      });
     }
-    fetch("/api/version", { credentials: "include" }).then((r) => r.ok ? r.json() : null).then((data) => {
-      if (data?.version) document.querySelectorAll("[data-server-version]").forEach((el) => { el.textContent = `v${data.version}`; });
-    }).catch(() => {});
 
     const iconClass = brand.iconClass || "fa-solid fa-skull";
     for (const icon of document.querySelectorAll("#nav-brand-icon, #nav-mobile-brand-icon")) {

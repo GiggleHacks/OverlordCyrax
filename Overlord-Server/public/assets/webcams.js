@@ -1,19 +1,47 @@
-const ids = [...new Set((new URLSearchParams(location.search).get("clientIds") || "").split(",").filter(Boolean))].slice(0, 12);
+const MAX_WEBCAM_TILES = 200;
+const ids = [...new Set((new URLSearchParams(location.search).get("clientIds") || "").split(",").filter(Boolean))].slice(0, MAX_WEBCAM_TILES);
+const TILE_FAILURE_TIMEOUT_MS = 5000;
+const terminalTileStates = new Set(["error", "offline", "disconnected", "not-found"]);
 const grid = document.getElementById("webcamTiles");
 const count = document.getElementById("tileCount");
 const stopAll = document.getElementById("stopAll");
 const activeTiles = new Map();
+const removalTimers = new Map();
 function syncLayout() {
   const active = [...activeTiles.values()].filter((tile) => !tile.classList.contains("is-stopped"));
   grid.dataset.count = String(active.length);
+  grid.classList.toggle("webcam-tiles--many", active.length > 12);
   count.textContent = `${active.length} LIVE`;
   stopAll.disabled = active.length === 0;
 }
 function stopTile(tile) {
+  clearTileRemoval(tile.dataset.clientId);
   const frame = tile.querySelector("iframe");
   frame.src = "about:blank";
   tile.classList.add("is-stopped");
   syncLayout();
+}
+
+function clearTileRemoval(clientId) {
+  const timer = removalTimers.get(clientId);
+  if (timer) clearTimeout(timer);
+  removalTimers.delete(clientId);
+}
+
+function removeTile(clientId, tile = activeTiles.get(clientId)) {
+  clearTileRemoval(clientId);
+  if (!tile || activeTiles.get(clientId) !== tile) return;
+  const frame = tile.querySelector("iframe");
+  if (frame) frame.src = "about:blank";
+  activeTiles.delete(clientId);
+  tile.remove();
+  syncLayout();
+}
+
+function scheduleTileRemoval(tile) {
+  const clientId = tile.dataset.clientId;
+  if (!clientId || removalTimers.has(clientId)) return;
+  removalTimers.set(clientId, setTimeout(() => removeTile(clientId, tile), TILE_FAILURE_TIMEOUT_MS));
 }
 for (const id of ids) {
   const tile = document.createElement("article");
@@ -45,6 +73,9 @@ function updateTileUi(tile, state) {
   } else if (state === "disconnected") {
     statusEl.className = "tile-status tile-status--error";
     statusEl.innerHTML = `<i class="fa-solid fa-link-slash"></i> Disconnected`;
+  } else if (state === "not-found") {
+    statusEl.className = "tile-status tile-status--error";
+    statusEl.innerHTML = `<i class="fa-solid fa-plug-circle-xmark"></i> Not found`;
   } else if (state === "connecting" || state === "starting") {
     statusEl.className = "tile-status";
     statusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Connecting`;
@@ -54,11 +85,24 @@ function updateTileUi(tile, state) {
   }
 }
 
+function setTileState(tile, state) {
+  tile.dataset.streamState = state;
+  updateTileUi(tile, state);
+  if (terminalTileStates.has(state)) {
+    scheduleTileRemoval(tile);
+  } else {
+    clearTileRemoval(tile.dataset.clientId);
+  }
+}
+
 async function refreshTileStatus() {
   const active = [...activeTiles.entries()].filter(([, tile]) => !tile.classList.contains("is-stopped"));
   if (!active.length) return;
   try {
-    const resp = await fetch(`/api/clients?page=1&pageSize=50`, { credentials: "include" });
+    const params = new URLSearchParams({ page: "1", pageSize: String(MAX_WEBCAM_TILES), sort: "stable" });
+    for (const [id] of active) params.append("id", id);
+    const resp = await fetch(`/api/clients?${params}`, { credentials: "include" });
+    if (!resp.ok) return;
     const data = await resp.json();
     const clients = new Map((data.items || []).map((c) => [c.id, c]));
     for (const [id, tile] of active) {
@@ -66,19 +110,18 @@ async function refreshTileStatus() {
       const statusEl = tile.querySelector(".tile-status");
       const pingEl = tile.querySelector(".tile-ping");
       if (!client) {
-        statusEl.innerHTML = `<i class="fa-solid fa-plug-circle-xmark"></i> Not found`;
-        statusEl.className = "tile-status tile-status--error";
         pingEl.textContent = "";
-        tile.dataset.streamState = "offline";
+        setTileState(tile, "not-found");
         continue;
       }
       const ping = Number.isFinite(Number(client.pingMs)) ? `${Math.round(Number(client.pingMs))} ms` : "";
       pingEl.textContent = ping;
       if (!client.online) {
-        statusEl.className = "tile-status tile-status--error";
-        statusEl.innerHTML = `<i class="fa-solid fa-plug-circle-xmark"></i> Offline`;
-        tile.dataset.streamState = "offline";
+        setTileState(tile, "offline");
         continue;
+      }
+      if (tile.dataset.streamState === "not-found" || tile.dataset.streamState === "offline") {
+        setTileState(tile, "connecting");
       }
       if (tile.dataset.streamState) {
         updateTileUi(tile, tile.dataset.streamState);
@@ -102,15 +145,19 @@ async function refreshTileStatus() {
   } catch {}
 }
 refreshTileStatus();
-setInterval(refreshTileStatus, 8000);
+const tileStatusInterval = setInterval(refreshTileStatus, 8000);
 
 window.addEventListener("message", (event) => {
   const msg = event.data;
   if (msg && msg.type === "webcam_status" && msg.clientId) {
     const tile = activeTiles.get(msg.clientId);
     if (tile && !tile.classList.contains("is-stopped")) {
-      tile.dataset.streamState = msg.status;
-      updateTileUi(tile, msg.status);
+      setTileState(tile, msg.status);
     }
   }
+});
+
+window.addEventListener("pagehide", () => {
+  clearInterval(tileStatusInterval);
+  for (const clientId of [...removalTimers.keys()]) clearTileRemoval(clientId);
 });

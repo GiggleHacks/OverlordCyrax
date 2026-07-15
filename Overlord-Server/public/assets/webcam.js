@@ -70,6 +70,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   let clientIsAdmin = false;
   let firewallWarningAcked = false;
   let firstFrameTimer = null;
+  let renderWatchTimer = null;
+  let lastRenderedFrameAt = 0;
   let startRetryCount = 0;
 
   let prefersH264 = typeof VideoDecoder === "function";
@@ -445,6 +447,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (selectedDeviceIndex !== Number(selected || 0) && ws && ws.readyState === WebSocket.OPEN) {
       send("webcam_select", { index: selectedDeviceIndex });
     }
+    postStatusToParent();
   }
 
   function isH264KeyFrame(data) {
@@ -488,6 +491,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       videoDecoder = new VideoDecoder({
         output: (frame) => {
           hasRenderedFrame = true;
+          lastRenderedFrameAt = performance.now();
           startRetryCount = 0;
           if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
           const width = frame.displayWidth || frame.codedWidth || canvas.width;
@@ -498,12 +502,17 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
           }
           try {
             ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+            if (desiredStreaming) setStreamState("streaming", "Streaming");
+          } catch (err) {
+            console.warn("webcam h264 draw failed", err);
+            setStreamState("error", "Unable to render camera image");
           } finally {
             frame.close();
           }
         },
         error: (err) => {
           console.warn("webcam h264 decoder error", err);
+          setStreamState("error", "Unable to decode camera image");
         },
       });
       videoDecoder.configure({ codec: "avc1.42E01E", optimizeForLatency: true });
@@ -553,8 +562,24 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       renderCount = 0;
       renderWindowStart = performance.now();
     }
+    postStatusToParent(state);
+  }
+
+  function postStatusToParent(statusOverride) {
+    if (!embedded || window.parent === window) return;
     try {
-      window.parent.postMessage({ type: "webcam_status", clientId, status: state }, "*");
+      const fpsText = viewerFps?.textContent;
+      const fps = fpsText && fpsText !== "--" ? Number(fpsText) : null;
+      window.parent.postMessage({
+        type: "webcam_status",
+        clientId,
+        status: statusOverride || streamState,
+        fps: Number.isFinite(fps) ? fps : null,
+        devices: Array.isArray(availableDevices)
+          ? availableDevices.map((d) => ({ index: d.index, name: d.name, maxFps: d.maxFps }))
+          : [],
+        settings: readSharedSettings(),
+      }, "*");
     } catch (e) {}
   }
 
@@ -573,6 +598,25 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }, 6000);
   }
 
+  function armRenderWatch() {
+    if (renderWatchTimer) clearInterval(renderWatchTimer);
+    renderWatchTimer = setInterval(() => {
+      if (!desiredStreaming || streamState !== "streaming" || !lastRenderedFrameAt) return;
+      if (performance.now() - lastRenderedFrameAt > 5000) {
+        setStreamState("error", "Camera stopped delivering images");
+      }
+    }, 1000);
+  }
+
+  function recordWebrtcFrame() {
+    if (!desiredStreaming) return;
+    hasRenderedFrame = true;
+    lastRenderedFrameAt = performance.now();
+    startRetryCount = 0;
+    if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
+    if (streamState !== "streaming") setStreamState("streaming", "Streaming");
+  }
+
   function updateViewerFps() {
     const now = performance.now();
     renderCount += 1;
@@ -580,6 +624,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (elapsed >= 1000) {
       viewerFps.textContent = String(Math.round((renderCount * 1000) / elapsed));
       renderCount = 0;
+      postStatusToParent(streamState);
       renderWindowStart = now;
     }
   }
@@ -596,6 +641,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       }
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       hasRenderedFrame = true;
+      lastRenderedFrameAt = performance.now();
       startRetryCount = 0;
       if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
       bitmap.close();
@@ -616,6 +662,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (format === 1) {
       drawJpeg(payload).catch((err) => {
         console.warn("webcam draw failed", err, "payloadBytes=", payload.length);
+        setStreamState("error", "Unable to render camera image");
       });
       return;
     }
@@ -634,13 +681,14 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         h264TimestampUs += 66_666;
         videoDecoder.decode(chunk);
         updateViewerFps();
-        if (desiredStreaming) setStreamState("streaming", "Streaming");
       } catch (err) {
         console.warn("webcam h264 decode failed", err, "payloadBytes=", payload.length);
+        setStreamState("error", "Unable to decode camera image");
       }
       return;
     }
     console.warn("webcam unsupported frame format", format, "payloadBytes=", payload.length);
+    setStreamState("error", "Unsupported camera image format");
   }
 
   function send(type, payload = {}) {
@@ -810,6 +858,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
     desiredStreaming = true;
     hasRenderedFrame = false;
+    lastRenderedFrameAt = 0;
     applyFpsSettings();
     if (mode === "relayed") {
       // Server replies with webrtc_ready; startWhep happens then.
@@ -825,6 +874,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
     setStreamState("starting", "Opening camera · waiting for first frame");
     armFirstFrameWatch();
+    armRenderWatch();
     return true;
   }
 
@@ -835,6 +885,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   stopBtn.addEventListener("click", () => {
     desiredStreaming = false;
     if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
+    if (renderWatchTimer) { clearInterval(renderWatchTimer); renderWatchTimer = null; }
     send("webcam_stop");
     stopAllWebrtc();
     disconnectAudio();
@@ -848,9 +899,11 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
     disconnectAudio();
     destroyVideoDecoder();
+    if (renderWatchTimer) { clearInterval(renderWatchTimer); renderWatchTimer = null; }
   }
   window.addEventListener("beforeunload", stopOnExit);
   window.addEventListener("pagehide", stopOnExit);
+  webrtcVideo?.addEventListener("timeupdate", recordWebrtcFrame);
 
   refreshCameras.addEventListener("click", () => {
     requestCameraList();
@@ -929,6 +982,74 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   });
 
   viewerScaleBtn?.addEventListener("click", () => { viewerScale = viewerScale === 60 ? 100 : 60; applyViewerScale(); sharedSettingsSaver.scheduleSave(); });
+
+  function applyParentSettings(payload) {
+    if (!payload || typeof payload !== "object") return;
+    if (payload.camera != null && cameraSelect) {
+      const idx = Number(payload.camera);
+      if (Number.isFinite(idx) && setSelectValue(cameraSelect, idx)) {
+        savedCameraIndex = idx;
+        selectedDeviceIndex = idx;
+        applyFpsInputLimits();
+        send("webcam_select", { index: idx });
+      }
+    }
+    if (payload.resolution != null && resolutionSelect) {
+      if (setSelectValue(resolutionSelect, payload.resolution)) {
+        pushVideoSettings();
+      }
+    }
+    if (payload.webrtcMode != null && webrtcMode) {
+      setSelectValue(webrtcMode, payload.webrtcMode);
+    }
+    if (payload.fps != null && fpsInput) {
+      fpsInput.value = String(payload.fps);
+      if (streamState !== "streaming" && streamState !== "starting" && streamState !== "stopping") {
+        applyFpsSettings();
+      }
+    }
+    if (typeof payload.preferH264 === "boolean" && codecH264) {
+      prefersH264 = payload.preferH264 && typeof VideoDecoder === "function";
+      codecH264.checked = prefersH264;
+      if (!prefersH264) destroyVideoDecoder();
+      pushVideoSettings();
+    }
+    sharedSettingsSaver.scheduleSave();
+    postStatusToParent();
+  }
+
+  window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (!data || typeof data !== "object" || data.type !== "webcam_cmd") return;
+    if (data.clientId && data.clientId !== clientId) return;
+    const action = String(data.action || "");
+    if (action === "start") {
+      startStreaming();
+      return;
+    }
+    if (action === "stop") {
+      desiredStreaming = false;
+      if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
+      if (renderWatchTimer) { clearInterval(renderWatchTimer); renderWatchTimer = null; }
+      send("webcam_stop");
+      stopAllWebrtc();
+      disconnectAudio();
+      setStreamState("idle", "Stopped");
+      return;
+    }
+    if (action === "refresh_cameras") {
+      requestCameraList();
+      postStatusToParent();
+      return;
+    }
+    if (action === "set") {
+      applyParentSettings(data.payload || {});
+      return;
+    }
+    if (action === "ping") {
+      postStatusToParent();
+    }
+  });
 
   const transition = new URLSearchParams(location.search).get("transition") === "1";
   const initDelay = transition ? 800 : (embedded ? 500 : 0);

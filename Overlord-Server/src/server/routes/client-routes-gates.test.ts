@@ -93,6 +93,16 @@ async function patchNickname(token: string, clientId: string, nickname: string) 
   );
 }
 
+async function listClients(token: string, params = new URLSearchParams()) {
+  const url = new URL(`https://localhost/api/clients?${params}`);
+  return handleClientRoutes(
+    new Request(url, { headers: { Authorization: `Bearer ${token}` } }),
+    url,
+    mockServer,
+    deps,
+  );
+}
+
 afterEach(() => {
   while (createdClientIds.length > 0) {
     const id = createdClientIds.pop();
@@ -105,6 +115,31 @@ afterEach(() => {
     const id = createdUserIds.pop();
     if (typeof id === "number") deleteUser(id);
   }
+});
+
+describe("clients:list requested IDs", () => {
+  test("returns only explicitly requested clients", async () => {
+    const auth = await makeUserWithToken("admin");
+    const includedId = registerTestClient();
+    const excludedId = registerTestClient();
+    const params = new URLSearchParams({ page: "1", pageSize: "200", enrollmentFilter: "all" });
+    params.append("id", includedId);
+
+    const res = await listClients(auth.token, params);
+    expect(res!.status).toBe(200);
+    const data = await res!.json();
+    expect(data.items.map((item: { id: string }) => item.id)).toEqual([includedId]);
+    expect(data.items.some((item: { id: string }) => item.id === excludedId)).toBe(false);
+  });
+
+  test("rejects more than 200 explicitly requested clients", async () => {
+    const auth = await makeUserWithToken("admin");
+    const params = new URLSearchParams();
+    for (let index = 0; index < 201; index += 1) params.append("id", `client-${index}`);
+
+    const res = await listClients(auth.token, params);
+    expect(res!.status).toBe(400);
+  });
 });
 
 describe("clients:disconnect gates", () => {

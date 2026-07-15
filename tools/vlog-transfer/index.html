@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VLOG TRANSFER // LIVE</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="terminal" aria-live="polite">
+    <header class="masthead">
+      <div>
+        <div class="eyebrow">OVERLORD // FILE OPS</div>
+        <h1>VLOG TRANSFER <span id="version">v0.1.0</span></h1>
+      </div>
+      <div id="status" class="status status-ready">READY</div>
+    </header>
+
+    <section class="hero-grid">
+      <div class="readout">
+        <span class="label">CURRENT TARGET</span>
+        <strong id="current-file">Awaiting worker…</strong>
+        <div class="progress-track" aria-label="Current file progress"><div id="current-bar" class="progress current"></div></div>
+        <div class="metric-line"><span id="current-bytes">0 B</span><span id="current-percent">0%</span></div>
+      </div>
+      <div class="readout total-readout">
+        <span class="label">TOTAL STREAM</span>
+        <strong id="total-bytes">0 B / 0 B</strong>
+        <div class="progress-track" aria-label="Total transfer progress"><div id="total-bar" class="progress total"></div></div>
+        <div class="metric-line"><span id="files">0 / 0 files</span><span id="eta">ETA --:--</span></div>
+      </div>
+    </section>
+
+    <section class="telemetry">
+      <div><span class="label">THROUGHPUT</span><strong id="speed">0 B/s</strong></div>
+      <div><span class="label">ELAPSED</span><strong id="elapsed">00:00:00</strong></div>
+      <div><span class="label">ERRORS</span><strong id="errors">0</strong></div>
+      <canvas id="sparkline" width="500" height="62" aria-label="Throughput history"></canvas>
+    </section>
+
+    <section class="manifest-panel">
+      <div class="section-heading"><span>TRANSFER QUEUE</span><span id="queue-state">0 ITEMS</span></div>
+      <ol id="queue" class="queue"></ol>
+    </section>
+
+    <footer><span id="footer-message">SCP PROGRESS METER // SIZE VERIFY ON</span><span>LOCALHOST ONLY</span></footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
