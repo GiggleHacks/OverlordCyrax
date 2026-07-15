@@ -1,0 +1,23 @@
+{
+  "percent": 100,
+  "phase": "COMPLETE",
+  "version": "2.4.26",
+  "active": "",
+  "completed": ["progress", "pip-js", "viewer-html", "viewer-js", "css", "tests", "deploy", "telegram"],
+  "failed": [],
+  "sparkline": [8,10,12,14,16,18,20,22,21,23,24,25,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,84,88,92,95,97,98,99,100],
+  "log": [
+    { "t": "00:00", "level": "info", "msg": "task started: PiP overlay fix" },
+    { "t": "00:01", "level": "ok", "msg": "progress page online" },
+    { "t": "00:02", "level": "ok", "msg": "pip-overlay.js controller written" },
+    { "t": "00:03", "level": "ok", "msg": "viewer.html restructured: overlay inside desktop panel" },
+    { "t": "00:04", "level": "ok", "msg": "viewer.js wired for pip mode + no-controls embed" },
+    { "t": "00:05", "level": "ok", "msg": "main.css PiP styles applied" },
+    { "t": "00:06", "level": "ok", "msg": "viewer-ui tests: 7 pass" },
+    { "t": "00:07", "level": "ok", "msg": "version bumped to 2.4.26" },
+    { "t": "00:08", "level": "ok", "msg": "deployed static assets to root@ratbox overlord-server" },
+    { "t": "00:09", "level": "warn", "msg": "repaired accidental sed corruption in dist/index.js" },
+    { "t": "00:10", "level": "ok", "msg": "version 2.4.26 live; telegram next" }
+  ],
+  "done": true
+}

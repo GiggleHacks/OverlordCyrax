@@ -112,14 +112,18 @@ export async function handleClientRoutes(
     const enrollmentFilter = url.searchParams.get("enrollmentFilter") || "approved";
     const groupFilter = url.searchParams.get("group") || "all";
     const webcamFilter = url.searchParams.get("webcam") || "all";
+    const requestedClientIds = Array.from(new Set(url.searchParams.getAll("id").filter(Boolean)));
+    if (requestedClientIds.length > 200) {
+      return Response.json({ error: "Too many client IDs (max 200)" }, { status: 400, headers: deps.CORS_HEADERS });
+    }
 
     if (user.role === "admin") {
-      const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter });
+      const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter, requestedClientIds: requestedClientIds.length ? requestedClientIds : undefined });
       return Response.json(result, { headers: deps.CORS_HEADERS });
     }
 
     if (user.role === "operator" && isEnrollmentRequest) {
-      const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter, builtByUserId: user.userId, requireBuildOwner: true });
+      const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter, requestedClientIds: requestedClientIds.length ? requestedClientIds : undefined, builtByUserId: user.userId, requireBuildOwner: true });
       return Response.json(result, { headers: deps.CORS_HEADERS });
     }
 
@@ -131,7 +135,7 @@ export async function handleClientRoutes(
     const allowedClientIds = scope === "allowlist" ? listUserClientRuleIdsByAccess(user.userId, "allow") : undefined;
     const deniedClientIds = scope === "denylist" ? listUserClientRuleIdsByAccess(user.userId, "deny") : undefined;
 
-    const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter, allowedClientIds, deniedClientIds });
+    const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter, groupFilter, webcamFilter, requestedClientIds: requestedClientIds.length ? requestedClientIds : undefined, allowedClientIds, deniedClientIds });
     return Response.json(result, { headers: deps.CORS_HEADERS });
   }
 

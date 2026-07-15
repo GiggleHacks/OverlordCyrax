@@ -347,9 +347,11 @@ form?.addEventListener("submit", async (e) => {
     if (data.user && data.user.mustChangePassword) {
       sessionStorage.setItem("temp_token", data.token);
       sessionStorage.setItem("temp_user", JSON.stringify(data.user));
+      sessionStorage.setItem("overlord_brand_typewriter", "1");
 
       window.location.href = "/change-password.html";
     } else {
+      sessionStorage.setItem("overlord_brand_typewriter", "1");
       window.location.href = "/";
     }
   } catch (err) {

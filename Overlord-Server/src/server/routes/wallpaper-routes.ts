@@ -406,6 +406,9 @@ function applyWallpaperScript(remotePath: string): string {
   const escapedPath = remotePath.replace(/'/g, "''");
   return `
 $path = '${escapedPath}'
+Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name WallpaperStyle -Value '6' -ErrorAction SilentlyContinue
+Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name TileWallpaper -Value '0' -ErrorAction SilentlyContinue
+
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
