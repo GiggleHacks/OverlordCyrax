@@ -1874,7 +1874,15 @@ body.viewer-has-webcam-bar .viewer-panels { height: calc(100vh - 82px); }
 .viewer-panels[data-mode="split-v"] .viewer-divider { display: block; cursor: row-resize; }
 .viewer-panels[data-mode="pip"] .viewer-divider { display: none; }
 .viewer-panels[data-mode="pip"] .viewer-panel-webcam { display: none !important; }
-.viewer-panels[data-mode="pip"] .viewer-panel-desktop,
+/* PiP: desktop fills the stage; webcam floats as overlay inside this panel */
+.viewer-panels[data-mode="pip"] .viewer-panel-desktop {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+/* Desktop-only: optional horizontal inset via CSS vars */
 .viewer-panels[data-mode="desktop"] .viewer-panel-desktop {
   position: absolute;
   top: 0;
@@ -1890,7 +1898,7 @@ body.viewer-has-webcam-bar .viewer-panels { height: calc(100vh - 82px); }
   width: 100%;
   height: 100%;
 }
-.viewer-panels[data-mode="pip"] .viewer-desktop-resize,
+.viewer-panels[data-mode="pip"] .viewer-desktop-resize { display: none; }
 .viewer-panels[data-mode="desktop"] .viewer-desktop-resize { display: block; }
 
 /* Desktop panel edge resize (pip/desktop modes) — left edge to slide/shrink */
@@ -1913,7 +1921,7 @@ body.viewer-has-webcam-bar .viewer-panels { height: calc(100vh - 82px); }
   content: none;
 }
 
-/* True PiP overlay — free-float over entire viewer layout (incl. side panel) */
+/* True PiP overlay — floats over the desktop video panel */
 .viewer-pip-overlay {
   display: none;
   position: absolute;
@@ -1924,8 +1932,8 @@ body.viewer-has-webcam-bar .viewer-panels { height: calc(100vh - 82px); }
   height: 28%;
   min-width: 160px;
   min-height: 100px;
-  max-width: min(90vw, 92%);
-  max-height: min(90vh, 92%);
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
   border: 2px solid rgba(23, 56, 73, 0.95);
   border-radius: 10px;
   overflow: hidden;
@@ -1935,9 +1943,10 @@ body.viewer-has-webcam-bar .viewer-panels { height: calc(100vh - 82px); }
   touch-action: none;
   user-select: none;
 }
-.viewer-pip-overlay.is-visible,
+body.viewer-pip-active .viewer-pip-overlay.is-visible,
+.viewer-panels[data-mode="pip"] .viewer-pip-overlay.is-visible,
 .viewer-panels[data-mode="pip"] .viewer-pip-overlay:not([hidden]) {
-  display: block;
+  display: block !important;
 }
 .viewer-pip-overlay:hover,
 .viewer-pip-overlay.is-dragging,

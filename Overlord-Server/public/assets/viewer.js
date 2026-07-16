@@ -150,7 +150,6 @@ function applySettingsFromChild(settings) {
   if (camH264 && typeof settings.preferH264 === "boolean") camH264.checked = settings.preferH264;
 }
 
-const viewerLayout = document.querySelector(".viewer-layout") || document.body;
 const sidePanelEl = document.getElementById("sidePanel");
 const SIDE_WIDTH_KEY = "overlord_side_panel_width_v1";
 const DESKTOP_LAYOUT_KEY = "overlord_desktop_layout_v1";
@@ -182,7 +181,7 @@ loadSidePanelWidth();
 
 const pip = initPipOverlay({
   root: pipOverlayEl,
-  host: viewerLayout,
+  host: desktopPanel,
   iframe: pipWebcam,
   onClose: () => {
     unloadFrame(pipWebcam);
@@ -198,7 +197,7 @@ function setMode(nextMode) {
   if (prev !== mode) {
     panels.style.gridTemplateColumns = "";
     panels.style.gridTemplateRows = "";
-    if (mode !== "pip" && mode !== "desktop") clearDesktopInset();
+    if (mode !== "desktop") clearDesktopInset();
   }
 
   if (webcamPanel) {
@@ -235,8 +234,12 @@ function setMode(nextMode) {
   if (needsPip) {
     ensureFrame(pipWebcam, webcamUrlBar);
     pip.show();
-    restoreDesktopInset();
-    requestAnimationFrame(() => pip.restoreLayout());
+    // Desktop panel is the host — keep it full-size (no inset) so PiP can float over RD.
+    clearDesktopInset();
+    requestAnimationFrame(() => {
+      pip.restoreLayout();
+      requestAnimationFrame(() => pip.restoreLayout());
+    });
   } else {
     pip.hide();
     unloadFrame(pipWebcam);
@@ -413,7 +416,7 @@ sideResize?.addEventListener("pointerdown", (e) => {
 });
 
 desktopResize?.addEventListener("pointerdown", (e) => {
-  if (mode !== "pip" && mode !== "desktop") return;
+  if (mode !== "desktop") return;
   if (e.button != null && e.button !== 0) return;
   e.preventDefault();
   desktopDragging = true;
@@ -488,5 +491,6 @@ document.addEventListener("mouseup", endPanelDrags);
 document.addEventListener("pointerup", endPanelDrags);
 document.addEventListener("pointercancel", endPanelDrags);
 window.addEventListener("resize", () => {
-  if (mode === "pip" || mode === "desktop") restoreDesktopInset();
+  if (mode === "desktop") restoreDesktopInset();
+  if (mode === "pip") requestAnimationFrame(() => pip.restoreLayout());
 });

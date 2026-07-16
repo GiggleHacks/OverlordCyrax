@@ -93,34 +93,34 @@
           <section class="viewer-panel viewer-panel-desktop" id="viewerDesktopPanel">
             <iframe id="viewerDesktop" title="Remote desktop"></iframe>
             <div class="viewer-desktop-resize" data-desktop-resize title="Resize desktop"></div>
+            <div id="viewerPipOverlay" class="viewer-pip-overlay" hidden>
+              <div class="pip-toolbar" data-pip-toolbar>
+                <span class="pip-drag-label" title="Drag to move">
+                  <i class="fa-solid fa-arrows-up-down-left-right"></i>
+                </span>
+                <div class="pip-snap-group" title="Snap position">
+                  <button type="button" data-pip-snap="tl" title="Top Left">TL</button>
+                  <button type="button" data-pip-snap="tr" title="Top Right">TR</button>
+                  <button type="button" data-pip-snap="bl" title="Bottom Left">BL</button>
+                  <button type="button" data-pip-snap="br" title="Bottom Right">BR</button>
+                </div>
+                <div class="pip-actions">
+                  <button type="button" data-pip-pin id="webcamPinBtn" title="Pin / Lock Position" aria-pressed="false">
+                    <i class="fa-solid fa-thumbtack"></i>
+                  </button>
+                  <button type="button" data-pip-close id="webcamCloseBtn" title="Close Webcam Overlay">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+              </div>
+              <span class="pip-lock-badge" data-pip-lock-badge hidden title="Position locked">
+                <i class="fa-solid fa-lock"></i>
+              </span>
+              <iframe id="viewerPipWebcam" title="Webcam overlay"></iframe>
+              <div class="pip-resize-handle" data-pip-resize title="Resize"></div>
+            </div>
           </section>
         </main>
-      </div>
-      <div id="viewerPipOverlay" class="viewer-pip-overlay" hidden>
-        <div class="pip-toolbar" data-pip-toolbar>
-          <span class="pip-drag-label" title="Drag to move">
-            <i class="fa-solid fa-arrows-up-down-left-right"></i>
-          </span>
-          <div class="pip-snap-group" title="Snap position">
-            <button type="button" data-pip-snap="tl" title="Top Left">TL</button>
-            <button type="button" data-pip-snap="tr" title="Top Right">TR</button>
-            <button type="button" data-pip-snap="bl" title="Bottom Left">BL</button>
-            <button type="button" data-pip-snap="br" title="Bottom Right">BR</button>
-          </div>
-          <div class="pip-actions">
-            <button type="button" data-pip-pin id="webcamPinBtn" title="Pin / Lock Position" aria-pressed="false">
-              <i class="fa-solid fa-thumbtack"></i>
-            </button>
-            <button type="button" data-pip-close id="webcamCloseBtn" title="Close Webcam Overlay">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
-        </div>
-        <span class="pip-lock-badge" data-pip-lock-badge hidden title="Position locked">
-          <i class="fa-solid fa-lock"></i>
-        </span>
-        <iframe id="viewerPipWebcam" title="Webcam overlay"></iframe>
-        <div class="pip-resize-handle" data-pip-resize title="Resize"></div>
       </div>
       <div class="side-panel-resize" data-side-resize title="Resize side panel"></div>
     </div>

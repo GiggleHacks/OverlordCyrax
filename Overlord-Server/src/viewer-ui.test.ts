@@ -13,7 +13,7 @@ describe("unified viewer UI", () => {
     expect(html).toContain('id="viewerClientId"');
   });
 
-  test("hosts PiP webcam overlay over the full viewer layout", async () => {
+  test("hosts PiP webcam overlay inside the desktop video panel", async () => {
     const html = await publicFile("viewer.html");
     expect(html).toContain('id="viewerDesktopPanel"');
     expect(html).toContain('id="viewerPipOverlay"');
@@ -27,16 +27,15 @@ describe("unified viewer UI", () => {
     expect(html).toContain('data-pip-lock-badge');
     expect(html).toContain('data-side-resize');
     expect(html).toContain('data-desktop-resize');
-    const layoutIdx = html.indexOf('class="viewer-layout"');
-    const pipIdx = html.indexOf('id="viewerPipOverlay"');
     const desktopIdx = html.indexOf('id="viewerDesktopPanel"');
+    const pipIdx = html.indexOf('id="viewerPipOverlay"');
     const desktopClose = html.indexOf("</section>", desktopIdx);
-    expect(layoutIdx).toBeGreaterThan(-1);
-    expect(pipIdx).toBeGreaterThan(desktopClose);
-    expect(html.indexOf('id="viewerPipOverlay"', desktopIdx)).toBe(pipIdx);
+    expect(desktopIdx).toBeGreaterThan(-1);
+    expect(pipIdx).toBeGreaterThan(desktopIdx);
+    expect(pipIdx).toBeLessThan(desktopClose);
   });
 
-  test("ships shared pip overlay controller with free-layout host", async () => {
+  test("ships shared pip overlay controller hosted on desktop panel", async () => {
     const js = await publicFile("assets/pip-overlay.js");
     expect(js).toContain("export function initPipOverlay");
     expect(js).toContain("pointerdown");
@@ -46,10 +45,12 @@ describe("unified viewer UI", () => {
     expect(viewerJs).toContain("webcamUrlBar");
     expect(viewerJs).toContain("embedded=1");
     expect(viewerJs).toContain('action: "start"');
-    expect(viewerJs).toContain("viewer-layout");
+    expect(viewerJs).toContain("host: desktopPanel");
     expect(viewerJs).toContain("viewer-pip-active");
     expect(viewerJs).toContain("overlord_side_panel_width_v1");
     expect(viewerJs).toContain("overlord_desktop_layout_v1");
+    const css = await publicFile("assets/main.css");
+    expect(css).toContain("body.viewer-pip-active .viewer-pip-overlay.is-visible");
   });
 
   test("exposes parent webcam Start/Stop/Settings bar for split and pip", async () => {
