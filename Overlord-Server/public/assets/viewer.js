@@ -150,12 +150,43 @@ function applySettingsFromChild(settings) {
   if (camH264 && typeof settings.preferH264 === "boolean") camH264.checked = settings.preferH264;
 }
 
+const viewerLayout = document.querySelector(".viewer-layout") || document.body;
+const sidePanelEl = document.getElementById("sidePanel");
+const SIDE_WIDTH_KEY = "overlord_side_panel_width_v1";
+const DESKTOP_LAYOUT_KEY = "overlord_desktop_layout_v1";
+const SIDE_MIN = 140;
+const SIDE_MAX = 420;
+const SIDE_DEFAULT = 230;
+
+function applySidePanelWidth(px) {
+  const w = Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(px)));
+  document.documentElement.style.setProperty("--side-panel-width", `${w}px`);
+  if (sidePanelEl) {
+    sidePanelEl.style.width = `${w}px`;
+    sidePanelEl.style.minWidth = `${w}px`;
+  }
+  return w;
+}
+
+function loadSidePanelWidth() {
+  try {
+    const raw = localStorage.getItem(SIDE_WIDTH_KEY);
+    const n = raw ? Number(raw) : SIDE_DEFAULT;
+    return Number.isFinite(n) ? applySidePanelWidth(n) : applySidePanelWidth(SIDE_DEFAULT);
+  } catch {
+    return applySidePanelWidth(SIDE_DEFAULT);
+  }
+}
+
+loadSidePanelWidth();
+
 const pip = initPipOverlay({
   root: pipOverlayEl,
-  host: desktopPanel,
+  host: viewerLayout,
   iframe: pipWebcam,
   onClose: () => {
     unloadFrame(pipWebcam);
+    document.body.classList.remove("viewer-pip-active");
     updateCamStatusUi("idle", "--");
   },
 });
@@ -167,6 +198,7 @@ function setMode(nextMode) {
   if (prev !== mode) {
     panels.style.gridTemplateColumns = "";
     panels.style.gridTemplateRows = "";
+    if (mode !== "pip" && mode !== "desktop") clearDesktopInset();
   }
 
   if (webcamPanel) {
@@ -198,13 +230,18 @@ function setMode(nextMode) {
     unloadFrame(desktop);
   }
 
+  document.body.classList.toggle("viewer-pip-active", needsPip);
+
   if (needsPip) {
     ensureFrame(pipWebcam, webcamUrlBar);
     pip.show();
+    restoreDesktopInset();
     requestAnimationFrame(() => pip.restoreLayout());
   } else {
     pip.hide();
     unloadFrame(pipWebcam);
+    if (mode === "desktop") restoreDesktopInset();
+    else clearDesktopInset();
   }
 
   setWebcamBarVisible(showBar);
@@ -292,11 +329,63 @@ refreshCapability();
 setInterval(refreshCapability, 10000);
 
 const divider = document.getElementById("viewerDivider");
+const sideResize = document.querySelector("[data-side-resize]");
+const desktopResize = document.querySelector("[data-desktop-resize]");
 let isDragging = false;
+let sideDragging = false;
+let desktopDragging = false;
 let startPos = 0;
 let startSize = 0;
 
-divider.addEventListener("mousedown", (e) => {
+function clearDesktopInset() {
+  if (!panels) return;
+  panels.style.removeProperty("--desktop-left");
+  panels.style.removeProperty("--desktop-width");
+}
+
+function restoreDesktopInset() {
+  if (!desktopPanel || (mode !== "pip" && mode !== "desktop")) {
+    clearDesktopInset();
+    return;
+  }
+  try {
+    const raw = localStorage.getItem(DESKTOP_LAYOUT_KEY);
+    if (!raw) {
+      clearDesktopInset();
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    const insetPct = Number(parsed.insetPct) || 0;
+    const widthPct = Number(parsed.widthPct);
+    applyDesktopLayout(insetPct, Number.isFinite(widthPct) ? widthPct : 100 - insetPct);
+  } catch {
+    clearDesktopInset();
+  }
+}
+
+function applyDesktopLayout(insetPct, widthPct) {
+  if (!panels) return;
+  const pr = panels.getBoundingClientRect();
+  if (pr.width < 1) return;
+  const minW = 240;
+  const maxInset = Math.max(0, pr.width - minW);
+  const inset = Math.max(0, Math.min(maxInset, (insetPct / 100) * pr.width));
+  let w = Number.isFinite(widthPct) ? (widthPct / 100) * pr.width : pr.width - inset;
+  w = Math.max(minW, Math.min(pr.width - inset, w));
+  panels.style.setProperty("--desktop-left", `${inset}px`);
+  panels.style.setProperty("--desktop-width", `${w}px`);
+  try {
+    localStorage.setItem(
+      DESKTOP_LAYOUT_KEY,
+      JSON.stringify({
+        insetPct: (inset / pr.width) * 100,
+        widthPct: (w / pr.width) * 100,
+      }),
+    );
+  } catch {}
+}
+
+divider?.addEventListener("mousedown", (e) => {
   if (mode !== "split") return;
   e.preventDefault();
   isDragging = true;
@@ -306,6 +395,57 @@ divider.addEventListener("mousedown", (e) => {
   document.body.style.cursor = "col-resize";
   document.body.style.userSelect = "none";
   panels.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = "none"));
+});
+
+sideResize?.addEventListener("pointerdown", (e) => {
+  if (e.button != null && e.button !== 0) return;
+  e.preventDefault();
+  sideDragging = true;
+  startPos = e.clientX;
+  startSize = sidePanelEl?.getBoundingClientRect().width || SIDE_DEFAULT;
+  sideResize.classList.add("is-dragging");
+  document.body.style.cursor = "ew-resize";
+  document.body.style.userSelect = "none";
+  document.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = "none"));
+  try {
+    sideResize.setPointerCapture(e.pointerId);
+  } catch {}
+});
+
+desktopResize?.addEventListener("pointerdown", (e) => {
+  if (mode !== "pip" && mode !== "desktop") return;
+  if (e.button != null && e.button !== 0) return;
+  e.preventDefault();
+  desktopDragging = true;
+  startPos = e.clientX;
+  const rect = desktopPanel.getBoundingClientRect();
+  const pref = panels.getBoundingClientRect();
+  startSize = rect.left - pref.left;
+  desktopResize.classList.add("is-dragging");
+  document.body.style.cursor = "ew-resize";
+  document.body.style.userSelect = "none";
+  panels.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = "none"));
+  try {
+    desktopResize.setPointerCapture(e.pointerId);
+  } catch {}
+});
+
+document.addEventListener("pointermove", (e) => {
+  if (sideDragging) {
+    const next = applySidePanelWidth(startSize + (e.clientX - startPos));
+    try {
+      localStorage.setItem(SIDE_WIDTH_KEY, String(next));
+    } catch {}
+    if (mode === "pip") requestAnimationFrame(() => pip.restoreLayout());
+    return;
+  }
+  if (desktopDragging) {
+    const pref = panels.getBoundingClientRect();
+    const inset = Math.max(0, startSize + (e.clientX - startPos));
+    const width = Math.max(280, pref.width - inset);
+    applyDesktopLayout((inset / pref.width) * 100, (width / pref.width) * 100);
+    return;
+  }
 });
 
 document.addEventListener("mousemove", (e) => {
@@ -320,11 +460,33 @@ document.addEventListener("mousemove", (e) => {
   panels.style.gridTemplateColumns = `${newFirst}px ${dividerSize}px ${second}px`;
 });
 
-document.addEventListener("mouseup", () => {
-  if (!isDragging) return;
-  isDragging = false;
-  divider.classList.remove("is-dragging");
-  document.body.style.cursor = "";
-  document.body.style.userSelect = "";
-  panels.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = ""));
+function endPanelDrags() {
+  if (isDragging) {
+    isDragging = false;
+    divider?.classList.remove("is-dragging");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    panels.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = ""));
+  }
+  if (sideDragging) {
+    sideDragging = false;
+    sideResize?.classList.remove("is-dragging");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    document.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = ""));
+  }
+  if (desktopDragging) {
+    desktopDragging = false;
+    desktopResize?.classList.remove("is-dragging");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    panels.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = ""));
+  }
+}
+
+document.addEventListener("mouseup", endPanelDrags);
+document.addEventListener("pointerup", endPanelDrags);
+document.addEventListener("pointercancel", endPanelDrags);
+window.addEventListener("resize", () => {
+  if (mode === "pip" || mode === "desktop") restoreDesktopInset();
 });

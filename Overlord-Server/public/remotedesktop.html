@@ -22,26 +22,27 @@
     <main class="px-3 py-3 flex-1 flex flex-col rd-focus-view">
       <div class="flex-1 flex flex-col gap-4" style="max-width: 100%">
         <div class="flex flex-wrap gap-2 items-center">
-          <div class="flex items-center gap-2">
-            <button id="startBtn" class="button primary">
+          <div class="flex items-center gap-2 rd-toolbar">
+            <button id="startBtn" class="button primary rd-toolbar-btn">
               <i class="fa-solid fa-play"></i><span>Start</span>
             </button>
-            <button id="stopBtn" class="button ghost">
+            <button id="stopBtn" class="button ghost rd-toolbar-btn">
               <i class="fa-solid fa-stop"></i><span>Stop</span>
             </button>
-            <button id="recordBtn" class="button ghost" disabled title="Record on the server using Canvas transport">
+            <button id="recordBtn" class="button ghost rd-toolbar-btn" disabled title="Record on the server using Canvas transport">
               <i class="fa-solid fa-circle-dot"></i><span>Record</span>
             </button>
             <div class="relative" id="rdRecordingSettingsWrap">
               <button
                 id="rdRecordingSettingsBtn"
                 type="button"
-                class="button ghost"
+                class="button ghost rd-toolbar-btn rd-toolbar-btn--compact"
                 aria-haspopup="true"
                 aria-expanded="false"
+                title="Recording Settings"
               >
-                <i class="fa-solid fa-sliders"></i><span>Recording Settings</span>
-                <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 ml-1"></i>
+                <i class="fa-solid fa-sliders"></i><span>Rec</span>
+                <i class="fa-solid fa-chevron-down text-[10px] text-slate-400"></i>
               </button>
 
               <div
@@ -81,10 +82,23 @@
                 </div>
               </div>
             </div>
-            <button id="fullscreenBtn" class="button ghost">
+            <button id="fullscreenBtn" class="button ghost rd-toolbar-btn">
               <i class="fa-solid fa-expand"></i><span>Fullscreen</span>
             </button>
-            <button id="rdScaleBtn" class="button ghost" title="Toggle viewer scale">65%</button>
+            <div class="rd-mic-wrap">
+              <button
+                id="rdMicBtn"
+                type="button"
+                class="button ghost rd-toolbar-btn rd-mic-btn"
+                title="Listen to remote microphone"
+                aria-pressed="false"
+                aria-label="Listen to remote microphone"
+              >
+                <i class="fa-solid fa-microphone-slash"></i><span>Mic</span>
+              </button>
+              <canvas id="rdMicWave" class="rd-mic-wave" width="96" height="28" hidden aria-hidden="true" title="Remote microphone level"></canvas>
+            </div>
+            <button id="rdScaleBtn" class="button ghost rd-toolbar-btn" title="Toggle viewer scale">65%</button>
           </div>
 
           <div
@@ -106,8 +120,8 @@
           <div
             class="flex items-center gap-2 bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-300"
           >
-            <span class="uppercase tracking-wide text-xs text-slate-500">input</span>
-            <span id="inputLatency" class="pill pill-ghost font-mono text-amber-200">-- ms</span>
+            <span class="uppercase tracking-wide text-xs text-slate-500" title="Round-trip input latency from last mouse/keyboard event">Latency</span>
+            <span id="inputLatency" class="pill pill-ghost font-mono text-amber-200" title="Round-trip input latency from last mouse/keyboard event">-- ms</span>
           </div>
 
           <div class="relative ml-auto" id="rdSettingsWrap">

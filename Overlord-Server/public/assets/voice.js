@@ -1,5 +1,11 @@
 import { fetchVoiceCapabilities } from "./data.js";
 import { checkFeatureAccess } from "./feature-gate.js";
+import {
+  getVoiceQualityPreset,
+  loadSavedVoiceQuality,
+  normalizeVoiceQuality,
+  saveVoiceQuality,
+} from "./voice-listen.js";
 
 const params = new URLSearchParams(window.location.search);
 const clientId = params.get("clientId") || "";
@@ -15,6 +21,7 @@ const statusPill = document.getElementById("status-pill");
 const localWaveCanvas = document.getElementById("local-wave");
 const remoteWaveCanvas = document.getElementById("remote-wave");
 const sourceSelect = document.getElementById("source-select");
+const qualitySelect = document.getElementById("quality-select");
 const muteSelfBtn = document.getElementById("mute-self-btn");
 const muteRemoteBtn = document.getElementById("mute-remote-btn");
 const micVolumeSlider = document.getElementById("mic-volume");
@@ -37,18 +44,30 @@ let selfMuted = true;
 let remoteMuted = true;
 let playbackChunks = [];
 let playbackChunkReadOffset = 0;
+let playbackPrimed = false;
 let levelLoopRunning = false;
+let voiceQuality = loadSavedVoiceQuality();
+let qualityPreset = getVoiceQualityPreset(voiceQuality);
+let uplinkSampleRate = 16000;
 const WAVE_SIZE = 2048;
 const WAVE_VISUAL_GAIN = 1.8;
 const CAPTURE_FRAME_SIZE = 512;
-const PLAYBACK_FRAME_SIZE = 512;
-const MAX_PLAYBACK_BUFFER_MS = 120;
 const localWaveBuffer = new Float32Array(WAVE_SIZE);
 const remoteWaveBuffer = new Float32Array(WAVE_SIZE);
 let localWaveWrite = 0;
 let remoteWaveWrite = 0;
 
-const UPLINK_SAMPLE_RATE = 16000;
+function applyQualitySelection() {
+  voiceQuality = normalizeVoiceQuality(qualitySelect?.value || loadSavedVoiceQuality());
+  qualityPreset = getVoiceQualityPreset(voiceQuality);
+  saveVoiceQuality(voiceQuality);
+  if (qualitySelect) qualitySelect.value = voiceQuality;
+}
+
+if (qualitySelect) {
+  qualitySelect.value = voiceQuality;
+  qualitySelect.addEventListener("change", applyQualitySelection);
+}
 
 function sourceLabel(source) {
   if (source === "default" || source === "microphone") {
@@ -105,6 +124,13 @@ function floatToInt16(float32Buffer) {
 function clearPlaybackQueue() {
   playbackChunks = [];
   playbackChunkReadOffset = 0;
+  playbackPrimed = false;
+}
+
+function bufferedSampleCount() {
+  let n = -playbackChunkReadOffset;
+  for (const c of playbackChunks) n += c.length;
+  return Math.max(0, n);
 }
 
 function pushWaveSamples(ring, writePos, samples) {
@@ -222,27 +248,36 @@ function appendPlaybackPcm(binary) {
 
   const samples = Math.floor(binary.byteLength / 2);
   if (samples <= 0) return;
-  const src = new Int16Array(binary.buffer, binary.byteOffset, samples);
-  const chunk = resampleInt16ToFloat32(src, UPLINK_SAMPLE_RATE, playAudioCtx?.sampleRate || UPLINK_SAMPLE_RATE);
+  const src = new Int16Array(samples);
+  const view = new DataView(binary.buffer, binary.byteOffset, samples * 2);
+  for (let i = 0; i < samples; i++) src[i] = view.getInt16(i * 2, true);
+  const chunk = resampleInt16ToFloat32(src, uplinkSampleRate, playAudioCtx?.sampleRate || uplinkSampleRate);
   if (chunk.length === 0) return;
   playbackChunks.push(chunk);
   remoteWaveWrite = pushWaveSamples(remoteWaveBuffer, remoteWaveWrite, chunk);
 
-  // Keep roughly <= 2 seconds buffered to avoid stale replay artifacts.
-  let bufferedSamples = -playbackChunkReadOffset;
-  for (const chunk of playbackChunks) bufferedSamples += chunk.length;
-  const sampleRate = playAudioCtx?.sampleRate || UPLINK_SAMPLE_RATE;
-  const maxSamples = Math.max(PLAYBACK_FRAME_SIZE, Math.round(sampleRate * (MAX_PLAYBACK_BUFFER_MS / 1000)));
+  const sampleRate = playAudioCtx?.sampleRate || uplinkSampleRate;
+  const maxSamples = Math.max(qualityPreset.frameSize, Math.round(sampleRate * (qualityPreset.maxBufferMs / 1000)));
+  let bufferedSamples = bufferedSampleCount();
   while (bufferedSamples > maxSamples && playbackChunks.length > 0) {
     const dropped = playbackChunks.shift();
-    bufferedSamples -= dropped?.length || 0;
+    bufferedSamples -= Math.max(0, (dropped?.length || 0) - playbackChunkReadOffset);
     playbackChunkReadOffset = 0;
+  }
+
+  if (!playbackPrimed && !remoteMuted) {
+    const need = Math.round(sampleRate * (qualityPreset.minStartMs / 1000));
+    if (bufferedSampleCount() >= need) playbackPrimed = true;
   }
 }
 
 function initPlaybackEngine() {
   if (!playAudioCtx) {
-    playAudioCtx = new AudioContext({ sampleRate: 16000, latencyHint: "interactive" });
+    try {
+      playAudioCtx = new AudioContext({ latencyHint: qualityPreset.latencyHint });
+    } catch {
+      playAudioCtx = new AudioContext({ sampleRate: 16000, latencyHint: qualityPreset.latencyHint });
+    }
   }
   if (!playGainNode) {
     playGainNode = playAudioCtx.createGain();
@@ -250,12 +285,12 @@ function initPlaybackEngine() {
     playGainNode.connect(playAudioCtx.destination);
   }
   if (!playProcessorNode) {
-    playProcessorNode = playAudioCtx.createScriptProcessor(PLAYBACK_FRAME_SIZE, 1, 1);
+    playProcessorNode = playAudioCtx.createScriptProcessor(qualityPreset.frameSize, 1, 1);
     playProcessorNode.onaudioprocess = (event) => {
       const out = event.outputBuffer.getChannelData(0);
       out.fill(0);
 
-      if (remoteMuted) return;
+      if (remoteMuted || !playbackPrimed) return;
 
       let writeIndex = 0;
       while (writeIndex < out.length && playbackChunks.length > 0) {
@@ -277,6 +312,13 @@ function initPlaybackEngine() {
           playbackChunks.shift();
           playbackChunkReadOffset = 0;
         }
+      }
+
+      if (writeIndex < out.length) {
+        playbackPrimed = false;
+        const sampleRate = playAudioCtx?.sampleRate || uplinkSampleRate;
+        const need = Math.round(sampleRate * (qualityPreset.rebufferMs / 1000));
+        if (bufferedSampleCount() >= need) playbackPrimed = true;
       }
     };
     playProcessorNode.connect(playGainNode);
@@ -367,6 +409,10 @@ function updateMuteButtons() {
 async function connectVoice() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
 
+  applyQualitySelection();
+  // Legacy agents always send 16 kHz until a format frame arrives.
+  uplinkSampleRate = 16000;
+
   // Start each new session with both directions muted by default.
   selfMuted = true;
   remoteMuted = true;
@@ -386,7 +432,12 @@ async function connectVoice() {
       await startMicCapture();
       initPlaybackEngine();
       const chosenSource = sourceSelect?.value || "default";
-      ws.send(JSON.stringify({ type: "start", source: chosenSource }));
+      ws.send(JSON.stringify({
+        type: "start",
+        source: chosenSource,
+        quality: voiceQuality,
+        sampleRate: qualityPreset.sampleRate,
+      }));
     } catch {
       alert("Microphone access denied or unavailable.");
       disconnectVoice();
@@ -397,6 +448,10 @@ async function connectVoice() {
     if (typeof ev.data === "string") {
       try {
         const msg = JSON.parse(ev.data);
+        if (msg?.type === "format" && typeof msg.sampleRate === "number" && msg.sampleRate > 0) {
+          uplinkSampleRate = msg.sampleRate | 0;
+          return;
+        }
         if (msg?.type === "status") {
           if (msg.status === "offline") {
             setStatus("Client Offline", "border-amber-700 bg-amber-900/30 text-amber-200");
@@ -484,6 +539,8 @@ muteRemoteBtn?.addEventListener("click", () => {
   remoteMuted = !remoteMuted;
   if (remoteMuted) {
     clearPlaybackQueue();
+  } else {
+    playbackPrimed = false;
   }
   updateMuteButtons();
 });

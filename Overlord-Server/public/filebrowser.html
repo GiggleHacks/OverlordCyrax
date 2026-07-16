@@ -55,6 +55,22 @@
       .file-checkbox:checked:hover {
         background-color: #2563eb;
       }
+      .select-all-checkbox {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 16px;
+        height: 16px;
+        border: 1px solid rgb(71 85 105);
+        border-radius: 0.25rem;
+        background-color: rgba(100, 116, 139, 0.3);
+        cursor: pointer;
+      }
+      .select-all-checkbox:checked,
+      .select-all-checkbox:indeterminate {
+        background-color: #3b82f6;
+        border-color: #60a5fa;
+        box-shadow: inset 0 0 0 3px #0f172a;
+      }
       .context-menu {
         display: none;
         position: fixed;
@@ -701,6 +717,13 @@
               <option value="archives">Archives</option>
               <option value="executables">Executables</option>
             </select>
+            <button
+              id="select-all-btn"
+              class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-100"
+              type="button"
+            >
+              Select all
+            </button>
           </div>
 
           <div class="flex items-center gap-2">
@@ -716,7 +739,10 @@
           <div
             class="file-header grid grid-cols-12 gap-3 px-4 py-3 bg-slate-950/60 border-b border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-500"
           >
-            <div class="col-span-6">Name</div>
+            <div class="col-span-6 flex items-center gap-3">
+              <input id="select-all-checkbox" class="select-all-checkbox" type="checkbox" aria-label="Select all visible items" />
+              <span>Name</span>
+            </div>
             <div class="col-span-2">Size</div>
             <div class="col-span-3">Modified</div>
             <div class="col-span-1 text-right">Actions</div>

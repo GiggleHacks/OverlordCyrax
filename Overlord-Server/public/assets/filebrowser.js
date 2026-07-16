@@ -20,6 +20,8 @@ let ws = null;
 let currentPath = "";
 let pathHistory = [];
 let selectedFiles = new Set();
+let selectionAnchorPath = null;
+let bulkOperationInProgress = false;
 let fileDownloads = new Map();
 let fileUploads = new Map();
 let fileUploadsById = new Map();
@@ -33,6 +35,7 @@ const pendingCommandWaiters = new Map();
 const VIRTUALIZATION_THRESHOLD = 400;
 const VIRTUAL_ROW_HEIGHT = 58;
 const VIRTUAL_OVERSCAN = 8;
+const BULK_OPERATION_CONCURRENCY = 4;
 const MAC_PERMISSION_STORAGE_KEY = `filebrowser.macPermissionAllowed.${clientId}.v2`;
 const macPermissionAllowedPaths = new Set(loadMacPermissionAllowedPaths());
 
@@ -62,6 +65,8 @@ const sortFieldEl = document.getElementById("sort-field");
 const sortOrderBtn = document.getElementById("sort-order-btn");
 const filterTypeEl = document.getElementById("filter-type");
 const fileCountSummaryEl = document.getElementById("file-count-summary");
+const selectAllBtn = document.getElementById("select-all-btn");
+const selectAllCheckbox = document.getElementById("select-all-checkbox");
 
 const searchBar = document.getElementById("search-bar");
 const searchInput = document.getElementById("search-input");
@@ -1013,6 +1018,15 @@ window.addEventListener("keyup", (e) => {
   if (e.key !== " ") return;
   hideQuickLookPopover();
 });
+window.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "a") return;
+  const target = e.target;
+  if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+  if (document.querySelector(".file-editor-modal.show, .file-preview-modal.show")) return;
+  if (filteredDirectoryEntries.length === 0) return;
+  e.preventDefault();
+  setVisibleSelection(true);
+});
 window.addEventListener("scroll", () => hideQuickLookPopover(), { passive: true });
 
 // ---- Folder size --------------------------------------------------------------
@@ -1280,6 +1294,7 @@ function renderCurrentDirectory() {
   filteredDirectoryEntries = applySortAndFilterEntries(directoryEntries);
   const visibleEntries = filteredDirectoryEntries;
   updateDirectorySummaryAndPaging(visibleEntries.length, visibleEntries.length);
+  updateSelectionUI();
 
   const canGoUp = shouldShowParentDirectory(currentPath);
   const parentPath = canGoUp ? getParentPath(currentPath) : ".";
@@ -1338,6 +1353,7 @@ function handleFileList(msg) {
 
   markMacPermissionAllowed(currentPath);
   selectedFiles.clear();
+  selectionAnchorPath = null;
   updateSelectionUI();
   renderCurrentDirectory();
 }
@@ -1416,6 +1432,7 @@ function createFileRow(entry) {
   const macPermissionRisk = macPermissionLockedDirectory(entry);
   row.className =
     "file-item grid grid-cols-12 gap-3 px-4 py-3 border border-transparent cursor-pointer transition-colors" +
+    (selectedFiles.has(entry.path) ? " selected" : "") +
     (macPermissionRisk ? " opacity-60 bg-slate-950/30 hover:bg-amber-900/10" : " hover:bg-slate-800/50");
   row.dataset.path = entry.path;
   row.dataset.isDir = entry.isDir;
@@ -1445,7 +1462,7 @@ function createFileRow(entry) {
     : "";
 
   row.innerHTML = `
-    <input type="checkbox" class="file-checkbox" data-path="${escapeHtml(entry.path)}">
+    <input type="checkbox" class="file-checkbox" data-path="${escapeHtml(entry.path)}" ${selectedFiles.has(entry.path) ? "checked" : ""} aria-label="Select ${escapeHtml(entry.name)}">
     <div class="col-span-6 flex items-center gap-2 truncate pl-8">
       ${icon}
       <span class="truncate">${escapeHtml(entry.name)}</span>
@@ -1502,13 +1519,12 @@ function createFileRow(entry) {
   };
 
   checkbox.onchange = (e) => {
-    if (e.target.checked) {
-      selectedFiles.add(entry.path);
-      row.classList.add("selected");
+    if (e.shiftKey && selectionAnchorPath) {
+      setSelectionRange(entry.path, e.target.checked);
     } else {
-      selectedFiles.delete(entry.path);
-      row.classList.remove("selected");
+      setPathSelected(entry.path, e.target.checked);
     }
+    selectionAnchorPath = entry.path;
     updateSelectionUI();
   };
 
@@ -1548,16 +1564,8 @@ function createFileRow(entry) {
 }
 
 function toggleSelection(row, path) {
-  const checkbox = row.querySelector(".file-checkbox");
-  if (selectedFiles.has(path)) {
-    selectedFiles.delete(path);
-    row.classList.remove("selected");
-    if (checkbox) checkbox.checked = false;
-  } else {
-    selectedFiles.add(path);
-    row.classList.add("selected");
-    if (checkbox) checkbox.checked = true;
-  }
+  setPathSelected(path, !selectedFiles.has(path));
+  selectionAnchorPath = path;
   updateSelectionUI();
 }
 
@@ -3334,16 +3342,64 @@ function updateSelectionUI() {
 
   document.querySelectorAll(".file-item").forEach((row) => {
     const path = row.dataset.path;
-    if (selectedFiles.has(path)) {
-      row.classList.add("selected");
-    } else {
-      row.classList.remove("selected");
+    const selected = selectedFiles.has(path);
+    row.classList.toggle("selected", selected);
+    const checkbox = row.querySelector(".file-checkbox");
+    if (checkbox) {
+      checkbox.checked = selected;
+      checkbox.disabled = bulkOperationInProgress;
     }
   });
+
+  const visiblePaths = filteredDirectoryEntries.map((entry) => entry.path);
+  const selectedVisibleCount = visiblePaths.filter((path) => selectedFiles.has(path)).length;
+  const allVisibleSelected = visiblePaths.length > 0 && selectedVisibleCount === visiblePaths.length;
+
+  if (selectAllCheckbox) {
+    selectAllCheckbox.checked = allVisibleSelected;
+    selectAllCheckbox.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
+    selectAllCheckbox.disabled = bulkOperationInProgress || visiblePaths.length === 0;
+  }
+  if (selectAllBtn) {
+    selectAllBtn.disabled = bulkOperationInProgress || visiblePaths.length === 0;
+    selectAllBtn.textContent = allVisibleSelected ? "Clear visible" : "Select all";
+    selectAllBtn.setAttribute("aria-label", allVisibleSelected ? "Clear visible selection" : "Select all visible items");
+  }
+}
+
+function setPathSelected(path, selected) {
+  if (selected) {
+    selectedFiles.add(path);
+  } else {
+    selectedFiles.delete(path);
+  }
+}
+
+function setVisibleSelection(selected) {
+  if (bulkOperationInProgress) return;
+  filteredDirectoryEntries.forEach((entry) => setPathSelected(entry.path, selected));
+  selectionAnchorPath = null;
+  updateSelectionUI();
+}
+
+function setSelectionRange(path, selected) {
+  const targetIndex = filteredDirectoryEntries.findIndex((entry) => entry.path === path);
+  const anchorIndex = filteredDirectoryEntries.findIndex((entry) => entry.path === selectionAnchorPath);
+  if (targetIndex < 0 || anchorIndex < 0) {
+    setPathSelected(path, selected);
+    return;
+  }
+
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  for (let index = start; index <= end; index += 1) {
+    setPathSelected(filteredDirectoryEntries[index].path, selected);
+  }
 }
 
 function clearSelection() {
   selectedFiles.clear();
+  selectionAnchorPath = null;
   updateSelectionUI();
 }
 
@@ -3671,50 +3727,117 @@ editorRunBtn.addEventListener("click", () => {
   );
 });
 
+function setBulkActionsDisabled(disabled) {
+  bulkOperationInProgress = disabled;
+  [bulkDownloadBtn, bulkDeleteBtn, bulkMoveBtn, bulkCopyBtn, clearSelectionBtn].forEach((button) => {
+    button.disabled = disabled;
+  });
+  updateSelectionUI();
+}
+
+function bulkDestinationPath(destination, sourcePath) {
+  const fileName = sourcePath.split(/[\/\\]/).pop();
+  const separator = destination.includes("\\") ? "\\" : "/";
+  return `${destination.replace(/[\/\\]+$/, "")}${separator}${fileName}`;
+}
+
+function sendBulkCommand(commandType, path, destination = null) {
+  const commandId = `bulk-${commandType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = waitForCommandResult(commandId);
+
+  if (commandType === "file_delete") {
+    send({ type: "file_delete", path, commandId });
+  } else {
+    send({
+      type: "command",
+      commandType,
+      id: commandId,
+      payload: { source: path, dest: destination },
+    });
+  }
+
+  return result;
+}
+
+async function runBulkOperation(label, paths, commandType, destination = null) {
+  if (paths.length === 0) return;
+
+  setBulkActionsDisabled(true);
+  notifyToast(`${label} ${paths.length} item${paths.length === 1 ? "" : "s"}...`, "info", 3000);
+
+  let nextIndex = 0;
+  const results = [];
+  const worker = async () => {
+    while (nextIndex < paths.length) {
+      const path = paths[nextIndex];
+      nextIndex += 1;
+      try {
+        await sendBulkCommand(
+          commandType,
+          path,
+          destination ? bulkDestinationPath(destination, path) : null,
+        );
+        results.push({ path, ok: true });
+      } catch (error) {
+        results.push({ path, ok: false, error });
+      }
+    }
+  };
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(BULK_OPERATION_CONCURRENCY, paths.length) }, worker));
+    const failed = results.filter((result) => !result.ok);
+    const completed = results.length - failed.length;
+    const summary = `${label} ${completed} of ${paths.length} item${paths.length === 1 ? "" : "s"}`;
+    notifyToast(
+      failed.length === 0 ? `${summary} successfully` : `${summary}; ${failed.length} failed`,
+      failed.length === 0 ? "success" : "error",
+      6000,
+    );
+    clearSelection();
+    listFiles(currentPath);
+  } finally {
+    setBulkActionsDisabled(false);
+  }
+}
+
 bulkDownloadBtn.addEventListener("click", () => {
-  selectedFiles.forEach((path) => downloadFile(path));
+  Array.from(selectedFiles).forEach((path) => downloadFile(path));
 });
 
 bulkDeleteBtn.addEventListener("click", () => {
-  if (!confirm(`Delete ${selectedFiles.size} selected items?`)) return;
-
-  selectedFiles.forEach((path) => {
-    send({ type: "file_delete", path });
-  });
-
-  clearSelection();
-  setTimeout(() => listFiles(currentPath), 500);
+  const paths = Array.from(selectedFiles);
+  if (!confirm(`Delete ${paths.length} selected item${paths.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
+  runBulkOperation("Deleted", paths, "file_delete");
 });
 
 bulkMoveBtn.addEventListener("click", () => {
-  const dest = prompt("Enter destination path:");
-  if (!dest) return;
-
-  selectedFiles.forEach((path) => {
-    const fileName = path.split(/[\/\\]/).pop();
-    const destPath = `${dest}/${fileName}`;
-    send({ type: "file_move", source: path, dest: destPath });
-  });
-
-  clearSelection();
-  setTimeout(() => listFiles(currentPath), 500);
+  const destination = prompt("Enter destination folder:");
+  if (!destination) return;
+  runBulkOperation("Moved", Array.from(selectedFiles), "file_move", destination);
 });
 
 bulkCopyBtn.addEventListener("click", () => {
-  const dest = prompt("Enter destination path:");
-  if (!dest) return;
-
-  selectedFiles.forEach((path) => {
-    const fileName = path.split(/[\/\\]/).pop();
-    const destPath = `${dest}/${fileName}`;
-    send({ type: "file_copy", source: path, dest: destPath });
-  });
-
-  clearSelection();
-  setTimeout(() => listFiles(currentPath), 500);
+  const destination = prompt("Enter destination folder:");
+  if (!destination) return;
+  runBulkOperation("Copied", Array.from(selectedFiles), "file_copy", destination);
 });
 
 clearSelectionBtn.addEventListener("click", clearSelection);
+
+if (selectAllCheckbox) {
+  selectAllCheckbox.addEventListener("change", () => {
+    setVisibleSelection(selectAllCheckbox.checked);
+  });
+}
+
+if (selectAllBtn) {
+  selectAllBtn.addEventListener("click", () => {
+    const allVisibleSelected = filteredDirectoryEntries.length > 0
+      && filteredDirectoryEntries.every((entry) => selectedFiles.has(entry.path));
+    setVisibleSelection(!allVisibleSelected);
+  });
+}
 
 contextMenu.querySelectorAll(".context-menu-item").forEach((item) => {
   item.addEventListener("click", () => {

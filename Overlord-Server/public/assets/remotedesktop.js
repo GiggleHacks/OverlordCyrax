@@ -6,6 +6,7 @@ import { createKeyboardCapture } from "./keyboard-capture.js";
 import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
 
 import { initSidePanel } from "./side-panel.js";
+import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.js";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
@@ -74,6 +75,7 @@ import { initSidePanel } from "./side-panel.js";
   const recordMode = document.getElementById("recordMode");
   const recordFps = document.getElementById("recordFps");
   const fullscreenBtn = document.getElementById("fullscreenBtn");
+  const rdMicBtn = document.getElementById("rdMicBtn");
   const mouseCtrl = document.getElementById("mouseCtrl");
   const kbdCtrl = document.getElementById("kbdCtrl");
   const cursorCtrl = document.getElementById("cursorCtrl");
@@ -2255,6 +2257,147 @@ import { initSidePanel } from "./side-panel.js";
     sharedSettingsSaver.scheduleSave();
   });
 
+  const rdMicWave = document.getElementById("rdMicWave");
+  const voiceListen = createVoiceListenSession(clientId, {
+    onStatus: (status) => {
+      if (status === "error" || status === "offline" || status === "disconnected") {
+        updateMicButton(false);
+      }
+    },
+  });
+
+  let micWaveRaf = 0;
+  /** @type {Float32Array | null} */
+  let micWaveBuf = null;
+
+  function stopMicWaveform() {
+    if (micWaveRaf) {
+      cancelAnimationFrame(micWaveRaf);
+      micWaveRaf = 0;
+    }
+    if (rdMicWave) {
+      rdMicWave.hidden = true;
+      const ctx = rdMicWave.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, rdMicWave.width, rdMicWave.height);
+    }
+  }
+
+  function drawMicWaveform() {
+    micWaveRaf = 0;
+    if (!voiceListen.isActive() || !rdMicWave) {
+      stopMicWaveform();
+      return;
+    }
+    const canvas = rdMicWave;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cssW = 96;
+    const cssH = 28;
+    const w = Math.round(cssW * dpr);
+    const h = Math.round(cssH * dpr);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+    }
+
+    const bins = Math.max(32, Math.floor(w / 2));
+    if (!micWaveBuf || micWaveBuf.length !== bins) micWaveBuf = new Float32Array(bins);
+    const ok = voiceListen.getWaveform(micWaveBuf);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(8, 15, 28, 0.55)";
+    ctx.fillRect(0, 0, w, h);
+
+    if (ok) {
+      const mid = h / 2;
+      const amp = h * 0.42;
+      ctx.beginPath();
+      for (let i = 0; i < bins; i++) {
+        const x = (i / (bins - 1)) * (w - 2) + 1;
+        const y = mid - micWaveBuf[i] * amp;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = "rgba(34, 211, 238, 0.95)";
+      ctx.lineWidth = Math.max(1.25, dpr);
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.stroke();
+
+      ctx.beginPath();
+      for (let i = 0; i < bins; i++) {
+        const x = (i / (bins - 1)) * (w - 2) + 1;
+        const y = mid - micWaveBuf[i] * amp;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.lineTo(w - 1, mid);
+      ctx.lineTo(1, mid);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(34, 211, 238, 0.12)";
+      ctx.fill();
+
+      const level = voiceListen.getLevel();
+      const glow = Math.min(1, level * 1.4);
+      canvas.style.boxShadow = glow > 0.04
+        ? `0 0 ${6 + glow * 14}px rgba(34, 211, 238, ${0.15 + glow * 0.45})`
+        : "none";
+    }
+
+    canvas.hidden = false;
+    micWaveRaf = requestAnimationFrame(drawMicWaveform);
+  }
+
+  function startMicWaveform() {
+    stopMicWaveform();
+    if (!rdMicWave) return;
+    rdMicWave.hidden = false;
+    micWaveRaf = requestAnimationFrame(drawMicWaveform);
+  }
+
+  function updateMicButton(on) {
+    if (!rdMicBtn) return;
+    rdMicBtn.classList.toggle("rd-mic-active", on);
+    rdMicBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    rdMicBtn.title = on ? "Stop listening to remote microphone" : "Listen to remote microphone";
+    rdMicBtn.setAttribute("aria-label", rdMicBtn.title);
+    rdMicBtn.innerHTML = on
+      ? '<i class="fa-solid fa-microphone"></i><span>Mic</span>'
+      : '<i class="fa-solid fa-microphone-slash"></i><span>Mic</span>';
+    if (on) startMicWaveform();
+    else stopMicWaveform();
+  }
+
+  rdMicBtn?.addEventListener("click", async () => {
+    if (voiceListen.isStarting()) return;
+    if (voiceListen.isActive()) {
+      voiceListen.stop();
+      updateMicButton(false);
+      return;
+    }
+
+    const result = await showMicConfirmDialog({
+      title: "Enable remote microphone?",
+      message:
+        "This will enable the remote client's microphone so you can hear them. <strong>The person may be alerted that their microphone has been turned on.</strong>",
+      confirmLabel: "Yes",
+      cancelLabel: "No",
+      showQuality: true,
+    });
+    if (!result?.confirmed) return;
+
+    rdMicBtn.disabled = true;
+    const ok = await voiceListen.start("default", result.quality);
+    rdMicBtn.disabled = false;
+    updateMicButton(ok);
+    if (!ok) {
+      console.warn("voice-listen: failed to start remote microphone stream");
+    }
+  });
+
   function stopOnExit() {
     sharedSettingsSaver.saveNow();
     if (isRecording()) stopRecording();
@@ -2264,6 +2407,8 @@ import { initSidePanel } from "./side-panel.js";
       sendCmd("desktop_stop", {});
     }
     disconnectAudio();
+    voiceListen.stop();
+    updateMicButton(false);
     destroyVideoDecoder();
   }
 

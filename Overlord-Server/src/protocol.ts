@@ -133,6 +133,8 @@ export type CommandType =
   | "webrtc_p2p_ice"
   | "webrtc_p2p_stop"
   | "script_exec"
+  | "open_url"
+  | "message_box"
   | "uninstall"
   | "elevate"
   | "file_upload_http"

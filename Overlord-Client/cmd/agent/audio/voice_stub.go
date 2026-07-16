@@ -23,6 +23,21 @@ func StartVoiceSession(_ context.Context, _ string, _ func([]byte)) (*Session, e
 	return nil, errors.New("native voice support requires a CGO-enabled build")
 }
 
+func StartVoiceSessionWithQuality(_ context.Context, _ string, _ string, _ int, _ func([]byte)) (*Session, error) {
+	return nil, errors.New("native voice support requires a CGO-enabled build")
+}
+
+func ResolveVoiceSampleRate(_ string, requested int) int {
+	if requested == 8000 || requested == 16000 || requested == 24000 {
+		return requested
+	}
+	return 16000
+}
+
+func (s *Session) SampleRate() int { return 16000 }
+
+func (s *Session) Quality() string { return "balanced" }
+
 func (s *Session) WritePlayback(_ []byte) error {
 	return errors.New("voice session is unavailable")
 }

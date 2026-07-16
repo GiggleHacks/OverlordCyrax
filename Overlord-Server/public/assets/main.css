@@ -1865,6 +1865,7 @@ body.viewer-has-webcam-bar .viewer-panels { height: calc(100vh - 82px); }
 .viewer-panels[data-mode="split"] { grid-template-columns: minmax(200px, 3fr) 6px minmax(200px, 2fr); }
 .viewer-panels[data-mode="split-v"] { grid-template-columns: 1fr; grid-template-rows: minmax(160px, 280px) 6px 1fr; }
 .viewer-panels[data-mode="pip"] { grid-template-columns: 1fr; position: relative; }
+.viewer-panels[data-mode="desktop"] { position: relative; }
 .viewer-panel { min-width: 0; min-height: 0; background: #05080d; position: relative; }
 .viewer-panel iframe { display: block; width: 100%; height: 100%; border: 0; background: #05080d; }
 .viewer-divider { display: none; background: #173849; cursor: col-resize; position: relative; z-index: 5; transition: background .15s; }
@@ -1873,22 +1874,58 @@ body.viewer-has-webcam-bar .viewer-panels { height: calc(100vh - 82px); }
 .viewer-panels[data-mode="split-v"] .viewer-divider { display: block; cursor: row-resize; }
 .viewer-panels[data-mode="pip"] .viewer-divider { display: none; }
 .viewer-panels[data-mode="pip"] .viewer-panel-webcam { display: none !important; }
-.viewer-panels[data-mode="pip"] .viewer-panel-desktop { width: 100%; height: 100%; position: relative; overflow: hidden; }
-.viewer-panels[data-mode="pip"] .viewer-panel-desktop > iframe#viewerDesktop { width: 100%; height: 100%; }
+.viewer-panels[data-mode="pip"] .viewer-panel-desktop,
+.viewer-panels[data-mode="desktop"] .viewer-panel-desktop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--desktop-left, 0px);
+  width: var(--desktop-width, 100%);
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.viewer-panels[data-mode="pip"] .viewer-panel-desktop > iframe#viewerDesktop,
+.viewer-panels[data-mode="desktop"] .viewer-panel-desktop > iframe#viewerDesktop {
+  width: 100%;
+  height: 100%;
+}
+.viewer-panels[data-mode="pip"] .viewer-desktop-resize,
+.viewer-panels[data-mode="desktop"] .viewer-desktop-resize { display: block; }
 
-/* True PiP reaction-cam overlay inside the desktop video panel */
+/* Desktop panel edge resize (pip/desktop modes) — left edge to slide/shrink */
+.viewer-desktop-resize {
+  display: none;
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  background: transparent;
+  transition: background .15s;
+}
+.viewer-desktop-resize:hover,
+.viewer-desktop-resize.is-dragging { background: rgba(34, 211, 238, 0.55); }
+/* right-edge width handle */
+.viewer-panel-desktop::after {
+  content: none;
+}
+
+/* True PiP overlay — free-float over entire viewer layout (incl. side panel) */
 .viewer-pip-overlay {
   display: none;
   position: absolute;
-  z-index: 20;
+  z-index: 40;
   top: 12px;
   right: 12px;
-  width: 28%;
+  width: 22%;
   height: 28%;
-  min-width: 180px;
-  min-height: 120px;
-  max-width: 60%;
-  max-height: 60%;
+  min-width: 160px;
+  min-height: 100px;
+  max-width: min(90vw, 92%);
+  max-height: min(90vh, 92%);
   border: 2px solid rgba(23, 56, 73, 0.95);
   border-radius: 10px;
   overflow: hidden;
@@ -2027,11 +2064,12 @@ body.viewer-has-webcam-bar .viewer-panels { height: calc(100vh - 82px); }
 }
 .viewer-panels[data-mode="webcam"] .viewer-panel-desktop,
 .viewer-panels[data-mode="webcam"] .viewer-divider,
-.viewer-panels[data-mode="webcam"] .viewer-pip-overlay,
 .viewer-panels[data-mode="desktop"] .viewer-panel-webcam,
-.viewer-panels[data-mode="desktop"] .viewer-divider,
-.viewer-panels[data-mode="desktop"] .viewer-pip-overlay,
-.viewer-panels[data-mode="split"] .viewer-pip-overlay { display: none !important; }
+.viewer-panels[data-mode="desktop"] .viewer-divider { display: none !important; }
+body:not(.viewer-pip-active) .viewer-pip-overlay { display: none !important; }
+body.pip-dragging .side-panel,
+body.pip-dragging .viewer-main { pointer-events: none; }
+body.pip-dragging .viewer-pip-overlay { pointer-events: auto; }
 .rd-focus-view { width: 65%; margin: 0 auto; transition: width .2s ease; }
 .rd-view--100 .rd-focus-view { width: 100%; }
 body.rd-embedded {
@@ -2059,14 +2097,16 @@ body.webcam-embedded .webcam-workspace { width: 100% !important; max-width: none
 @media (prefers-reduced-motion: reduce) { .viewer-commandbar button, .rd-focus-view { transition: none; } }
 
 /* ── Side action panel ─────────────────────────────────────── */
-.viewer-layout { display: flex; height: 100vh; overflow: hidden; }
-.viewer-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.viewer-layout { display: flex; height: 100vh; overflow: hidden; position: relative; }
+.viewer-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .rd-with-panel { display: flex; height: 100vh; overflow: hidden; }
 .rd-with-panel > .rd-focus-view { flex: 1; min-width: 0; overflow-y: auto; width: auto !important; }
 
 .side-panel {
-  width: 230px;
-  min-width: 230px;
+  width: var(--side-panel-width, 230px);
+  min-width: 140px;
+  max-width: 420px;
+  flex-shrink: 0;
   height: 100vh;
   overflow-y: auto;
   overflow-x: hidden;
@@ -2076,7 +2116,23 @@ body.webcam-embedded .webcam-workspace { width: 100% !important; max-width: none
   flex-direction: column;
   scrollbar-width: thin;
   scrollbar-color: #1e3a5f #080d14;
+  position: relative;
+  z-index: 2;
 }
+.side-panel-resize {
+  position: absolute;
+  z-index: 30;
+  top: 0;
+  bottom: 0;
+  left: var(--side-panel-width, 230px);
+  width: 6px;
+  margin-left: -3px;
+  cursor: ew-resize;
+  background: transparent;
+  transition: background .15s;
+}
+.side-panel-resize:hover,
+.side-panel-resize.is-dragging { background: rgba(34, 211, 238, 0.55); }
 .side-panel::-webkit-scrollbar { width: 5px; }
 .side-panel::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 4px; }
 .side-panel::-webkit-scrollbar-track { background: transparent; }
@@ -2203,6 +2259,134 @@ body.webcam-embedded .webcam-workspace { width: 100% !important; max-width: none
   border-radius: 2px;
   transition: width .15s ease;
 }
+
+/* ── Side panel modals (trolling) ──────────────────────────── */
+.sp-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(4px);
+}
+.sp-modal {
+  width: min(420px, 100%);
+  background: #0f1724;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  color: #e2e8f0;
+  overflow: hidden;
+}
+.sp-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+.sp-modal-title {
+  font: 600 14px/1.2 "Inter", system-ui, sans-serif;
+  color: #f8fafc;
+}
+.sp-modal-close {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.sp-modal-close:hover { color: #e2e8f0; }
+.sp-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.sp-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+.sp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  border: none;
+  padding: 0;
+}
+.sp-field > span,
+.sp-field > legend {
+  font: 600 11px/1.2 "Inter", system-ui, sans-serif;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.sp-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #e2e8f0;
+  padding: 9px 11px;
+  font: 400 13px/1.3 "Inter", system-ui, sans-serif;
+  outline: none;
+}
+.sp-input:focus {
+  border-color: rgba(244, 114, 182, 0.55);
+  box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.12);
+}
+.sp-textarea { resize: vertical; min-height: 72px; }
+.sp-hint {
+  margin: 0;
+  font: 400 11.5px/1.4 "Inter", system-ui, sans-serif;
+  color: #7c8da4;
+}
+.sp-icon-field {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.sp-icon-field > legend {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+}
+.sp-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 12.5px/1.2 "Inter", system-ui, sans-serif;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.sp-radio input { accent-color: #f472b6; }
+.sp-modal-btn {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font: 600 12.5px/1 "Inter", system-ui, sans-serif;
+  cursor: pointer;
+}
+.sp-modal-btn-cancel {
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #cbd5e1;
+}
+.sp-modal-btn-cancel:hover { background: rgba(148, 163, 184, 0.08); }
+.sp-modal-btn-confirm {
+  background: linear-gradient(135deg, #f472b6, #e879f9);
+  color: #1a0b14;
+}
+.sp-modal-btn-confirm:hover { filter: brightness(1.05); }
 
 /* ── RD standalone with side panel ─────────────────────────── */
 body.rd-has-panel { display: flex; flex-direction: row; height: 100vh; overflow: hidden; min-height: 0 !important; }
@@ -3577,6 +3761,172 @@ tbody tr:hover {
 .webcam-workspace--100 { width:100%; }
 .webcam-control { min-width:34px !important; min-height:34px !important; padding:0 !important; justify-content:center; }
 .webcam-scale { margin-left:auto; font-family:"JetBrains Mono", monospace; font-size:11px; }
+
+/* Remote desktop toolbar — compact height aligned with webcam controls, labels kept */
+.rd-toolbar-btn {
+  min-height: 34px !important;
+  padding: 5px 9px !important;
+  font-size: 11px !important;
+  gap: 6px !important;
+  border-radius: 8px !important;
+  line-height: 1.2;
+}
+.rd-toolbar-btn i { font-size: 11px; transition: transform 150ms ease; }
+.rd-toolbar-btn:hover:not(:disabled) i { transform: scale(1.08); }
+.rd-toolbar-btn:active:not(:disabled) { transform: translateY(0) scale(0.97); }
+.rd-toolbar-btn--compact {
+  padding: 5px 8px !important;
+  gap: 4px !important;
+}
+.rd-toolbar-btn--compact span { max-width: 3.5rem; }
+.rd-mic-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rd-mic-btn.rd-mic-active {
+  border-color: rgba(34, 211, 238, 0.55) !important;
+  background: linear-gradient(170deg, rgba(8, 145, 178, 0.35), rgba(15, 23, 42, 0.4)) !important;
+  color: #a5f3fc !important;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.2), 0 8px 18px rgba(8, 145, 178, 0.25);
+}
+.rd-mic-btn.rd-mic-active:hover:not(:disabled) {
+  border-color: rgba(34, 211, 238, 0.75) !important;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35), 0 10px 22px rgba(8, 145, 178, 0.35);
+}
+.rd-mic-wave {
+  display: block;
+  width: 96px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  background: rgba(8, 15, 28, 0.75);
+  flex-shrink: 0;
+}
+.rd-mic-wave[hidden] { display: none !important; }
+.rd-mic-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(6px);
+}
+.rd-mic-confirm section {
+  max-width: 440px;
+  width: calc(100% - 32px);
+  padding: 24px;
+  border: 1px solid rgba(34, 211, 238, 0.45);
+  border-radius: 16px;
+  background: #0f172a;
+  box-shadow: 0 18px 60px #000;
+}
+.rd-mic-confirm .rd-mic-confirm-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  font-size: 18px;
+}
+.rd-mic-confirm h2 {
+  margin: 16px 0 8px;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+.rd-mic-confirm p {
+  color: #cbd5e1;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+.rd-mic-confirm p strong { color: #fbbf24; font-weight: 600; }
+.rd-mic-confirm .rd-mic-quality {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rd-mic-confirm .rd-mic-quality select {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: #0b1220;
+  color: #e2e8f0;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  outline: none;
+}
+.rd-mic-confirm .rd-mic-quality select:focus {
+  border-color: rgba(34, 211, 238, 0.55);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.25);
+}
+.rd-mic-confirm .rd-mic-dont-show {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: #94a3b8;
+  cursor: pointer;
+  user-select: none;
+}
+.rd-mic-confirm .rd-mic-dont-show input {
+  width: 15px;
+  height: 15px;
+  accent-color: #0891b2;
+  cursor: pointer;
+}
+.rd-mic-confirm .rd-mic-dont-show:hover { color: #cbd5e1; }
+.rd-mic-confirm .rd-mic-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.rd-mic-confirm .rd-mic-confirm-actions button {
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+.rd-mic-confirm .rd-mic-confirm-actions button:hover {
+  transform: translateY(-1px);
+}
+.rd-mic-confirm [data-cancel] {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #e2e8f0;
+}
+.rd-mic-confirm [data-confirm] {
+  background: #0891b2;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  color: white;
+}
+.rd-mic-confirm [data-confirm]:hover {
+  background: #0e7490;
+  box-shadow: 0 8px 18px rgba(8, 145, 178, 0.35);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rd-toolbar-btn i,
+  .rd-toolbar-btn:hover:not(:disabled) i,
+  .rd-toolbar-btn:active:not(:disabled),
+  .rd-mic-confirm .rd-mic-confirm-actions button:hover {
+    transform: none !important;
+    transition: none !important;
+  }
+}
 .cv-row, .cv-card, .dashboard-icon-btn, .layout-toggle-btn { transition:transform .16s ease, border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
 .cv-row:hover, .cv-card:hover { transform:translateY(-2px); }
 .dashboard-icon-btn:active, .layout-toggle-btn:active, .cv-webcam-btn:active { transform:scale(.92); }

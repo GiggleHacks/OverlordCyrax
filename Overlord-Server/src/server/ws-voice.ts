@@ -60,11 +60,33 @@ export function handleVoiceViewerMessage(ws: ServerWebSocket<SocketData>, raw: s
       const message = JSON.parse(raw);
       if (message?.type === "start") {
         const source = typeof message?.source === "string" ? message.source : "microphone";
+        const qualityRaw = typeof message?.quality === "string" ? message.quality.trim().toLowerCase() : "";
+        const quality =
+          qualityRaw === "fast" || qualityRaw === "low" || qualityRaw === "lq"
+            ? "fast"
+            : qualityRaw === "smooth" || qualityRaw === "high" || qualityRaw === "hq"
+              ? "smooth"
+              : "balanced";
+        const requestedRate = typeof message?.sampleRate === "number" ? message.sampleRate : 0;
+        const sampleRate =
+          requestedRate === 8000 || requestedRate === 16000 || requestedRate === 24000
+            ? requestedRate
+            : quality === "fast"
+              ? 8000
+              : 16000;
         const started = sendVoiceCommand(clientId, "voice_session_start", {
           source,
           sessionId: ws.data.sessionId,
+          quality,
+          sampleRate,
         });
-        safeJson(ws, { type: "status", status: started ? "connected" : "error" });
+        // sampleRate is a hint; agents that support quality will also emit a format frame.
+        safeJson(ws, {
+          type: "status",
+          status: started ? "connected" : "error",
+          quality,
+          sampleRate,
+        });
         return;
       }
       if (message?.type === "stop") {
@@ -84,6 +106,12 @@ export function handleVoiceViewerMessage(ws: ServerWebSocket<SocketData>, raw: s
 
 export function handleVoiceUplink(clientId: string, payload: any) {
   const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  const sampleRate =
+    typeof payload?.sampleRate === "number" && payload.sampleRate > 0
+      ? (payload.sampleRate as number)
+      : 0;
+  const isInfo = payload?.info === true || payload?.format === true;
+
   const bytes = payload?.data instanceof Uint8Array
     ? payload.data
     : payload?.data instanceof ArrayBuffer
@@ -91,13 +119,21 @@ export function handleVoiceUplink(clientId: string, payload: any) {
       : ArrayBuffer.isView(payload?.data)
         ? new Uint8Array(payload.data.buffer)
         : null;
-  if (!bytes || bytes.byteLength === 0) return;
 
   for (const session of sessionManager.getVoiceSessionsByClient(clientId)) {
     if (sessionId) {
       if (session.id !== sessionId) continue;
     }
     try {
+      if (isInfo || (sampleRate > 0 && (!bytes || bytes.byteLength === 0))) {
+        safeJson(session.viewer, {
+          type: "format",
+          sampleRate: sampleRate || 16000,
+          quality: typeof payload?.quality === "string" ? payload.quality : undefined,
+        });
+        continue;
+      }
+      if (!bytes || bytes.byteLength === 0) continue;
       session.viewer.send(bytes);
     } catch {
       // ignore failed sends; cleanup happens on close

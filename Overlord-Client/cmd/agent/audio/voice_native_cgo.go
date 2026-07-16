@@ -22,6 +22,22 @@ const (
 	maxPlaybackBufferMillis = 250
 )
 
+// ResolveVoiceSampleRate maps a quality preset / explicit rate to a capture rate.
+// Unknown values fall back to the historic 16 kHz default.
+func ResolveVoiceSampleRate(quality string, requested int) int {
+	if requested == 8000 || requested == 16000 || requested == 24000 {
+		return requested
+	}
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "fast", "low", "lq":
+		return 8000
+	case "smooth", "high", "hq":
+		return 16000
+	default:
+		return voiceSampleRate
+	}
+}
+
 const maxPlaybackBufferBytes = (voiceSampleRate * voiceChannels * voiceBytesPerSample * maxPlaybackBufferMillis) / 1000
 
 type playbackBuffer struct {
@@ -64,12 +80,28 @@ type Session struct {
 	capture  *malgo.Device
 	playback *malgo.Device
 
-	uplink chan []byte
-	queue  *playbackBuffer
+	uplink     chan []byte
+	queue      *playbackBuffer
+	sampleRate uint32
+	quality    string
 
 	wg       sync.WaitGroup
 	closeMu  sync.Mutex
 	isClosed bool
+}
+
+func (s *Session) SampleRate() int {
+	if s == nil || s.sampleRate == 0 {
+		return voiceSampleRate
+	}
+	return int(s.sampleRate)
+}
+
+func (s *Session) Quality() string {
+	if s == nil {
+		return "balanced"
+	}
+	return s.quality
 }
 
 func ProbeCapabilities() Capabilities {
@@ -185,11 +217,24 @@ func findSystemCaptureDevice(ctx malgo.Context) (*malgo.DeviceID, string, bool) 
 }
 
 func StartVoiceSession(parent context.Context, source string, onCapture func([]byte)) (*Session, error) {
+	return StartVoiceSessionWithQuality(parent, source, "balanced", 0, onCapture)
+}
+
+func StartVoiceSessionWithQuality(parent context.Context, source string, quality string, requestedRate int, onCapture func([]byte)) (*Session, error) {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if onCapture == nil {
 		return nil, errors.New("voice capture callback is required")
 	}
 	source = strings.TrimSpace(source)
+	rate := uint32(ResolveVoiceSampleRate(quality, requestedRate))
+	q := strings.ToLower(strings.TrimSpace(quality))
+	if q == "" {
+		q = "balanced"
+	}
+	uplinkSlots := 24
+	if q == "fast" || q == "low" || q == "lq" {
+		uplinkSlots = 8
+	}
 
 	audioCtx, err := malgo.InitContext(nil, malgo.ContextConfig{}, nil)
 	if err != nil {
@@ -198,15 +243,17 @@ func StartVoiceSession(parent context.Context, source string, onCapture func([]b
 
 	ctx, cancel := context.WithCancel(parent)
 	s := &Session{
-		ctx:      ctx,
-		cancel:   cancel,
-		audioCtx: audioCtx,
-		uplink:   make(chan []byte, 24),
-		queue:    &playbackBuffer{},
+		ctx:        ctx,
+		cancel:     cancel,
+		audioCtx:   audioCtx,
+		uplink:     make(chan []byte, uplinkSlots),
+		queue:      &playbackBuffer{},
+		sampleRate: rate,
+		quality:    q,
 	}
 
 	playCfg := malgo.DefaultDeviceConfig(malgo.Playback)
-	playCfg.SampleRate = voiceSampleRate
+	playCfg.SampleRate = rate
 	playCfg.Playback.Format = malgo.FormatS16
 	playCfg.Playback.Channels = voiceChannels
 
@@ -224,9 +271,16 @@ func StartVoiceSession(parent context.Context, source string, onCapture func([]b
 	s.playback = playDev
 
 	capCfg := malgo.DefaultDeviceConfig(malgo.Capture)
-	capCfg.SampleRate = voiceSampleRate
+	capCfg.SampleRate = rate
 	capCfg.Capture.Format = malgo.FormatS16
 	capCfg.Capture.Channels = voiceChannels
+	// Prefer smaller periods for Fast so chunks leave the agent sooner.
+	if q == "fast" || q == "low" || q == "lq" {
+		capCfg.PeriodSizeInFrames = rate / 50 // ~20ms
+		if capCfg.PeriodSizeInFrames < 160 {
+			capCfg.PeriodSizeInFrames = 160
+		}
+	}
 	if strings.EqualFold(source, "system") {
 		deviceID, deviceName, ok := findSystemCaptureDevice(audioCtx.Context)
 		if !ok || deviceID == nil {
