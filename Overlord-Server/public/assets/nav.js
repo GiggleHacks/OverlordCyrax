@@ -198,9 +198,8 @@ if (host) {
 
   import("./chat-widget.js").then((chatWidget) => {
     runWithoutPageTracking(() => {
-      chatWidget.init();
-
-      if (chatWidget.isHidden() && refs.navUtility) {
+      const addChatRestoreButton = () => {
+        if (!refs.navUtility || document.getElementById("chat-restore-btn")) return;
         const restoreBtn = document.createElement("button");
         restoreBtn.id = "chat-restore-btn";
         restoreBtn.className = "inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/70 border border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800 text-xs transition-colors";
@@ -211,6 +210,13 @@ if (host) {
           restoreBtn.remove();
         });
         refs.navUtility.insertBefore(restoreBtn, refs.navUtility.firstChild);
+      };
+
+      window.addEventListener("overlord:chat-hidden", addChatRestoreButton);
+      chatWidget.init();
+
+      if (chatWidget.isHidden() && refs.navUtility) {
+        addChatRestoreButton();
       }
     });
   });

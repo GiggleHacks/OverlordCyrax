@@ -105,6 +105,7 @@ function updateMuteVisibility() {
     bubble.classList.add("hidden");
     panel.classList.add("hidden");
     panelOpen = false;
+    window.dispatchEvent(new CustomEvent("overlord:chat-hidden"));
   } else {
     bubble.classList.remove("hidden");
   }
@@ -195,13 +196,19 @@ function createWidget() {
   bubble = document.createElement("div");
   bubble.id = "chat-bubble";
   bubble.className = "fixed bottom-5 right-5 z-[9998] cursor-pointer select-none";
+  bubble.title = "Left-click to open team chat; right-click to close";
   bubble.innerHTML = `
-    <div class="relative flex items-center justify-center w-12 h-12 rounded-full bg-sky-600 hover:bg-sky-500 shadow-lg shadow-sky-900/30 transition-colors">
-      <i class="fa-solid fa-comments text-white text-lg"></i>
-      <span data-chat-badge class="hidden absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-rose-500 text-white text-xs flex items-center justify-center font-semibold"></span>
+    <div class="relative flex items-center justify-center w-8 h-8 rounded-full bg-sky-600 hover:bg-sky-500 shadow-md shadow-sky-900/30 transition-colors">
+      <i class="fa-solid fa-comments text-white text-sm"></i>
+      <span data-chat-badge class="hidden absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-semibold"></span>
     </div>
   `;
   bubble.addEventListener("click", togglePanel);
+  bubble.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    chatClient.setMuteMode("hide");
+    updateMuteVisibility();
+  });
 
   panel = document.createElement("div");
   panel.id = "chat-panel";
