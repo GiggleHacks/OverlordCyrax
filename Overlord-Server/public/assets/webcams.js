@@ -1,12 +1,18 @@
 const MAX_WEBCAM_TILES = 200;
 const ids = [...new Set((new URLSearchParams(location.search).get("clientIds") || "").split(",").filter(Boolean))].slice(0, MAX_WEBCAM_TILES);
-const TILE_FAILURE_TIMEOUT_MS = 5000;
-const terminalTileStates = new Set(["error", "offline", "disconnected", "not-found"]);
+// Only truly terminal after retries; transient stream glitches should not erase the grid.
+const TILE_FAILURE_TIMEOUT_MS = 20000;
+const TILE_RETRY_MS = 2500;
+const MAX_TILE_RETRIES = 3;
+const terminalTileStates = new Set(["offline", "not-found"]);
+const recoverableTileStates = new Set(["error", "disconnected"]);
 const grid = document.getElementById("webcamTiles");
 const count = document.getElementById("tileCount");
 const stopAll = document.getElementById("stopAll");
 const activeTiles = new Map();
 const removalTimers = new Map();
+const retryTimers = new Map();
+const retryCounts = new Map();
 let focusSession = 0;
 let focusPoll = null;
 
@@ -86,8 +92,16 @@ function clearTileRemoval(clientId) {
   removalTimers.delete(clientId);
 }
 
+function clearTileRetry(clientId) {
+  const timer = retryTimers.get(clientId);
+  if (timer) clearTimeout(timer);
+  retryTimers.delete(clientId);
+}
+
 function removeTile(clientId, tile = activeTiles.get(clientId)) {
   clearTileRemoval(clientId);
+  clearTileRetry(clientId);
+  retryCounts.delete(clientId);
   if (!tile || activeTiles.get(clientId) !== tile) return;
   const frame = tile.querySelector("iframe");
   if (frame) frame.src = "about:blank";
@@ -102,11 +116,30 @@ function scheduleTileRemoval(tile) {
   removalTimers.set(clientId, setTimeout(() => removeTile(clientId, tile), TILE_FAILURE_TIMEOUT_MS));
 }
 
-for (const id of ids) {
+function scheduleTileRetry(tile) {
+  const clientId = tile.dataset.clientId;
+  if (!clientId || retryTimers.has(clientId)) return;
+  const attempts = retryCounts.get(clientId) || 0;
+  if (attempts >= MAX_TILE_RETRIES) {
+    scheduleTileRemoval(tile);
+    return;
+  }
+  retryCounts.set(clientId, attempts + 1);
+  retryTimers.set(clientId, setTimeout(() => {
+    retryTimers.delete(clientId);
+    if (!activeTiles.has(clientId) || tile.classList.contains("is-stopped")) return;
+    const frame = tile.querySelector("iframe");
+    if (frame) frame.src = tileWebcamUrl(clientId);
+    setTileState(tile, "connecting");
+  }, TILE_RETRY_MS));
+}
+
+for (const [index, id] of ids.entries()) {
   const tile = document.createElement("article");
   tile.className = "webcam-tile";
   tile.dataset.clientId = id;
-  tile.innerHTML = `<button class="tile-expand" title="Open in viewer" aria-label="Open webcam in viewer"><i class="fa-solid fa-expand"></i></button><span class="tile-client">${id.slice(0, 12)}</span><span class="tile-status"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting</span><span class="tile-ping"></span><button class="tile-stop" title="Stop webcam" aria-label="Stop webcam"><i class="fa-solid fa-stop"></i></button><iframe title="Webcam ${id}" src="${tileWebcamUrl(id)}"></iframe>`;
+  // Stagger iframe load so agents/server are not slammed all at once.
+  tile.innerHTML = `<button class="tile-expand" title="Open in viewer" aria-label="Open webcam in viewer"><i class="fa-solid fa-expand"></i></button><span class="tile-client">${id.slice(0, 12)}</span><span class="tile-status"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting</span><span class="tile-ping"></span><button class="tile-stop" title="Stop webcam" aria-label="Stop webcam"><i class="fa-solid fa-stop"></i></button><iframe title="Webcam ${id}" src="about:blank"></iframe>`;
   tile.querySelector(".tile-stop").onclick = (event) => { event.stopPropagation(); stopTile(tile); };
   tile.querySelector(".tile-expand").onclick = () => {
     const viewerUrl = `/viewer?clientId=${encodeURIComponent(id)}&mode=webcam&transition=1&fromArray=1`;
@@ -118,6 +151,13 @@ for (const id of ids) {
   };
   activeTiles.set(id, tile);
   grid.append(tile);
+  setTimeout(() => {
+    if (!activeTiles.has(id) || tile.classList.contains("is-stopped")) return;
+    const frame = tile.querySelector("iframe");
+    if (frame && (!frame.src || frame.src === "about:blank" || frame.getAttribute("src") === "about:blank")) {
+      frame.src = tileWebcamUrl(id);
+    }
+  }, Math.min(index * 180, 4000));
 }
 stopAll.onclick = () => {
   clearFocusWatch();
@@ -156,10 +196,23 @@ function updateTileUi(tile, state) {
 function setTileState(tile, state) {
   tile.dataset.streamState = state;
   updateTileUi(tile, state);
+  const clientId = tile.dataset.clientId;
+  if (state === "streaming" || state === "starting" || state === "connecting") {
+    clearTileRemoval(clientId);
+    clearTileRetry(clientId);
+    if (state === "streaming") retryCounts.delete(clientId);
+    return;
+  }
+  if (recoverableTileStates.has(state)) {
+    clearTileRemoval(clientId);
+    scheduleTileRetry(tile);
+    return;
+  }
   if (terminalTileStates.has(state)) {
+    clearTileRetry(clientId);
     scheduleTileRemoval(tile);
   } else {
-    clearTileRemoval(tile.dataset.clientId);
+    clearTileRemoval(clientId);
   }
 }
 
@@ -184,7 +237,8 @@ async function refreshTileStatus() {
       }
       const ping = Number.isFinite(Number(client.pingMs)) ? `${Math.round(Number(client.pingMs))} ms` : "";
       pingEl.textContent = ping;
-      if (!client.online) {
+      // Don't kill a live stream on a brief online-flag blip from the clients API.
+      if (!client.online && tile.dataset.streamState !== "streaming" && tile.dataset.streamState !== "starting") {
         setTileState(tile, "offline");
         continue;
       }
@@ -235,4 +289,5 @@ window.addEventListener("pagehide", () => {
   clearInterval(tileStatusInterval);
   clearFocusWatch();
   for (const clientId of [...removalTimers.keys()]) clearTileRemoval(clientId);
+  for (const clientId of [...retryTimers.keys()]) clearTileRetry(clientId);
 });

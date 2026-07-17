@@ -1022,10 +1022,14 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
       break;
     case "webcam_select": {
       const index = Math.max(0, Number(payload.index) || 0);
+      const previousIndex = state.deviceIndex;
       state.deviceIndex = index;
       webcamStreamingState.set(clientId, state);
       sendDesktopCommand(target, "webcam_select", { index });
-      if (state.isStreaming) {
+      // Only bounce the agent camera when the device actually changes.
+      // Same-index reselects during array open were stop/starting mid-stream and
+      // killing H.264 decoder state in the browser tiles.
+      if (state.isStreaming && previousIndex !== index) {
         sendDesktopCommand(target, "webcam_stop", {});
         sendDesktopCommand(target, "webcam_start", {});
       }
@@ -1100,6 +1104,8 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
       } else {
         logger.debug(`[webcam] ignoring webcam_stop for client ${clientId} - ${otherWebcamViewers.length} other viewer(s) still active`);
       }
+      // Still ack this viewer so reconnect/restart races can complete, but the
+      // browser ignores "stopped" while desiredStreaming/intentionalRestart.
       safeSendViewer(ws, { type: "status", status: "stopped" });
       break;
     }

@@ -85,10 +85,18 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   let firstFrameTimer = null;
   let renderWatchTimer = null;
   let lastRenderedFrameAt = 0;
+  let lastFrameReceivedAt = 0;
   let startRetryCount = 0;
+  let stallRestartCount = 0;
+  let h264ErrorCount = 0;
+  let intentionalRestart = false;
+  let suppressSelectRestart = false;
 
-  let prefersH264 = typeof VideoDecoder === "function";
+  // Array tiles: prefer JPEG — H.264 mid-stream resets under multi-tile load are a common hard error.
+  let prefersH264 = !embedded && typeof VideoDecoder === "function";
   let savedCameraIndex = null;
+  const STALL_MS = embedded ? 15000 : 8000;
+  const MAX_STALL_RESTARTS = embedded ? 4 : 2;
 
   /* ── Remote system audio while viewing webcam ── */
   const AUDIO_SAMPLE_RATE = 16000;
@@ -315,7 +323,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     setSelectValue(webrtcMode, settings.webrtcMode);
     setSelectValue(audioTransport, settings.audioTransport);
     if (audioCtrl && typeof settings.audio === "boolean") audioCtrl.checked = settings.audio;
-    if (typeof settings.preferH264 === "boolean") {
+    if (typeof settings.preferH264 === "boolean" && !embedded) {
       prefersH264 = settings.preferH264 && typeof VideoDecoder === "function";
     }
     if (Number(settings.viewerScale) === 100) viewerScale = 100;
@@ -407,17 +415,37 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function applyFpsSettings() {
+    // Never surface a hard error for FPS while live — array tiles hit this during reconnect races.
     if (streamState === "streaming" || streamState === "starting" || streamState === "stopping") {
-      setStreamState("error", "Stop stream before changing FPS");
       return;
     }
     const maxFps = selectedDeviceMaxFps();
     const fps = Math.max(1, Math.min(maxFps, Number(fpsInput.value) || 30));
     if ((Number(fpsInput.value) || 30) > maxFps) {
       fpsInput.value = String(maxFps);
-      setStreamState("idle", `FPS capped to camera max (${maxFps})`);
     }
     send("webcam_set_fps", { fps, useMax: false });
+  }
+
+  function noteFrameReceived() {
+    lastFrameReceivedAt = performance.now();
+  }
+
+  function fallbackToJpeg(reason) {
+    if (!prefersH264) return;
+    prefersH264 = false;
+    if (codecH264) codecH264.checked = false;
+    destroyVideoDecoder();
+    console.warn("webcam: falling back to jpeg", reason || "", "h264Errors=", h264ErrorCount);
+    pushVideoSettings();
+    if (desiredStreaming) {
+      intentionalRestart = true;
+      send("webcam_stop");
+      setTimeout(() => {
+        intentionalRestart = false;
+        startStreaming(false);
+      }, 200);
+    }
   }
 
   function requestCameraList() {
@@ -457,7 +485,15 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
     selectedDeviceIndex = Number(cameraSelect.value) || 0;
     applyFpsInputLimits();
-    if (selectedDeviceIndex !== Number(selected || 0) && ws && ws.readyState === WebSocket.OPEN) {
+    // Avoid mid-stream camera reselect (server stop/start drops H.264 state → tile error).
+    if (
+      !suppressSelectRestart &&
+      streamState !== "streaming" &&
+      streamState !== "starting" &&
+      selectedDeviceIndex !== Number(selected || 0) &&
+      ws &&
+      ws.readyState === WebSocket.OPEN
+    ) {
       send("webcam_select", { index: selectedDeviceIndex });
     }
     postStatusToParent();
@@ -516,17 +552,29 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
           }
           try {
             ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+            h264ErrorCount = 0;
+            stallRestartCount = 0;
             if (desiredStreaming) setStreamState("streaming", "Streaming");
           } catch (err) {
             console.warn("webcam h264 draw failed", err);
-            setStreamState("error", "Unable to render camera image");
           } finally {
             frame.close();
           }
         },
         error: (err) => {
           console.warn("webcam h264 decoder error", err);
-          setStreamState("error", "Unable to decode camera image");
+          h264ErrorCount += 1;
+          destroyVideoDecoder();
+          if (h264ErrorCount >= 2) {
+            fallbackToJpeg("decoder_error");
+          } else if (desiredStreaming) {
+            intentionalRestart = true;
+            send("webcam_stop");
+            setTimeout(() => {
+              intentionalRestart = false;
+              startStreaming(false);
+            }, 250);
+          }
         },
       });
       videoDecoder.configure({ codec: "avc1.42E01E", optimizeForLatency: true });
@@ -601,24 +649,41 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (firstFrameTimer) clearTimeout(firstFrameTimer);
     firstFrameTimer = setTimeout(() => {
       if (!desiredStreaming || hasRenderedFrame) return;
-      if (startRetryCount < 1) {
+      if (startRetryCount < (embedded ? 3 : 1)) {
         startRetryCount += 1;
         setStreamState("starting", "Camera is slow to respond · retrying automatically");
+        intentionalRestart = true;
         send("webcam_stop");
-        setTimeout(() => startStreaming(false), 250);
+        setTimeout(() => {
+          intentionalRestart = false;
+          startStreaming(false);
+        }, 250);
       } else {
         setStreamState("error", "Unable to start camera · verify the device has a camera and it is not in use by another app");
       }
-    }, 6000);
+    }, embedded ? 10000 : 6000);
   }
 
   function armRenderWatch() {
     if (renderWatchTimer) clearInterval(renderWatchTimer);
     renderWatchTimer = setInterval(() => {
-      if (!desiredStreaming || streamState !== "streaming" || !lastRenderedFrameAt) return;
-      if (performance.now() - lastRenderedFrameAt > 5000) {
-        setStreamState("error", "Camera stopped delivering images");
+      if (!desiredStreaming) return;
+      if (streamState !== "streaming" && streamState !== "starting") return;
+      const last = Math.max(lastRenderedFrameAt, lastFrameReceivedAt);
+      if (!last) return;
+      if (performance.now() - last <= STALL_MS) return;
+      if (stallRestartCount < MAX_STALL_RESTARTS) {
+        stallRestartCount += 1;
+        setStreamState("starting", "Stream stalled · reconnecting");
+        intentionalRestart = true;
+        send("webcam_stop");
+        setTimeout(() => {
+          intentionalRestart = false;
+          startStreaming(false);
+        }, 300);
+        return;
       }
+      setStreamState("error", "Camera stopped delivering images");
     }, 1000);
   }
 
@@ -626,7 +691,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (!desiredStreaming) return;
     hasRenderedFrame = true;
     lastRenderedFrameAt = performance.now();
+    lastFrameReceivedAt = lastRenderedFrameAt;
     startRetryCount = 0;
+    stallRestartCount = 0;
     if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
     if (streamState !== "streaming") setStreamState("streaming", "Streaming");
   }
@@ -644,6 +711,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   async function drawJpeg(bytes) {
+    noteFrameReceived();
     if (drawPending) return;
     drawPending = true;
     try {
@@ -658,6 +726,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       hasRenderedFrame = true;
       lastRenderedFrameAt = performance.now();
       startRetryCount = 0;
+      stallRestartCount = 0;
       if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
       bitmap.close();
       updateViewerFps();
@@ -674,16 +743,22 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     const format = bytes[6];
     const payload = bytes.slice(8);
     if (!payload.length) return;
+    noteFrameReceived();
     if (format === 1) {
       drawJpeg(payload).catch((err) => {
         console.warn("webcam draw failed", err, "payloadBytes=", payload.length);
-        setStreamState("error", "Unable to render camera image");
+        // Transient decode glitches under multi-tile load — do not kill the tile.
       });
       return;
     }
     if (format === 4) {
+      if (!prefersH264) {
+        // Agent still sending H.264 after we requested JPEG — re-assert preference.
+        pushVideoSettings();
+        return;
+      }
       if (!ensureVideoDecoder()) {
-        setStreamState("error", "H264 decoder unavailable in browser");
+        fallbackToJpeg("decoder_unavailable");
         return;
       }
       try {
@@ -698,12 +773,13 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         updateViewerFps();
       } catch (err) {
         console.warn("webcam h264 decode failed", err, "payloadBytes=", payload.length);
-        setStreamState("error", "Unable to decode camera image");
+        h264ErrorCount += 1;
+        destroyVideoDecoder();
+        if (h264ErrorCount >= 2) fallbackToJpeg("decode_throw");
       }
       return;
     }
     console.warn("webcam unsupported frame format", format, "payloadBytes=", payload.length);
-    setStreamState("error", "Unsupported camera image format");
   }
 
   function send(type, payload = {}) {
@@ -788,7 +864,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (msg.type === "ready") {
       if (msg.os) clientOs = String(msg.os).toLowerCase();
       if (msg.isAdmin !== undefined) clientIsAdmin = !!msg.isAdmin;
-      setStreamState("idle", "Ready");
+      // Do not clobber an active/desired stream with idle "Ready".
+      if (!desiredStreaming && streamState !== "streaming" && streamState !== "starting") {
+        setStreamState("idle", "Ready");
+      }
       return;
     }
     if (msg.type === "status") {
@@ -800,12 +879,13 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
           setStreamState("starting", "Opening camera · waiting for response");
         }
       } else if (msg.status === "stopped") {
-        desiredStreaming = false;
+        // Ignore stop acks during intentional reconnect (first-frame / stall recovery).
+        if (intentionalRestart || desiredStreaming) return;
         setStreamState("idle", "Stopped");
-      } else if (msg.status === "connecting") {
-        setStreamState("idle", "Ready");
-      } else if (msg.status === "online") {
-        setStreamState("idle", "Ready");
+      } else if (msg.status === "connecting" || msg.status === "online") {
+        if (!desiredStreaming && streamState !== "streaming" && streamState !== "starting") {
+          setStreamState("idle", "Ready");
+        }
       }
     }
   }
@@ -817,6 +897,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     setStreamState("connecting", "Connecting");
 
     ws.onopen = () => {
+      suppressSelectRestart = true;
       requestCameraList();
       if (savedCameraIndex !== null && savedCameraIndex !== undefined) {
         selectedDeviceIndex = Number(savedCameraIndex) || 0;
@@ -829,6 +910,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       } else {
         setStreamState("idle", "Stopped");
       }
+      setTimeout(() => { suppressSelectRestart = false; }, 2000);
     };
 
     ws.onmessage = (event) => {
@@ -846,13 +928,18 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
     ws.onclose = () => {
       stopAllWebrtc();
-      setStreamState("disconnected", "Disconnected");
-      setTimeout(connect, 3000);
+      // Keep desiredStreaming; auto-reconnect instead of a terminal error that removes array tiles.
+      if (desiredStreaming) {
+        setStreamState("connecting", "Reconnecting");
+      } else {
+        setStreamState("disconnected", "Disconnected");
+      }
+      setTimeout(connect, 1500);
     };
 
     ws.onerror = () => {
+      // onclose handles reconnect; avoid terminal "error" that blanked array tiles.
       stopAllWebrtc();
-      setStreamState("error", "Connection error");
     };
   }
 
