@@ -9,82 +9,87 @@
   </head>
   <body class="unified-viewer">
     <div class="viewer-layout">
-      <aside id="sidePanel" class="side-panel"></aside>
+      <aside id="sidePanel" class="side-panel" aria-label="Client tools">
+        <button type="button" id="sidePanelCollapse" class="sp-collapse-btn" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">
+          <i class="fa-solid fa-angles-left"></i>
+        </button>
+      </aside>
       <div class="viewer-main">
         <header class="viewer-commandbar">
-          <span class="viewer-id">ID <b id="viewerClientId">------------</b></span>
-          <nav aria-label="Viewer mode">
-            <button data-mode="webcam"><i class="fa-solid fa-camera"></i> Webcam</button>
-            <button data-mode="desktop"><i class="fa-solid fa-display"></i> Desktop</button>
-            <button data-mode="split"><i class="fa-solid fa-table-columns"></i> Split</button>
-            <button data-mode="pip"><i class="fa-solid fa-clone"></i> PiP</button>
+          <a href="/" class="viewer-back" title="Back to Clients" aria-label="Back to Clients">
+            <i class="fa-solid fa-arrow-left"></i><span class="viewer-back-label">Clients</span>
+          </a>
+          <span class="viewer-id" title="Client ID">ID <b id="viewerClientId">------------</b></span>
+          <nav class="viewer-mode-nav" aria-label="Layout presets">
+            <button type="button" data-mode="webcam" title="Webcam only"><i class="fa-solid fa-camera"></i><span>Webcam</span></button>
+            <button type="button" data-mode="desktop" title="Desktop only"><i class="fa-solid fa-display"></i><span>Desktop</span></button>
+            <button type="button" data-mode="split" title="Side by side — desktop left, webcam right"><i class="fa-solid fa-table-columns"></i><span>Split</span></button>
+            <button type="button" data-mode="pip" title="Floating webcam over desktop"><i class="fa-solid fa-clone"></i><span>PiP</span></button>
           </nav>
-          <span id="viewerCapability" class="viewer-capability"><i class="fa-solid fa-video-slash"></i> checking camera</span>
-        </header>
-        <div id="viewerWebcamBar" class="viewer-webcam-bar" hidden>
-          <span class="viewer-webcam-bar-label"><i class="fa-solid fa-camera"></i> Webcam</span>
-          <button type="button" id="viewerCamStart" class="viewer-cam-btn viewer-cam-btn-primary" title="Start webcam">
-            <i class="fa-solid fa-play"></i> Start
-          </button>
-          <button type="button" id="viewerCamStop" class="viewer-cam-btn" title="Stop webcam">
-            <i class="fa-solid fa-stop"></i> Stop
-          </button>
-          <span id="viewerCamStatus" class="viewer-cam-status">
-            <i class="fa-solid fa-circle text-slate-400"></i>
-            <span>Idle</span>
-          </span>
-          <span class="viewer-cam-fps">FPS <b id="viewerCamFps">--</b></span>
-          <div class="viewer-cam-settings-wrap">
-            <button type="button" id="viewerCamSettingsBtn" class="viewer-cam-btn" aria-haspopup="true" aria-expanded="false">
-              <i class="fa-solid fa-sliders"></i> Settings
-              <i class="fa-solid fa-chevron-down viewer-cam-chevron"></i>
+          <div id="viewerWebcamBar" class="viewer-webcam-bar viewer-toolbar-cam" hidden>
+            <button type="button" id="viewerCamStart" class="viewer-cam-btn viewer-cam-btn-primary" title="Start webcam">
+              <i class="fa-solid fa-play"></i>
             </button>
-            <div id="viewerCamSettingsMenu" class="viewer-cam-settings-menu" hidden role="menu">
-              <div class="viewer-cam-settings-section">
-                <div class="viewer-cam-settings-title">Camera</div>
-                <div class="viewer-cam-field">
-                  <label for="viewerCamDevice">Device</label>
-                  <select id="viewerCamDevice"></select>
-                  <button type="button" id="viewerCamRefresh" class="viewer-cam-btn viewer-cam-icon" title="Refresh cameras">
-                    <i class="fa-solid fa-rotate"></i>
-                  </button>
+            <button type="button" id="viewerCamStop" class="viewer-cam-btn" title="Stop webcam">
+              <i class="fa-solid fa-stop"></i>
+            </button>
+            <span id="viewerCamStatus" class="viewer-cam-status">
+              <i class="fa-solid fa-circle text-slate-400"></i>
+              <span>Idle</span>
+            </span>
+            <span class="viewer-cam-fps">FPS <b id="viewerCamFps">--</b></span>
+            <div class="viewer-cam-settings-wrap">
+              <button type="button" id="viewerCamSettingsBtn" class="viewer-cam-btn" aria-haspopup="true" aria-expanded="false" title="Webcam settings">
+                <i class="fa-solid fa-sliders"></i>
+              </button>
+              <div id="viewerCamSettingsMenu" class="viewer-cam-settings-menu" hidden role="menu">
+                <div class="viewer-cam-settings-section">
+                  <div class="viewer-cam-settings-title">Camera</div>
+                  <div class="viewer-cam-field">
+                    <label for="viewerCamDevice">Device</label>
+                    <select id="viewerCamDevice"></select>
+                    <button type="button" id="viewerCamRefresh" class="viewer-cam-btn viewer-cam-icon" title="Refresh cameras">
+                      <i class="fa-solid fa-rotate"></i>
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div class="viewer-cam-settings-section">
-                <div class="viewer-cam-settings-title">Video</div>
-                <div class="viewer-cam-field">
-                  <label for="viewerCamResolution">Resolution</label>
-                  <select id="viewerCamResolution">
-                    <option value="360">360p</option>
-                    <option value="480" selected>480p</option>
-                    <option value="720">720p</option>
-                    <option value="1080">1080p</option>
-                    <option value="-1">Native</option>
-                  </select>
+                <div class="viewer-cam-settings-section">
+                  <div class="viewer-cam-settings-title">Video</div>
+                  <div class="viewer-cam-field">
+                    <label for="viewerCamResolution">Resolution</label>
+                    <select id="viewerCamResolution">
+                      <option value="360" selected>360p</option>
+                      <option value="480">480p</option>
+                      <option value="720">720p</option>
+                      <option value="1080">1080p</option>
+                      <option value="-1">Native</option>
+                    </select>
+                  </div>
+                  <div class="viewer-cam-field">
+                    <label for="viewerCamMode">Mode</label>
+                    <select id="viewerCamMode">
+                      <option value="off" selected>Standard</option>
+                      <option value="p2p">Direct (P2P)</option>
+                      <option value="relayed">Relayed</option>
+                    </select>
+                  </div>
+                  <div class="viewer-cam-field">
+                    <label for="viewerCamMaxFps">Max FPS</label>
+                    <select id="viewerCamMaxFps">
+                      <option value="15">15 fps</option>
+                      <option value="30" selected>30 fps</option>
+                      <option value="60">60 fps</option>
+                    </select>
+                  </div>
+                  <label class="viewer-cam-check">
+                    <input type="checkbox" id="viewerCamH264" checked /> H.264
+                  </label>
                 </div>
-                <div class="viewer-cam-field">
-                  <label for="viewerCamMode">Mode</label>
-                  <select id="viewerCamMode">
-                    <option value="off" selected>Standard</option>
-                    <option value="p2p">Direct (P2P)</option>
-                    <option value="relayed">Relayed</option>
-                  </select>
-                </div>
-                <div class="viewer-cam-field">
-                  <label for="viewerCamMaxFps">Max FPS</label>
-                  <select id="viewerCamMaxFps">
-                    <option value="15">15 fps</option>
-                    <option value="30" selected>30 fps</option>
-                    <option value="60">60 fps</option>
-                  </select>
-                </div>
-                <label class="viewer-cam-check">
-                  <input type="checkbox" id="viewerCamH264" checked /> H.264
-                </label>
               </div>
             </div>
           </div>
-        </div>
+          <span id="viewerCapability" class="viewer-capability"><i class="fa-solid fa-video-slash"></i> checking camera</span>
+        </header>
         <main id="viewerPanels" class="viewer-panels" data-mode="webcam">
           <section class="viewer-panel viewer-panel-webcam" id="viewerWebcamPanel">
             <iframe id="viewerWebcam" title="Webcam"></iframe>
@@ -98,21 +103,46 @@
                 <span class="pip-drag-label" title="Drag to move">
                   <i class="fa-solid fa-arrows-up-down-left-right"></i>
                 </span>
-                <div class="pip-snap-group" title="Snap position">
-                  <button type="button" data-pip-snap="tl" title="Top Left">TL</button>
-                  <button type="button" data-pip-snap="tr" title="Top Right">TR</button>
-                  <button type="button" data-pip-snap="bl" title="Bottom Left">BL</button>
-                  <button type="button" data-pip-snap="br" title="Bottom Right">BR</button>
+                <span class="pip-title" data-pip-title>Local Webcam</span>
+                <div class="pip-snap-group" title="Move webcam to a corner">
+                  <button type="button" data-pip-snap="tl" title="Move to top-left corner" aria-label="Top left">
+                    <i class="fa-solid fa-arrow-up"></i><i class="fa-solid fa-arrow-left pip-snap-second"></i>
+                  </button>
+                  <button type="button" data-pip-snap="tr" title="Move to top-right corner" aria-label="Top right">
+                    <i class="fa-solid fa-arrow-up"></i><i class="fa-solid fa-arrow-right pip-snap-second"></i>
+                  </button>
+                  <button type="button" data-pip-snap="bl" title="Move to bottom-left corner" aria-label="Bottom left">
+                    <i class="fa-solid fa-arrow-down"></i><i class="fa-solid fa-arrow-left pip-snap-second"></i>
+                  </button>
+                  <button type="button" data-pip-snap="br" title="Move to bottom-right corner" aria-label="Bottom right">
+                    <i class="fa-solid fa-arrow-down"></i><i class="fa-solid fa-arrow-right pip-snap-second"></i>
+                  </button>
                 </div>
+                <label class="pip-opacity-wrap" title="Opacity">
+                  <i class="fa-solid fa-circle-half-stroke"></i>
+                  <input type="range" min="25" max="100" value="100" data-pip-opacity aria-label="Webcam opacity" />
+                </label>
                 <div class="pip-actions">
-                  <button type="button" data-pip-pin id="webcamPinBtn" title="Pin / Lock Position" aria-pressed="false">
+                  <button type="button" data-pip-snap="edge-right" title="Park webcam on the right edge" aria-label="Right edge">
+                    <i class="fa-solid fa-arrow-right"></i>
+                  </button>
+                  <button type="button" data-pip-dock-bottom title="Park webcam along the bottom" aria-label="Bottom edge">
+                    <i class="fa-solid fa-arrow-down"></i>
+                  </button>
+                  <button type="button" data-pip-minimize id="webcamMinimizeBtn" title="Minimize to small pill" aria-pressed="false">
+                    <i class="fa-solid fa-window-minimize"></i>
+                  </button>
+                  <button type="button" data-pip-pin id="webcamPinBtn" title="Lock position" aria-pressed="false">
                     <i class="fa-solid fa-thumbtack"></i>
                   </button>
-                  <button type="button" data-pip-close id="webcamCloseBtn" title="Close Webcam Overlay">
+                  <button type="button" data-pip-close id="webcamCloseBtn" title="Hide floating webcam">
                     <i class="fa-solid fa-xmark"></i>
                   </button>
                 </div>
               </div>
+              <button type="button" class="pip-pill" data-pip-pill hidden title="Restore webcam">
+                <i class="fa-solid fa-video"></i><span>Webcam</span>
+              </button>
               <span class="pip-lock-badge" data-pip-lock-badge hidden title="Position locked">
                 <i class="fa-solid fa-lock"></i>
               </span>

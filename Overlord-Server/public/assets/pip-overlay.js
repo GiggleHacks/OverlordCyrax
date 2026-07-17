@@ -1,16 +1,21 @@
- const STORAGE_KEY = "overlord_pip_layout_v2";
+const STORAGE_KEY = "overlord_pip_layout_v3";
 const DEFAULT_LAYOUT = {
   leftPct: null,
   topPct: null,
-  widthPct: 22,
-  heightPct: 28,
+  widthPct: 28,
+  heightPct: 15.75, // ~16:9 of widthPct
   pinned: false,
   corner: "tr",
+  minimized: false,
+  opacity: 1,
+  alwaysOnTop: true,
 };
 
 const MIN_W = 160;
 const MIN_H = 100;
 const PAD = 8;
+const PILL_W = 148;
+const PILL_H = 36;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -18,7 +23,7 @@ function clamp(n, min, max) {
 
 function loadLayout() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("overlord_pip_layout_v2");
     if (!raw) return { ...DEFAULT_LAYOUT };
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_LAYOUT, ...parsed };
@@ -43,6 +48,15 @@ function cornerPosition(hostW, hostH, boxW, boxH, corner) {
       return { left: maxL - PAD, top: PAD };
     case "bl":
       return { left: PAD, top: maxT - PAD };
+    case "edge-left":
+      return { left: PAD, top: Math.max(PAD, (hostH - boxH) / 2) };
+    case "edge-right":
+      return { left: maxL - PAD, top: Math.max(PAD, (hostH - boxH) / 2) };
+    case "edge-top":
+      return { left: Math.max(PAD, (hostW - boxW) / 2), top: PAD };
+    case "edge-bottom":
+    case "bottom":
+      return { left: Math.max(PAD, (hostW - boxW) / 2), top: maxT - PAD };
     case "br":
     default:
       return { left: maxL - PAD, top: maxT - PAD };
@@ -66,7 +80,11 @@ export function initPipOverlay(options) {
       show() {},
       hide() {},
       destroy() {},
+      restoreLayout() {},
+      setMinimized() {},
+      setOpacity() {},
       isPinned: () => false,
+      isMinimized: () => false,
       getLayout: () => ({ ...DEFAULT_LAYOUT }),
     };
   }
@@ -85,12 +103,34 @@ export function initPipOverlay(options) {
   const toolbar = root.querySelector("[data-pip-toolbar]");
   const pinBtn = root.querySelector("[data-pip-pin]");
   const closeBtn = root.querySelector("[data-pip-close]");
+  const minimizeBtn = root.querySelector("[data-pip-minimize]");
+  const opacityInput = root.querySelector("[data-pip-opacity]");
+  const dockBottomBtn = root.querySelector("[data-pip-dock-bottom]");
   const resizeHandle = root.querySelector("[data-pip-resize]");
   const lockBadge = root.querySelector("[data-pip-lock-badge]");
   const snapBtns = root.querySelectorAll("[data-pip-snap]");
+  const titleEl = root.querySelector("[data-pip-title]");
+  let pillEl = root.querySelector("[data-pip-pill]");
+
+  if (!pillEl) {
+    pillEl = document.createElement("button");
+    pillEl.type = "button";
+    pillEl.className = "pip-pill";
+    pillEl.setAttribute("data-pip-pill", "");
+    pillEl.hidden = true;
+    pillEl.innerHTML = `<i class="fa-solid fa-video"></i><span>Webcam</span>`;
+    root.appendChild(pillEl);
+  }
 
   function hostRect() {
     return host.getBoundingClientRect();
+  }
+
+  function applyOpacityUi() {
+    const op = clamp(Number(layout.opacity) || 1, 0.25, 1);
+    layout.opacity = op;
+    root.style.setProperty("--pip-opacity", String(op));
+    if (opacityInput) opacityInput.value = String(Math.round(op * 100));
   }
 
   function applyPinnedUi() {
@@ -101,11 +141,28 @@ export function initPipOverlay(options) {
       pinBtn.setAttribute("aria-pressed", layout.pinned ? "true" : "false");
     }
     if (lockBadge) lockBadge.hidden = !layout.pinned;
-    root.style.cursor = layout.pinned ? "default" : "move";
+    root.style.cursor = layout.pinned || layout.minimized ? "default" : "move";
+  }
+
+  function applyMinimizedUi() {
+    root.classList.toggle("is-minimized", !!layout.minimized);
+    if (pillEl) pillEl.hidden = !layout.minimized;
+    if (iframe) iframe.style.visibility = layout.minimized ? "hidden" : "";
+    if (resizeHandle) resizeHandle.hidden = !!layout.minimized;
+    if (toolbar) toolbar.style.display = layout.minimized ? "none" : "";
+    if (minimizeBtn) {
+      minimizeBtn.title = layout.minimized ? "Restore webcam" : "Minimize to pill";
+      minimizeBtn.setAttribute("aria-pressed", layout.minimized ? "true" : "false");
+    }
+    if (titleEl) titleEl.textContent = layout.minimized ? "Webcam" : "Local Webcam";
+  }
+
+  function applyZIndex() {
+    root.style.zIndex = layout.alwaysOnTop ? "50" : "30";
   }
 
   function setIframePointerEvents(enabled) {
-    if (iframe) iframe.style.pointerEvents = enabled ? "" : "none";
+    if (iframe) iframe.style.pointerEvents = enabled && !layout.minimized ? "" : "none";
     host.querySelectorAll("iframe").forEach((f) => {
       if (f !== iframe) f.style.pointerEvents = enabled ? "" : "none";
     });
@@ -114,6 +171,24 @@ export function initPipOverlay(options) {
 
   function applyLayoutFromPixels(left, top, width, height) {
     const hr = hostRect();
+    if (layout.minimized) {
+      const w = PILL_W;
+      const h = PILL_H;
+      const l = clamp(left, PAD, Math.max(PAD, hr.width - w - PAD));
+      const t = clamp(top, PAD, Math.max(PAD, hr.height - h - PAD));
+      root.style.left = `${l}px`;
+      root.style.top = `${t}px`;
+      root.style.width = `${w}px`;
+      root.style.height = `${h}px`;
+      root.style.right = "auto";
+      root.style.bottom = "auto";
+      if (hr.width > 0 && hr.height > 0) {
+        layout.leftPct = (l / hr.width) * 100;
+        layout.topPct = (t / hr.height) * 100;
+      }
+      return;
+    }
+
     const maxW = Math.max(MIN_W, hr.width - PAD * 2);
     const maxH = Math.max(MIN_H, hr.height - PAD * 2);
     const w = clamp(width, MIN_W, maxW);
@@ -140,6 +215,17 @@ export function initPipOverlay(options) {
     const hr = hostRect();
     if (hr.width < 1 || hr.height < 1) return;
 
+    if (layout.minimized) {
+      let left = layout.leftPct != null ? (layout.leftPct / 100) * hr.width : hr.width - PILL_W - PAD;
+      let top = layout.topPct != null ? (layout.topPct / 100) * hr.height : hr.height - PILL_H - PAD;
+      applyLayoutFromPixels(left, top, PILL_W, PILL_H);
+      applyPinnedUi();
+      applyMinimizedUi();
+      applyOpacityUi();
+      applyZIndex();
+      return;
+    }
+
     const maxW = Math.max(MIN_W, hr.width - PAD * 2);
     const maxH = Math.max(MIN_H, hr.height - PAD * 2);
     let w = ((layout.widthPct || DEFAULT_LAYOUT.widthPct) / 100) * hr.width;
@@ -161,6 +247,9 @@ export function initPipOverlay(options) {
 
     applyLayoutFromPixels(left, top, w, h);
     applyPinnedUi();
+    applyMinimizedUi();
+    applyOpacityUi();
+    applyZIndex();
   }
 
   function persist() {
@@ -173,12 +262,38 @@ export function initPipOverlay(options) {
     persist();
   }
 
+  function setMinimized(minimized) {
+    layout.minimized = !!minimized;
+    applyMinimizedUi();
+    restoreLayout();
+    persist();
+  }
+
+  function setOpacity(opacity) {
+    layout.opacity = clamp(Number(opacity) || 1, 0.25, 1);
+    applyOpacityUi();
+    persist();
+  }
+
   function snap(corner) {
     if (layout.pinned) return;
     layout.corner = corner;
+    layout.minimized = false;
+    applyMinimizedUi();
     const hr = hostRect();
-    const w = root.offsetWidth || ((layout.widthPct / 100) * hr.width);
-    const h = root.offsetHeight || ((layout.heightPct / 100) * hr.height);
+    let w = root.offsetWidth || (layout.widthPct / 100) * hr.width;
+    let h = root.offsetHeight || (layout.heightPct / 100) * hr.height;
+    if (corner === "edge-bottom" || corner === "bottom") {
+      w = clamp(hr.width * 0.42, MIN_W, hr.width - PAD * 2);
+      h = clamp(hr.height * 0.28, MIN_H, hr.height - PAD * 2);
+      layout.widthPct = (w / hr.width) * 100;
+      layout.heightPct = (h / hr.height) * 100;
+    } else if (corner === "edge-right" || corner === "edge-left") {
+      w = clamp(hr.width * 0.28, MIN_W, hr.width - PAD * 2);
+      h = clamp(hr.height * 0.45, MIN_H, hr.height - PAD * 2);
+      layout.widthPct = (w / hr.width) * 100;
+      layout.heightPct = (h / hr.height) * 100;
+    }
     const pos = cornerPosition(hr.width, hr.height, w, h, corner);
     applyLayoutFromPixels(pos.left, pos.top, w, h);
     persist();
@@ -187,7 +302,7 @@ export function initPipOverlay(options) {
   function onDragStart(e) {
     if (layout.pinned) return;
     if (e.button != null && e.button !== 0) return;
-    if (e.target.closest("button, [data-pip-resize], a, input, select")) return;
+    if (e.target.closest("button, [data-pip-resize], a, input, select, [data-pip-opacity]")) return;
 
     e.preventDefault();
     dragging = true;
@@ -206,7 +321,7 @@ export function initPipOverlay(options) {
   }
 
   function onResizeStart(e) {
-    if (layout.pinned) return;
+    if (layout.pinned || layout.minimized) return;
     if (e.button != null && e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -242,8 +357,10 @@ export function initPipOverlay(options) {
 
     if (resizing) {
       const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      applyLayoutFromPixels(startLeft, startTop, startW + dx, startH + dy);
+      // Lock ~16:9 while resizing so the stream isn't forced into a squat crop box.
+      const nextW = Math.max(MIN_W, startW + dx);
+      const nextH = Math.max(MIN_H, nextW * (9 / 16));
+      applyLayoutFromPixels(startLeft, startTop, nextW, nextH);
       layout.corner = null;
     }
   }
@@ -272,11 +389,35 @@ export function initPipOverlay(options) {
     if (typeof onClose === "function") onClose();
   }
 
+  function onMinimizeClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMinimized(!layout.minimized);
+  }
+
+  function onPillClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMinimized(false);
+  }
+
   function onSnapClick(e) {
     e.preventDefault();
     e.stopPropagation();
     const corner = e.currentTarget.getAttribute("data-pip-snap");
     if (corner) snap(corner);
+  }
+
+  function onOpacityInput(e) {
+    e.stopPropagation();
+    const pct = Number(e.currentTarget.value);
+    setOpacity((Number.isFinite(pct) ? pct : 100) / 100);
+  }
+
+  function onDockBottomClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    snap("edge-bottom");
   }
 
   const dragSurface = toolbar || root;
@@ -287,6 +428,10 @@ export function initPipOverlay(options) {
   if (resizeHandle) resizeHandle.addEventListener("pointerdown", onResizeStart);
   if (pinBtn) pinBtn.addEventListener("click", onPinClick);
   if (closeBtn) closeBtn.addEventListener("click", onCloseClick);
+  if (minimizeBtn) minimizeBtn.addEventListener("click", onMinimizeClick);
+  if (pillEl) pillEl.addEventListener("click", onPillClick);
+  if (opacityInput) opacityInput.addEventListener("input", onOpacityInput);
+  if (dockBottomBtn) dockBottomBtn.addEventListener("click", onDockBottomClick);
   snapBtns.forEach((btn) => btn.addEventListener("click", onSnapClick));
 
   let ro = null;
@@ -317,22 +462,32 @@ export function initPipOverlay(options) {
     if (resizeHandle) resizeHandle.removeEventListener("pointerdown", onResizeStart);
     if (pinBtn) pinBtn.removeEventListener("click", onPinClick);
     if (closeBtn) closeBtn.removeEventListener("click", onCloseClick);
+    if (minimizeBtn) minimizeBtn.removeEventListener("click", onMinimizeClick);
+    if (pillEl) pillEl.removeEventListener("click", onPillClick);
+    if (opacityInput) opacityInput.removeEventListener("input", onOpacityInput);
+    if (dockBottomBtn) dockBottomBtn.removeEventListener("click", onDockBottomClick);
     snapBtns.forEach((btn) => btn.removeEventListener("click", onSnapClick));
     window.removeEventListener("resize", restoreLayout);
     if (ro) ro.disconnect();
   }
 
   applyPinnedUi();
+  applyMinimizedUi();
+  applyOpacityUi();
+  applyZIndex();
   restoreLayout();
 
   return {
     setPinned,
+    setMinimized,
+    setOpacity,
     snap,
     show,
     hide,
     destroy,
     restoreLayout,
     isPinned: () => !!layout.pinned,
+    isMinimized: () => !!layout.minimized,
     getLayout: () => ({ ...layout }),
   };
 }

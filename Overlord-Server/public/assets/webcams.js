@@ -7,19 +7,77 @@ const count = document.getElementById("tileCount");
 const stopAll = document.getElementById("stopAll");
 const activeTiles = new Map();
 const removalTimers = new Map();
+let focusSession = 0;
+let focusPoll = null;
+
+function tileWebcamUrl(clientId) {
+  return `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1`;
+}
+
 function syncLayout() {
   const active = [...activeTiles.values()].filter((tile) => !tile.classList.contains("is-stopped"));
   grid.dataset.count = String(active.length);
   grid.classList.toggle("webcam-tiles--many", active.length > 12);
+  grid.classList.toggle("is-focused", active.length === 1 && activeTiles.size > 1);
   count.textContent = `${active.length} LIVE`;
   stopAll.disabled = active.length === 0;
 }
+
 function stopTile(tile) {
   clearTileRemoval(tile.dataset.clientId);
   const frame = tile.querySelector("iframe");
   frame.src = "about:blank";
   tile.classList.add("is-stopped");
   syncLayout();
+}
+
+function startTile(tile) {
+  const clientId = tile.dataset.clientId;
+  if (!clientId) return;
+  clearTileRemoval(clientId);
+  const frame = tile.querySelector("iframe");
+  tile.classList.remove("is-stopped");
+  frame.src = tileWebcamUrl(clientId);
+  setTileState(tile, "connecting");
+  syncLayout();
+}
+
+function stopOtherTiles(selectedId) {
+  for (const [id, tile] of activeTiles) {
+    if (id !== selectedId && !tile.classList.contains("is-stopped")) stopTile(tile);
+  }
+}
+
+function restoreAllTiles() {
+  for (const tile of activeTiles.values()) {
+    if (tile.classList.contains("is-stopped")) startTile(tile);
+  }
+  grid.classList.remove("is-focused");
+  syncLayout();
+}
+
+function clearFocusWatch() {
+  if (focusPoll) {
+    clearInterval(focusPoll);
+    focusPoll = null;
+  }
+}
+
+function watchFocusedViewer(win, session) {
+  clearFocusWatch();
+  focusPoll = setInterval(() => {
+    if (session !== focusSession) {
+      clearFocusWatch();
+      return;
+    }
+    if (!win || win.closed) {
+      clearFocusWatch();
+      if (session === focusSession) {
+        restoreAllTiles();
+        focusSession = 0;
+      }
+    }
+  }, 700);
 }
 
 function clearTileRemoval(clientId) {
@@ -43,20 +101,30 @@ function scheduleTileRemoval(tile) {
   if (!clientId || removalTimers.has(clientId)) return;
   removalTimers.set(clientId, setTimeout(() => removeTile(clientId, tile), TILE_FAILURE_TIMEOUT_MS));
 }
+
 for (const id of ids) {
   const tile = document.createElement("article");
   tile.className = "webcam-tile";
   tile.dataset.clientId = id;
-  tile.innerHTML = `<button class="tile-expand" title="Open in viewer" aria-label="Open webcam in viewer"><i class="fa-solid fa-expand"></i></button><span class="tile-client">${id.slice(0, 12)}</span><span class="tile-status"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting</span><span class="tile-ping"></span><button class="tile-stop" title="Stop webcam" aria-label="Stop webcam"><i class="fa-solid fa-stop"></i></button><iframe title="Webcam ${id}" src="/webcam?clientId=${encodeURIComponent(id)}&embedded=1"></iframe>`;
+  tile.innerHTML = `<button class="tile-expand" title="Open in viewer" aria-label="Open webcam in viewer"><i class="fa-solid fa-expand"></i></button><span class="tile-client">${id.slice(0, 12)}</span><span class="tile-status"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting</span><span class="tile-ping"></span><button class="tile-stop" title="Stop webcam" aria-label="Stop webcam"><i class="fa-solid fa-stop"></i></button><iframe title="Webcam ${id}" src="${tileWebcamUrl(id)}"></iframe>`;
   tile.querySelector(".tile-stop").onclick = (event) => { event.stopPropagation(); stopTile(tile); };
   tile.querySelector(".tile-expand").onclick = () => {
-    for (const t of activeTiles.values()) stopTile(t);
-    window.open(`/viewer?clientId=${encodeURIComponent(id)}&mode=webcam&transition=1`, "_blank");
+    const viewerUrl = `/viewer?clientId=${encodeURIComponent(id)}&mode=webcam&transition=1&fromArray=1`;
+    const win = window.open(viewerUrl, "_blank");
+    if (!win) return;
+    const session = ++focusSession;
+    stopOtherTiles(id);
+    watchFocusedViewer(win, session);
   };
   activeTiles.set(id, tile);
   grid.append(tile);
 }
-stopAll.onclick = () => { for (const tile of activeTiles.values()) stopTile(tile); grid.classList.remove("is-focused"); };
+stopAll.onclick = () => {
+  clearFocusWatch();
+  focusSession = 0;
+  for (const tile of activeTiles.values()) stopTile(tile);
+  grid.classList.remove("is-focused");
+};
 syncLayout();
 
 function updateTileUi(tile, state) {
@@ -149,15 +217,22 @@ const tileStatusInterval = setInterval(refreshTileStatus, 8000);
 
 window.addEventListener("message", (event) => {
   const msg = event.data;
-  if (msg && msg.type === "webcam_status" && msg.clientId) {
+  if (!msg || typeof msg !== "object") return;
+  if (msg.type === "webcam_status" && msg.clientId) {
     const tile = activeTiles.get(msg.clientId);
     if (tile && !tile.classList.contains("is-stopped")) {
       setTileState(tile, msg.status);
     }
   }
+  if (msg.type === "webcam_array_viewer_closed" && focusSession) {
+    clearFocusWatch();
+    restoreAllTiles();
+    focusSession = 0;
+  }
 });
 
 window.addEventListener("pagehide", () => {
   clearInterval(tileStatusInterval);
+  clearFocusWatch();
   for (const clientId of [...removalTimers.keys()]) clearTileRemoval(clientId);
 });

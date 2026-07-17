@@ -647,6 +647,13 @@ function buildPanel(clientId) {
   const panel = document.createElement("div");
   panel.className = "sp-inner";
 
+  const home = document.createElement("a");
+  home.className = "sp-item sp-home";
+  home.href = "/";
+  home.title = "Clients";
+  home.innerHTML = `<i class="fa-solid fa-house" style="color:#818cf8"></i><span>Clients</span>`;
+  panel.appendChild(home);
+
   /* ---- Static groups ---- */
   for (const group of PANEL_GROUPS) {
     const section = document.createElement("div");
@@ -662,7 +669,16 @@ function buildPanel(clientId) {
     } else {
       toggle.innerHTML = `<i class="${group.icon} sp-group-icon" style="color:${group.color}"></i><span class="sp-group-label">${group.label}</span><i class="fa-solid fa-chevron-right sp-chevron"></i>`;
     }
-    toggle.addEventListener("click", () => section.classList.toggle("is-open"));
+    toggle.title = group.label;
+    toggle.addEventListener("click", () => {
+      const rail = section.closest(".side-panel")?.classList.contains("is-collapsed");
+      if (rail) {
+        section.classList.toggle("is-rail-open");
+        section.classList.toggle("is-open", section.classList.contains("is-rail-open"));
+        return;
+      }
+      section.classList.toggle("is-open");
+    });
     section.appendChild(toggle);
 
     /* Items container */
@@ -680,6 +696,7 @@ function buildPanel(clientId) {
       const btn = document.createElement("button");
       btn.className = "sp-item";
       btn.type = "button";
+      btn.title = item.label;
       btn.innerHTML = `<i class="${item.icon}" style="color:${item.color}"></i><span>${item.label}</span>`;
 
       if (item.open) {

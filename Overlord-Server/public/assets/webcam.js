@@ -48,9 +48,22 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     return webrtcMode ? String(webrtcMode.value || "off") : "off";
   }
   function setWebrtcViewActive(active) {
-    if (canvas) canvas.style.display = active ? "none" : "block";
-    if (webrtcVideo) webrtcVideo.style.display = active ? "block" : "none";
+    if (canvas) {
+      canvas.classList.toggle("is-hidden", !!active);
+      canvas.style.display = active ? "none" : "block";
+    }
+    if (webrtcVideo) {
+      webrtcVideo.classList.toggle("is-active", !!active);
+      webrtcVideo.style.display = active ? "block" : "none";
+    }
   }
+
+  /** No-op for embedded tiles (CSS fills the cell). Standalone page keeps natural scale via HTML. */
+  function applyMediaAspect(_width, _height) {
+    /* intentionally empty — array layout is CSS-driven */
+  }
+
+  function syncWebrtcVideoAspect() {}
 
   clientLabel.textContent = clientId;
 
@@ -314,7 +327,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     return {
       camera: Number(cameraSelect?.value ?? savedCameraIndex ?? 0),
       fps: Number(fpsInput?.value || 30),
-      resolution: Number(resolutionSelect?.value || 480),
+      resolution: Number(resolutionSelect?.value || 360),
       preferH264: !!prefersH264,
       webrtcMode: getWebrtcMode(),
       audio: !!audioCtrl?.checked,
@@ -345,7 +358,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   setCodecModeLabel(prefersH264 ? "h264" : "jpeg", "preferred");
 
   function pushVideoSettings() {
-    const maxHeight = Number(resolutionSelect?.value || 480);
+    const maxHeight = Number(resolutionSelect?.value || 360);
     const codec = prefersH264 ? "h264" : "jpeg";
     console.debug("webcam: pushVideoSettings maxHeight=", maxHeight, "codec=", codec);
     setCodecModeLabel(codec, "requested");
@@ -499,6 +512,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
           if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
             canvas.width = width;
             canvas.height = height;
+            applyMediaAspect(width, height);
           }
           try {
             ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
@@ -638,6 +652,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
+        applyMediaAspect(bitmap.width, bitmap.height);
       }
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       hasRenderedFrame = true;
@@ -904,6 +919,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   window.addEventListener("beforeunload", stopOnExit);
   window.addEventListener("pagehide", stopOnExit);
   webrtcVideo?.addEventListener("timeupdate", recordWebrtcFrame);
+  webrtcVideo?.addEventListener("loadedmetadata", syncWebrtcVideoAspect);
+  webrtcVideo?.addEventListener("resize", syncWebrtcVideoAspect);
+  webrtcVideo?.addEventListener("playing", syncWebrtcVideoAspect);
+  applyMediaAspect(canvas?.width || 1280, canvas?.height || 720);
 
   refreshCameras.addEventListener("click", () => {
     requestCameraList();

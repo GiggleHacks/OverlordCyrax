@@ -4,10 +4,13 @@ import { initPipOverlay } from "./pip-overlay.js";
 const params = new URLSearchParams(location.search);
 const clientId = params.get("clientId") || "";
 const allowedModes = new Set(["webcam", "desktop", "split", "pip"]);
-let mode = allowedModes.has(params.get("mode")) ? params.get("mode") : "webcam";
+// Legacy "dock" / "space" URLs map to split (one clear side-by-side layout).
+const rawMode = params.get("mode") === "dock" ? "split" : params.get("mode");
+let mode = allowedModes.has(rawMode) ? rawMode : "webcam";
 
 /* Side action panel */
-initSidePanel(clientId, document.getElementById("sidePanel"));
+const sidePanelRoot = document.getElementById("sidePanel");
+initSidePanel(clientId, sidePanelRoot);
 const panels = document.getElementById("viewerPanels");
 const webcam = document.getElementById("viewerWebcam");
 const desktop = document.getElementById("viewerDesktop");
@@ -33,10 +36,25 @@ const camH264 = document.getElementById("viewerCamH264");
 
 idLabel.textContent = clientId.slice(0, 12) || "unknown";
 const transition = params.get("transition") || "";
+const fromArray = params.get("fromArray") === "1";
 // Webcam-only mode keeps in-frame controls; split/pip use the parent bar (no embedded chrome).
 const webcamUrlFull = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&controls=1${transition ? "&transition=1" : ""}`;
 const webcamUrlBar = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1${transition ? "&transition=1" : ""}`;
 const desktopUrl = `/remotedesktop?clientId=${encodeURIComponent(clientId)}&embedded=1`;
+
+function notifyArrayViewerClosed() {
+  if (!fromArray || !clientId) return;
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: "webcam_array_viewer_closed", clientId }, location.origin);
+    }
+  } catch {
+    /* ignore cross-origin / closed opener */
+  }
+}
+
+window.addEventListener("pagehide", notifyArrayViewerClosed);
+window.addEventListener("beforeunload", notifyArrayViewerClosed);
 
 function ensureFrame(frame, url) {
   if (!frame) return;
@@ -81,6 +99,17 @@ function setWebcamBarVisible(visible) {
     camSettingsMenu.hidden = true;
     camSettingsBtn?.setAttribute("aria-expanded", "false");
   }
+}
+
+function webcamNeedsParentBar(m) {
+  return m === "split" || m === "pip";
+}
+
+function applySplitColumns() {
+  if (!panels || mode !== "split") return;
+  // Desktop left (primary), webcam right — one clear side-by-side layout.
+  panels.style.gridTemplateColumns = "minmax(280px, 7fr) 6px minmax(220px, 3fr)";
+  panels.style.gridTemplateRows = "";
 }
 
 function updateCamStatusUi(status, fps) {
@@ -150,14 +179,27 @@ function applySettingsFromChild(settings) {
   if (camH264 && typeof settings.preferH264 === "boolean") camH264.checked = settings.preferH264;
 }
 
-const sidePanelEl = document.getElementById("sidePanel");
+const sidePanelEl = sidePanelRoot;
+const sideCollapseBtn = document.getElementById("sidePanelCollapse");
 const SIDE_WIDTH_KEY = "overlord_side_panel_width_v1";
+const SIDE_COLLAPSED_KEY = "overlord_side_panel_collapsed_v1";
 const DESKTOP_LAYOUT_KEY = "overlord_desktop_layout_v1";
 const SIDE_MIN = 140;
 const SIDE_MAX = 420;
 const SIDE_DEFAULT = 230;
+const SIDE_RAIL = 52;
+let sideCollapsed = false;
+let sideExpandedWidth = SIDE_DEFAULT;
 
 function applySidePanelWidth(px) {
+  if (sideCollapsed) {
+    document.documentElement.style.setProperty("--side-panel-width", `${SIDE_RAIL}px`);
+    if (sidePanelEl) {
+      sidePanelEl.style.width = `${SIDE_RAIL}px`;
+      sidePanelEl.style.minWidth = `${SIDE_RAIL}px`;
+    }
+    return SIDE_RAIL;
+  }
   const w = Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(px)));
   document.documentElement.style.setProperty("--side-panel-width", `${w}px`);
   if (sidePanelEl) {
@@ -167,17 +209,45 @@ function applySidePanelWidth(px) {
   return w;
 }
 
+function setSideCollapsed(collapsed) {
+  sideCollapsed = !!collapsed;
+  document.body.classList.toggle("viewer-side-collapsed", sideCollapsed);
+  sidePanelEl?.classList.toggle("is-collapsed", sideCollapsed);
+  if (sideCollapseBtn) {
+    sideCollapseBtn.setAttribute("aria-expanded", sideCollapsed ? "false" : "true");
+    sideCollapseBtn.title = sideCollapsed ? "Expand sidebar" : "Collapse sidebar";
+    sideCollapseBtn.setAttribute("aria-label", sideCollapseBtn.title);
+    const icon = sideCollapseBtn.querySelector("i");
+    if (icon) icon.className = sideCollapsed ? "fa-solid fa-angles-right" : "fa-solid fa-angles-left";
+  }
+  if (sideCollapsed) {
+    applySidePanelWidth(SIDE_RAIL);
+  } else {
+    applySidePanelWidth(sideExpandedWidth);
+  }
+  try {
+    localStorage.setItem(SIDE_COLLAPSED_KEY, sideCollapsed ? "1" : "0");
+  } catch {}
+  if (typeof pip !== "undefined" && mode === "pip") {
+    requestAnimationFrame(() => pip.restoreLayout());
+  }
+}
+
 function loadSidePanelWidth() {
   try {
     const raw = localStorage.getItem(SIDE_WIDTH_KEY);
     const n = raw ? Number(raw) : SIDE_DEFAULT;
-    return Number.isFinite(n) ? applySidePanelWidth(n) : applySidePanelWidth(SIDE_DEFAULT);
+    sideExpandedWidth = Number.isFinite(n) ? Math.max(SIDE_MIN, Math.min(SIDE_MAX, n)) : SIDE_DEFAULT;
   } catch {
-    return applySidePanelWidth(SIDE_DEFAULT);
+    sideExpandedWidth = SIDE_DEFAULT;
   }
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem(SIDE_COLLAPSED_KEY) === "1";
+  } catch {}
+  setSideCollapsed(collapsed);
+  return sideCollapsed ? SIDE_RAIL : sideExpandedWidth;
 }
-
-loadSidePanelWidth();
 
 const pip = initPipOverlay({
   root: pipOverlayEl,
@@ -187,12 +257,18 @@ const pip = initPipOverlay({
     unloadFrame(pipWebcam);
     document.body.classList.remove("viewer-pip-active");
     updateCamStatusUi("idle", "--");
+    // Stay on desktop when floating cam is closed — never jump to split.
+    if (mode === "pip") setMode("desktop");
   },
 });
 
+sideCollapseBtn?.addEventListener("click", () => setSideCollapsed(!sideCollapsed));
+loadSidePanelWidth();
+
 function setMode(nextMode) {
   const prev = mode;
-  mode = allowedModes.has(nextMode) ? nextMode : "webcam";
+  const requested = nextMode === "dock" ? "split" : nextMode;
+  mode = allowedModes.has(requested) ? requested : "webcam";
   panels.dataset.mode = mode;
   if (prev !== mode) {
     panels.style.gridTemplateColumns = "";
@@ -215,7 +291,7 @@ function setMode(nextMode) {
   const needsWebcam = mode === "webcam" || mode === "split";
   const needsDesktop = mode === "desktop" || mode === "split" || mode === "pip";
   const needsPip = mode === "pip";
-  const showBar = mode === "split" || mode === "pip";
+  const showBar = webcamNeedsParentBar(mode);
 
   if (needsWebcam) {
     ensureFrame(webcam, mode === "split" ? webcamUrlBar : webcamUrlFull);
@@ -247,6 +323,10 @@ function setMode(nextMode) {
     else clearDesktopInset();
   }
 
+  if (mode === "split") {
+    applySplitColumns();
+  }
+
   setWebcamBarVisible(showBar);
   if (showBar) {
     updateCamStatusUi("connecting", "--");
@@ -255,7 +335,9 @@ function setMode(nextMode) {
     setTimeout(() => postToWebcam({ type: "webcam_cmd", action: "ping" }), 1500);
   }
 
-  history.replaceState(null, "", `/viewer?clientId=${encodeURIComponent(clientId)}&mode=${mode}`);
+  const next = new URLSearchParams({ clientId, mode });
+  if (fromArray) next.set("fromArray", "1");
+  history.replaceState(null, "", `/viewer?${next}`);
 }
 
 document.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
@@ -393,7 +475,8 @@ divider?.addEventListener("mousedown", (e) => {
   e.preventDefault();
   isDragging = true;
   startPos = e.clientX;
-  startSize = panels.querySelector(".viewer-panel-webcam").getBoundingClientRect().width;
+  // Split: desktop is the left (primary) column.
+  startSize = panels.querySelector(".viewer-panel-desktop").getBoundingClientRect().width;
   divider.classList.add("is-dragging");
   document.body.style.cursor = "col-resize";
   document.body.style.userSelect = "none";
@@ -402,6 +485,7 @@ divider?.addEventListener("mousedown", (e) => {
 
 sideResize?.addEventListener("pointerdown", (e) => {
   if (e.button != null && e.button !== 0) return;
+  if (sideCollapsed) return;
   e.preventDefault();
   sideDragging = true;
   startPos = e.clientX;
@@ -436,6 +520,7 @@ desktopResize?.addEventListener("pointerdown", (e) => {
 document.addEventListener("pointermove", (e) => {
   if (sideDragging) {
     const next = applySidePanelWidth(startSize + (e.clientX - startPos));
+    sideExpandedWidth = next;
     try {
       localStorage.setItem(SIDE_WIDTH_KEY, String(next));
     } catch {}
@@ -460,6 +545,7 @@ document.addEventListener("mousemove", (e) => {
   let newFirst = startSize + (pos - startPos);
   newFirst = Math.max(minSize, Math.min(newFirst, totalSize - dividerSize - minSize));
   const second = totalSize - newFirst - dividerSize;
+  // Split: left column is desktop, right is webcam.
   panels.style.gridTemplateColumns = `${newFirst}px ${dividerSize}px ${second}px`;
 });
 
