@@ -1,4 +1,8 @@
+const WEBCAMS_JS_VERSION = "1.4.0";
 const MAX_WEBCAM_TILES = 200;
+const TILE_GAP_PX = 8;
+// Webcam feeds are landscape; score layouts by how the feed fits the cell, not raw cell area.
+const TARGET_ASPECT = 16 / 9;
 const ids = [...new Set((new URLSearchParams(location.search).get("clientIds") || "").split(",").filter(Boolean))].slice(0, MAX_WEBCAM_TILES);
 // Only truly terminal after retries; transient stream glitches should not erase the grid.
 const TILE_FAILURE_TIMEOUT_MS = 20000;
@@ -15,18 +19,68 @@ const retryTimers = new Map();
 const retryCounts = new Map();
 let focusSession = 0;
 let focusPoll = null;
+let layoutRaf = 0;
+const resumeAfterVisibility = new Set();
 
 function tileWebcamUrl(clientId) {
   return `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1`;
 }
 
+/** Pick cols/rows that maximize visible video area inside the available viewport. */
+function bestGrid(n, width, height, gap) {
+  if (n <= 0) return { cols: 1, rows: 1 };
+  if (n === 1) return { cols: 1, rows: 1 };
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  let best = { cols: 1, rows: n, score: -Infinity };
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const cellW = (w - gap * (cols - 1)) / cols;
+    const cellH = (h - gap * (rows - 1)) / rows;
+    if (cellW <= 0 || cellH <= 0) continue;
+    // Feeds letterbox (object-fit: contain), so only the aspect-fitted area is visible.
+    // Raw cell area alone favors degenerate n×1 strip layouts on wide screens.
+    const videoW = Math.min(cellW, cellH * TARGET_ASPECT);
+    const videoH = videoW / TARGET_ASPECT;
+    const empty = cols * rows - n;
+    const fill = 1 - (empty / (cols * rows)) * 0.12;
+    const score = videoW * videoH * fill;
+    if (score > best.score) best = { cols, rows, score };
+  }
+  return best;
+}
+
+function applyViewportGrid(activeCount) {
+  if (!grid) return;
+  if (activeCount <= 0) {
+    grid.style.gridTemplateColumns = "";
+    grid.style.gridTemplateRows = "";
+    return;
+  }
+  const rect = grid.getBoundingClientRect();
+  const width = rect.width || grid.clientWidth || 1;
+  const height = rect.height || grid.clientHeight || 1;
+  const { cols, rows } = bestGrid(activeCount, width, height, TILE_GAP_PX);
+  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+}
+
 function syncLayout() {
   const active = [...activeTiles.values()].filter((tile) => !tile.classList.contains("is-stopped"));
   grid.dataset.count = String(active.length);
-  grid.classList.toggle("webcam-tiles--many", active.length > 12);
   grid.classList.toggle("is-focused", active.length === 1 && activeTiles.size > 1);
   count.textContent = `${active.length} LIVE`;
   stopAll.disabled = active.length === 0;
+  applyViewportGrid(active.length);
+}
+
+function scheduleLayout() {
+  if (layoutRaf) cancelAnimationFrame(layoutRaf);
+  layoutRaf = requestAnimationFrame(() => {
+    layoutRaf = 0;
+    const active = [...activeTiles.values()].filter((tile) => !tile.classList.contains("is-stopped"));
+    applyViewportGrid(active.length);
+  });
 }
 
 function stopTile(tile) {
@@ -51,6 +105,12 @@ function startTile(tile) {
 function stopOtherTiles(selectedId) {
   for (const [id, tile] of activeTiles) {
     if (id !== selectedId && !tile.classList.contains("is-stopped")) stopTile(tile);
+  }
+}
+
+function stopAllTiles() {
+  for (const tile of activeTiles.values()) {
+    if (!tile.classList.contains("is-stopped")) stopTile(tile);
   }
 }
 
@@ -146,7 +206,7 @@ for (const [index, id] of ids.entries()) {
     const win = window.open(viewerUrl, "_blank");
     if (!win) return;
     const session = ++focusSession;
-    stopOtherTiles(id);
+    stopAllTiles();
     watchFocusedViewer(win, session);
   };
   activeTiles.set(id, tile);
@@ -165,7 +225,29 @@ stopAll.onclick = () => {
   for (const tile of activeTiles.values()) stopTile(tile);
   grid.classList.remove("is-focused");
 };
+window.addEventListener("resize", scheduleLayout);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    resumeAfterVisibility.clear();
+    for (const [id, tile] of activeTiles) {
+      if (tile.classList.contains("is-stopped")) continue;
+      resumeAfterVisibility.add(id);
+      stopTile(tile);
+    }
+    return;
+  }
+  for (const id of resumeAfterVisibility) {
+    const tile = activeTiles.get(id);
+    if (tile) startTile(tile);
+  }
+  resumeAfterVisibility.clear();
+});
+if (typeof ResizeObserver !== "undefined" && grid) {
+  new ResizeObserver(scheduleLayout).observe(grid);
+}
 syncLayout();
+// Re-measure after first paint when flex height is final.
+requestAnimationFrame(() => requestAnimationFrame(scheduleLayout));
 
 function updateTileUi(tile, state) {
   const statusEl = tile.querySelector(".tile-status");
@@ -266,6 +348,7 @@ async function refreshTileStatus() {
     }
   } catch {}
 }
+if (count) count.title = `webcams.js v${WEBCAMS_JS_VERSION}`;
 refreshTileStatus();
 const tileStatusInterval = setInterval(refreshTileStatus, 8000);
 

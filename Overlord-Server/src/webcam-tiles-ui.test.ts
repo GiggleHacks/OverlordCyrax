@@ -18,18 +18,21 @@ describe("webcam tile failures", () => {
     expect(js).toContain("Math.min(index * 180, 4000)");
   });
 
-  test("expands selected tile without blanking the array permanently", async () => {
+  test("expands selected tile via popup only without competing array stream", async () => {
     const js = await publicAsset("webcams.js");
-    expect(js).toContain("function stopOtherTiles(selectedId)");
+    expect(js).toContain('const WEBCAMS_JS_VERSION = "1.4.0"');
+    expect(js).toContain("function stopAllTiles()");
     expect(js).toContain("function startTile(tile)");
     expect(js).toContain("function restoreAllTiles()");
     expect(js).toContain("const win = window.open(viewerUrl, \"_blank\")");
     expect(js).toContain("if (!win) return");
-    expect(js).toContain("stopOtherTiles(id)");
+    expect(js).toContain("stopAllTiles()");
     expect(js).toContain("watchFocusedViewer(win, session)");
     expect(js).toContain("fromArray=1");
     expect(js).toContain("webcam_array_viewer_closed");
     expect(js).toContain("win.closed");
+    // Expand must not leave the selected tile live in the array while the popup streams.
+    expect(js).not.toMatch(/tile-expand[\s\S]{0,400}stopOtherTiles\(id\)/);
     const viewerJs = await publicAsset("viewer.js");
     expect(viewerJs).toContain('fromArray = params.get("fromArray") === "1"');
     expect(viewerJs).toContain("webcam_array_viewer_closed");
@@ -46,6 +49,29 @@ describe("webcam tile failures", () => {
     expect(js).toContain("webrtcVideo?.addEventListener(\"timeupdate\", recordWebrtcFrame)");
     expect(js).toContain("postStatusToParent(state)");
     expect(js).toContain("noteFrameReceived");
+    expect(js).toContain("const arrayTile = embedded && !showControls");
+    expect(js).toContain("const requestedFps = arrayTile ? 15");
+    expect(js).toContain("const maxHeight = arrayTile ? 360");
+    expect(js).toContain('fallbackToJpeg("decoder_backpressure")');
+  });
+
+  test("grid layout scores fitted video area so wide screens never get strip layouts", async () => {
+    const js = await publicAsset("webcams.js");
+    expect(js).toContain("const TARGET_ASPECT = 16 / 9");
+    expect(js).toContain("function bestGrid(n, width, height, gap)");
+    expect(js).toContain("const videoW = Math.min(cellW, cellH * TARGET_ASPECT)");
+    expect(js).toContain("const videoH = videoW / TARGET_ASPECT");
+    expect(js).toContain("const score = videoW * videoH * fill");
+    // Raw cell area scoring favored degenerate n×1 strip layouts on wide screens.
+    expect(js).not.toContain("const score = cellW * cellH * fill");
+  });
+
+  test("pauses array streams while the page is hidden", async () => {
+    const js = await publicAsset("webcams.js");
+    expect(js).toContain('document.addEventListener("visibilitychange"');
+    expect(js).toContain("resumeAfterVisibility.add(id)");
+    expect(js).toContain("stopTile(tile)");
+    expect(js).toContain("startTile(tile)");
   });
 
   test("array tiles fill the iframe stage without covering canvas", async () => {
