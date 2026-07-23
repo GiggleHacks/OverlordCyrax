@@ -113,10 +113,11 @@ const QUERY_CLIENT_PAGES: QueryClientPageDef[] = [
 
 /** Client-scoped pages accessed via path /:clientId/feature */
 const PATH_CLIENT_PAGES: ClientPageDef[] = [
-  { pattern: /^\/(.+)\/console$/,    file: "console.html",    clientIdGroup: 1 },
-  { pattern: /^\/(.+)\/files$/,      file: "filebrowser.html", clientIdGroup: 1 },
-  { pattern: /^\/(.+)\/processes$/,  file: "processes.html",  clientIdGroup: 1 },
-  { pattern: /^\/(.+)\/keylogger$/,  file: "keylogger.html",  clientIdGroup: 1 },
+  { pattern: /^\/(.+)\/console$/,          file: "console.html",            clientIdGroup: 1 },
+  { pattern: /^\/(.+)\/files\/classic$/,   file: "filebrowser-classic.html", clientIdGroup: 1 },
+  { pattern: /^\/(.+)\/files$/,            file: "filebrowser.html",         clientIdGroup: 1 },
+  { pattern: /^\/(.+)\/processes$/,        file: "processes.html",           clientIdGroup: 1 },
+  { pattern: /^\/(.+)\/keylogger$/,        file: "keylogger.html",           clientIdGroup: 1 },
 ];
 
 function checkAccess(role: UserRole, access: AccessLevel): Response | null {

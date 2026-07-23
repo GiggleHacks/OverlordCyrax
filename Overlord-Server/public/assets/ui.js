@@ -33,6 +33,7 @@ const MENU_GROUPS = [
     color: "text-blue-400",
     items: [
       { label: "File Browser", icon: "fa-solid fa-folder-tree",   icolor: "text-blue-400", open: "files" },
+      { label: "Classic Explorer", icon: "fa-solid fa-folder-open", icolor: "text-amber-300", open: "files-classic" },
       { label: "Execution",    icon: "fa-solid fa-rocket",         icolor: "text-cyan-400", open: "silent-exec", id: "menu-silent-exec", hidden: true },
       { label: "WinRE Persist", icon: "fa-solid fa-shield-halved", icolor: "text-amber-400", open: "winre", windowsOnly: true },
     ],

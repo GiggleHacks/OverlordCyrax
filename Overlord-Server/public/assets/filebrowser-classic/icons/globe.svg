@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <defs>
+    <clipPath id="g">
+      <circle cx="12" cy="12" r="9.2"/>
+    </clipPath>
+  </defs>
+  <!-- sphere -->
+  <circle cx="12" cy="12" r="9.2" fill="#1d74d6" stroke="#0a3a78" stroke-width="1.4"/>
+  <g clip-path="url(#g)">
+    <!-- ocean shading -->
+    <circle cx="9.5" cy="9" r="7" fill="#3a93f0" opacity="0.55"/>
+    <!-- latitude lines -->
+    <g fill="none" stroke="#cfe8ff" stroke-width="0.8" opacity="0.85">
+      <path d="M1 12 H23"/>
+      <path d="M2.4 7.5 H21.6"/>
+      <path d="M2.4 16.5 H21.6"/>
+      <!-- longitude lines -->
+      <ellipse cx="12" cy="12" rx="4" ry="9.2"/>
+      <ellipse cx="12" cy="12" rx="8" ry="9.2"/>
+      <line x1="12" y1="2" x2="12" y2="22"/>
+    </g>
+    <!-- continents -->
+    <g fill="#36a84a" stroke="#1d7a32" stroke-width="0.5">
+      <path d="M6.5 7 q3 -1.4 5 0.2 q1.2 1.6 -0.6 2.8 q-2.6 1.4 -4.8 0.2 q-1.4 -1.6 0.4 -3.2 z"/>
+      <path d="M13.5 13.2 q2.4 -0.4 3.2 1.8 q-0.4 2.4 -3 1.8 q-1.8 -1.4 -0.2 -3.6 z"/>
+      <path d="M7 15.5 q1.6 -0.4 1.8 1 q-0.6 1.4 -2 0.8 q-0.8 -1 0.2 -1.8 z"/>
+    </g>
+  </g>
+  <!-- glossy highlight -->
+  <path d="M5.5 6.5 A9 9 0 0 1 12 3.2" fill="none" stroke="#bfe0ff" stroke-width="1.1" stroke-linecap="round" opacity="0.8"/>
+</svg>

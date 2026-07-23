@@ -40,6 +40,7 @@ const PANEL_GROUPS = [
     color: "#60a5fa",
     items: [
       { label: "File Browser", icon: "fa-solid fa-folder-tree", color: "#60a5fa", open: "files" },
+      { label: "Classic Explorer", icon: "fa-solid fa-folder-open", color: "#fbbf24", open: "files-classic" },
     ],
   },
   {
@@ -81,11 +82,36 @@ function resolveOpenUrl(clientId, target) {
     case "webcam":      return `/viewer?clientId=${clientId}&mode=webcam`;
     case "Backstage":   return `/backstage?clientId=${clientId}`;
     case "files":       return `/${clientId}/files`;
+    case "files-classic": return `/${clientId}/files/classic`;
     case "processes":   return `/${clientId}/processes`;
     case "keylogger":   return `/${clientId}/keylogger`;
     case "voice":       return `/voice?clientId=${clientId}`;
     default:            return null;
   }
+}
+
+function openFileBrowserWindow(clientId, forceSkin) {
+  let skin = forceSkin || "modern";
+  if (!forceSkin) {
+    try {
+      skin = localStorage.getItem("overlord.filebrowser.skin") || "modern";
+    } catch {}
+  }
+  if (skin === "classic") {
+    try {
+      localStorage.setItem("overlord.filebrowser.skin", "classic");
+    } catch {}
+    window.open(
+      `/${clientId}/files/classic`,
+      `overlord-fb-classic-${clientId}`,
+      "width=780,height=520,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes",
+    );
+    return;
+  }
+  try {
+    localStorage.setItem("overlord.filebrowser.skin", "modern");
+  } catch {}
+  window.open(`/${clientId}/files`, "_blank");
 }
 
 /* ──────────────────────────────────────────────────────────── */
@@ -699,7 +725,11 @@ function buildPanel(clientId) {
       btn.title = item.label;
       btn.innerHTML = `<i class="${item.icon}" style="color:${item.color}"></i><span>${item.label}</span>`;
 
-      if (item.open) {
+      if (item.open === "files") {
+        btn.addEventListener("click", () => openFileBrowserWindow(clientId));
+      } else if (item.open === "files-classic") {
+        btn.addEventListener("click", () => openFileBrowserWindow(clientId, "classic"));
+      } else if (item.open) {
         btn.addEventListener("click", () => {
           const url = resolveOpenUrl(clientId, item.open);
           if (url) window.open(url, "_blank");

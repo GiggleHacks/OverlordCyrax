@@ -2098,7 +2098,7 @@ menu.addEventListener("click", async (e) => {
     closeMenu(clearContext);
     return;
   }
-  if (open === "files") {
+  if (open === "files" || open === "files-classic") {
     const platform = detectClientPlatform(contextCard);
     if (platform !== "windows") {
       const proceed = confirm(
@@ -2109,7 +2109,27 @@ menu.addEventListener("click", async (e) => {
         return;
       }
     }
-    window.open(`/${contextCard}/files`, "_blank", "noopener");
+    let skin = open === "files-classic" ? "classic" : "modern";
+    if (open === "files") {
+      try {
+        skin = localStorage.getItem("overlord.filebrowser.skin") || "modern";
+      } catch {}
+    }
+    if (skin === "classic") {
+      try {
+        localStorage.setItem("overlord.filebrowser.skin", "classic");
+      } catch {}
+      window.open(
+        `/${contextCard}/files/classic`,
+        `overlord-fb-classic-${contextCard}`,
+        "width=780,height=520,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes",
+      );
+    } else {
+      try {
+        localStorage.setItem("overlord.filebrowser.skin", "modern");
+      } catch {}
+      window.open(`/${contextCard}/files`, "_blank", "noopener");
+    }
     closeMenu(clearContext);
     return;
   }

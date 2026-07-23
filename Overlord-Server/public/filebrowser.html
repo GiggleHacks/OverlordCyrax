@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="/assets/custom.css" />
     <script src="/vendor/highlight.js/highlight.bundle.js"></script>
     <script defer src="/vendor/msgpackr/msgpackr.js"></script>
-    <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
     <style>
       .file-item:hover {
         background-color: rgba(30, 41, 59, 0.62);
@@ -461,9 +461,19 @@
           <h1 class="text-2xl font-bold">File Browser</h1>
           <p id="client-id-header" class="mt-1 text-sm text-slate-400 font-mono">Loading client...</p>
         </div>
-        <span id="status-indicator" class="inline-flex self-start sm:self-auto items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-xs font-medium">
-          <i class="fa-solid fa-circle-notch fa-spin"></i> Connecting...
-        </span>
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            id="open-classic-btn"
+            type="button"
+            class="button ghost text-xs"
+            title="Open compact Win95/98 Classic Explorer"
+          >
+            <i class="fa-solid fa-desktop"></i><span>Classic Explorer</span>
+          </button>
+          <span id="status-indicator" class="inline-flex self-start sm:self-auto items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-xs font-medium">
+            <i class="fa-solid fa-circle-notch fa-spin"></i> Connecting...
+          </span>
+        </div>
       </div>
 
       <div class="flex gap-4">

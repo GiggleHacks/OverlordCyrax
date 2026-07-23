@@ -1,0 +1,140 @@
+{
+  "defaults": {
+    "upload": 9,
+    "error": 0,
+    "delete": 0
+  },
+  "actions": {
+    "upload": [
+      {
+        "id": "tada",
+        "label": "Tada (classic)",
+        "file": "sounds/upload/1.wav"
+      },
+      {
+        "id": "ding",
+        "label": "Ding",
+        "file": "sounds/upload/2.wav"
+      },
+      {
+        "id": "chimes",
+        "label": "Chimes",
+        "file": "sounds/upload/3.wav"
+      },
+      {
+        "id": "chimeup",
+        "label": "Chime Up (synth)",
+        "file": "sounds/upload/4.wav"
+      },
+      {
+        "id": "sparkle",
+        "label": "Sparkle (synth)",
+        "file": "sounds/upload/5.wav"
+      },
+      {
+        "id": "welcome",
+        "label": "Welcome (Win98 pad)",
+        "file": "sounds/upload/6.wav"
+      },
+      {
+        "id": "bell95",
+        "label": "Bell (Win95)",
+        "file": "sounds/upload/7.wav"
+      },
+      {
+        "id": "fanfare",
+        "label": "Tada Fanfare",
+        "file": "sounds/upload/8.wav"
+      },
+      {
+        "id": "chime7",
+        "label": "Calm Chime (Win7)",
+        "file": "sounds/upload/9.wav"
+      },
+      {
+        "id": "pop",
+        "label": "Notify Pop",
+        "file": "sounds/upload/10.wav"
+      },
+      {
+        "id": "glass",
+        "label": "Glass Shimmer",
+        "file": "sounds/upload/11.wav"
+      },
+      {
+        "id": "triad",
+        "label": "Rising Triad",
+        "file": "sounds/upload/12.wav"
+      },
+      {
+        "id": "marimba",
+        "label": "Soft Marimba",
+        "file": "sounds/upload/13.wav"
+      },
+      {
+        "id": "sparkleup",
+        "label": "Sparkle Up",
+        "file": "sounds/upload/14.wav"
+      },
+      {
+        "id": "dingdong",
+        "label": "Ding-Dong",
+        "file": "sounds/upload/15.wav"
+      }
+    ],
+    "error": [
+      {
+        "id": "chord",
+        "label": "Chord (classic)",
+        "file": "sounds/error/1.wav"
+      },
+      {
+        "id": "notify",
+        "label": "Notify",
+        "file": "sounds/error/2.wav"
+      },
+      {
+        "id": "buzz",
+        "label": "Buzz (synth)",
+        "file": "sounds/error/3.wav"
+      },
+      {
+        "id": "uhoh",
+        "label": "Uh-oh (synth)",
+        "file": "sounds/error/4.wav"
+      },
+      {
+        "id": "errblip",
+        "label": "Error Blip (synth)",
+        "file": "sounds/error/5.wav"
+      }
+    ],
+    "delete": [
+      {
+        "id": "recycle",
+        "label": "Recycle (classic)",
+        "file": "sounds/delete/1.wav"
+      },
+      {
+        "id": "logoff",
+        "label": "Logoff swoosh",
+        "file": "sounds/delete/2.wav"
+      },
+      {
+        "id": "whoosh",
+        "label": "Whoosh (synth)",
+        "file": "sounds/delete/3.wav"
+      },
+      {
+        "id": "crumple",
+        "label": "Crumple (synth)",
+        "file": "sounds/delete/4.wav"
+      },
+      {
+        "id": "downblip",
+        "label": "Down Blip (synth)",
+        "file": "sounds/delete/5.wav"
+      }
+    ]
+  }
+}

@@ -94,6 +94,24 @@ if (clientIdHeader) {
   clientIdHeader.innerHTML = `<i class="fa-solid fa-computer mr-1.5 text-sky-400"></i>${escapeHtml(clientId)}`;
 }
 
+try {
+  localStorage.setItem("overlord.filebrowser.skin", "modern");
+} catch {}
+
+const openClassicBtn = document.getElementById("open-classic-btn");
+if (openClassicBtn) {
+  openClassicBtn.addEventListener("click", () => {
+    try {
+      localStorage.setItem("overlord.filebrowser.skin", "classic");
+    } catch {}
+    window.open(
+      `/${clientId}/files/classic`,
+      `overlord-fb-classic-${clientId}`,
+      "width=780,height=520,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes",
+    );
+  });
+}
+
 let sortField = localStorage.getItem("filebrowser.sortField") || "name";
 let sortOrder = localStorage.getItem("filebrowser.sortOrder") || "asc";
 let filterType = localStorage.getItem("filebrowser.filterType") || "all";
