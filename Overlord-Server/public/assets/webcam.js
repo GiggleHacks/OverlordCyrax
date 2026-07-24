@@ -3,11 +3,15 @@ import { checkFeatureAccess } from "./feature-gate.js";
 import { WhepClient } from "./whep.js";
 import { P2PClient } from "./webrtc-p2p.js";
 import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
+import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
+
+const WEBCAM_JS_VERSION = "1.0.0";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
   const embedded = new URLSearchParams(location.search).get("embedded") === "1";
   const showControls = new URLSearchParams(location.search).get("controls") === "1";
+  const arrayTile = embedded && !showControls;
   if (!clientId) {
     alert("Missing clientId");
     return;
@@ -33,6 +37,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const codecMode = document.getElementById("codecMode");
   const viewerFps = document.getElementById("viewerFps");
   const statusEl = document.getElementById("streamStatus");
+  statusEl.title = `webcam.js v${WEBCAM_JS_VERSION}`;
   const canvas = document.getElementById("frameCanvas");
   const ctx = canvas.getContext("2d");
   const webrtcMode = document.getElementById("webrtcMode");
@@ -91,12 +96,16 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   let h264ErrorCount = 0;
   let intentionalRestart = false;
   let suppressSelectRestart = false;
+  let stallRecoveryTimer = null;
+  let stallRecoveryInProgress = false;
 
   // Array tiles: prefer JPEG — H.264 mid-stream resets under multi-tile load are a common hard error.
   let prefersH264 = !embedded && typeof VideoDecoder === "function";
   let savedCameraIndex = null;
   const STALL_MS = embedded ? 15000 : 8000;
-  const MAX_STALL_RESTARTS = embedded ? 4 : 2;
+  const MAX_STALL_RESTARTS = 3;
+  const STALL_COUNTDOWN_SEC = 3;
+  const MAX_START_RETRIES = embedded ? 3 : 3;
 
   /* ── Remote system audio while viewing webcam ── */
   const AUDIO_SAMPLE_RATE = 16000;
@@ -366,7 +375,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   setCodecModeLabel(prefersH264 ? "h264" : "jpeg", "preferred");
 
   function pushVideoSettings() {
-    const maxHeight = Number(resolutionSelect?.value || 360);
+    const maxHeight = arrayTile ? 360 : Number(resolutionSelect?.value || 360);
     const codec = prefersH264 ? "h264" : "jpeg";
     console.debug("webcam: pushVideoSettings maxHeight=", maxHeight, "codec=", codec);
     setCodecModeLabel(codec, "requested");
@@ -420,7 +429,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       return;
     }
     const maxFps = selectedDeviceMaxFps();
-    const fps = Math.max(1, Math.min(maxFps, Number(fpsInput.value) || 30));
+    const requestedFps = arrayTile ? 15 : (Number(fpsInput.value) || 30);
+    const fps = Math.max(1, Math.min(maxFps, requestedFps));
     if ((Number(fpsInput.value) || 30) > maxFps) {
       fpsInput.value = String(maxFps);
     }
@@ -554,6 +564,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
             ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
             h264ErrorCount = 0;
             stallRestartCount = 0;
+            clearStallRecovery();
             if (desiredStreaming) setStreamState("streaming", "Streaming");
           } catch (err) {
             console.warn("webcam h264 draw failed", err);
@@ -595,6 +606,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       stopping: '<i class="fa-solid fa-circle-notch fa-spin"></i>',
       streaming: '<i class="fa-solid fa-circle text-emerald-400"></i>',
       idle: '<i class="fa-solid fa-circle text-slate-400"></i>',
+      stalled: '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i>',
       offline: '<i class="fa-solid fa-plug-circle-xmark text-rose-400"></i>',
       disconnected: '<i class="fa-solid fa-link-slash text-slate-400"></i>',
       error: '<i class="fa-solid fa-circle-exclamation text-rose-400"></i>',
@@ -605,15 +617,29 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
           state === "stopping" ? "Stopping" :
             state === "offline" ? "Client offline" :
               state === "disconnected" ? "Disconnected" :
-                state === "error" ? "Error" :
-                  "Stopped");
+                state === "stalled" ? "No frames" :
+                  state === "error" ? "Error" :
+                    "Stopped");
 
     statusEl.innerHTML = `${icons[state] || icons.idle} <span>${label}</span>`;
+    const base = "inline-flex items-center gap-2 px-3 py-2 rounded-full border text-sm";
+    const styles = {
+      streaming: "bg-emerald-900/40 text-emerald-100 border-emerald-700/70",
+      starting: "bg-sky-900/40 text-sky-100 border-sky-700/70",
+      stopping: "bg-amber-900/40 text-amber-100 border-amber-700/70",
+      stalled: "bg-amber-900/40 text-amber-100 border-amber-700/70",
+      offline: "bg-rose-900/40 text-rose-100 border-rose-700/70",
+      error: "bg-rose-900/40 text-rose-100 border-rose-700/70",
+      disconnected: "bg-slate-800 text-slate-300 border-slate-700",
+      idle: "bg-slate-800 text-slate-300 border-slate-700",
+      connecting: "bg-slate-800 text-slate-300 border-slate-700",
+    };
+    statusEl.className = `${base} ${styles[state] || styles.idle}`;
 
     const wsOpen = ws && ws.readyState === WebSocket.OPEN;
-    const streamLocked = streamState === "streaming" || streamState === "starting" || streamState === "stopping";
-    startBtn.disabled = !wsOpen || streamState === "starting" || streamState === "streaming";
-    stopBtn.disabled = !wsOpen || (streamState !== "starting" && streamState !== "streaming");
+    const streamLocked = streamState === "streaming" || streamState === "starting" || streamState === "stopping" || streamState === "stalled" || stallRecoveryInProgress;
+    startBtn.disabled = !wsOpen || streamState === "starting" || streamState === "streaming" || stallRecoveryInProgress;
+    stopBtn.disabled = !wsOpen || (streamState !== "starting" && streamState !== "streaming" && streamState !== "stalled" && !stallRecoveryInProgress);
     screenshotBtn.disabled = !hasRenderedFrame;
     refreshCameras.disabled = !wsOpen;
     applyFps.disabled = !wsOpen || streamLocked;
@@ -624,10 +650,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       renderCount = 0;
       renderWindowStart = performance.now();
     }
-    postStatusToParent(state);
+    postStatusToParent(state, label);
   }
 
-  function postStatusToParent(statusOverride) {
+  function postStatusToParent(statusOverride, labelOverride) {
     if (!embedded || window.parent === window) return;
     try {
       const fpsText = viewerFps?.textContent;
@@ -636,6 +662,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         type: "webcam_status",
         clientId,
         status: statusOverride || streamState,
+        label: labelOverride || null,
         fps: Number.isFinite(fps) ? fps : null,
         devices: Array.isArray(availableDevices)
           ? availableDevices.map((d) => ({ index: d.index, name: d.name, maxFps: d.maxFps }))
@@ -645,22 +672,70 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     } catch (e) {}
   }
 
+  function clearStallRecovery() {
+    if (stallRecoveryTimer) {
+      clearTimeout(stallRecoveryTimer);
+      stallRecoveryTimer = null;
+    }
+    stallRecoveryInProgress = false;
+  }
+
+  function restartWebcamStream() {
+    intentionalRestart = true;
+    send("webcam_stop");
+    stallRecoveryTimer = setTimeout(() => {
+      stallRecoveryTimer = null;
+      intentionalRestart = false;
+      stallRecoveryInProgress = false;
+      if (!desiredStreaming) return;
+      if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
+      startStreaming(false);
+    }, 300);
+  }
+
+  function beginStallRecovery(kind) {
+    if (stallRecoveryInProgress || !desiredStreaming) return;
+    if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
+    const isStart = kind === "start";
+    const count = isStart ? startRetryCount : stallRestartCount;
+    const max = isStart ? MAX_START_RETRIES : MAX_STALL_RESTARTS;
+    if (count >= max) {
+      if (isStart) {
+        setStreamState("error", "Unable to start camera · verify the device has a camera and it is not in use by another app");
+      } else {
+        setStreamState("error", "Camera stopped delivering images");
+      }
+      return;
+    }
+    stallRecoveryInProgress = true;
+    if (isStart) startRetryCount += 1;
+    else stallRestartCount += 1;
+    const attempt = isStart ? startRetryCount : stallRestartCount;
+    let remaining = STALL_COUNTDOWN_SEC;
+    const tick = () => {
+      if (!desiredStreaming || streamState === "offline" || streamState === "disconnected") {
+        clearStallRecovery();
+        return;
+      }
+      if (remaining > 0) {
+        setStreamState("stalled", `Retrying in ${remaining}...`);
+        remaining -= 1;
+        stallRecoveryTimer = setTimeout(tick, 1000);
+        return;
+      }
+      stallRecoveryTimer = null;
+      setStreamState("starting", `Restarting camera · attempt ${attempt}/${max}`);
+      restartWebcamStream();
+    };
+    tick();
+  }
+
   function armFirstFrameWatch() {
     if (firstFrameTimer) clearTimeout(firstFrameTimer);
     firstFrameTimer = setTimeout(() => {
       if (!desiredStreaming || hasRenderedFrame) return;
-      if (startRetryCount < (embedded ? 3 : 1)) {
-        startRetryCount += 1;
-        setStreamState("starting", "Camera is slow to respond · retrying automatically");
-        intentionalRestart = true;
-        send("webcam_stop");
-        setTimeout(() => {
-          intentionalRestart = false;
-          startStreaming(false);
-        }, 250);
-      } else {
-        setStreamState("error", "Unable to start camera · verify the device has a camera and it is not in use by another app");
-      }
+      if (stallRecoveryInProgress) return;
+      beginStallRecovery("start");
     }, embedded ? 10000 : 6000);
   }
 
@@ -668,22 +743,17 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (renderWatchTimer) clearInterval(renderWatchTimer);
     renderWatchTimer = setInterval(() => {
       if (!desiredStreaming) return;
+      if (stallRecoveryInProgress) return;
       if (streamState !== "streaming" && streamState !== "starting") return;
       const last = Math.max(lastRenderedFrameAt, lastFrameReceivedAt);
       if (!last) return;
       if (performance.now() - last <= STALL_MS) return;
-      if (stallRestartCount < MAX_STALL_RESTARTS) {
-        stallRestartCount += 1;
-        setStreamState("starting", "Stream stalled · reconnecting");
-        intentionalRestart = true;
-        send("webcam_stop");
-        setTimeout(() => {
-          intentionalRestart = false;
-          startStreaming(false);
-        }, 300);
+      if (stallRestartCount >= MAX_STALL_RESTARTS) {
+        setStreamState("error", "Camera stopped delivering images");
         return;
       }
-      setStreamState("error", "Camera stopped delivering images");
+      setStreamState("stalled", "No frames");
+      beginStallRecovery("stall");
     }, 1000);
   }
 
@@ -694,6 +764,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     lastFrameReceivedAt = lastRenderedFrameAt;
     startRetryCount = 0;
     stallRestartCount = 0;
+    clearStallRecovery();
     if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
     if (streamState !== "streaming") setStreamState("streaming", "Streaming");
   }
@@ -727,6 +798,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       lastRenderedFrameAt = performance.now();
       startRetryCount = 0;
       stallRestartCount = 0;
+      clearStallRecovery();
       if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
       bitmap.close();
       updateViewerFps();
@@ -761,6 +833,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         fallbackToJpeg("decoder_unavailable");
         return;
       }
+      if (isVideoDecoderBackpressured(videoDecoder, 2)) {
+        fallbackToJpeg("decoder_backpressure");
+        return;
+      }
       try {
         const isKey = isH264KeyFrame(payload);
         const chunk = new EncodedVideoChunk({
@@ -768,7 +844,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
           timestamp: h264TimestampUs,
           data: payload,
         });
-        h264TimestampUs += 66_666;
+        const configuredFps = arrayTile ? 15 : Math.max(1, Number(fpsInput?.value) || 30);
+        h264TimestampUs += Math.floor(1_000_000 / configuredFps);
         videoDecoder.decode(chunk);
         updateViewerFps();
       } catch (err) {
@@ -873,17 +950,20 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (msg.type === "status") {
       if (msg.status === "offline") {
         desiredStreaming = false;
-        setStreamState("offline", msg.reason || "Client offline");
+        clearStallRecovery();
+        stallRestartCount = 0;
+        startRetryCount = 0;
+        setStreamState("offline", "Client offline");
       } else if (msg.status === "starting") {
-        if (desiredStreaming && streamState !== "streaming") {
+        if (desiredStreaming && streamState !== "streaming" && !stallRecoveryInProgress) {
           setStreamState("starting", "Opening camera · waiting for response");
         }
       } else if (msg.status === "stopped") {
         // Ignore stop acks during intentional reconnect (first-frame / stall recovery).
-        if (intentionalRestart || desiredStreaming) return;
+        if (intentionalRestart || desiredStreaming || stallRecoveryInProgress) return;
         setStreamState("idle", "Stopped");
       } else if (msg.status === "connecting" || msg.status === "online") {
-        if (!desiredStreaming && streamState !== "streaming" && streamState !== "starting") {
+        if (!desiredStreaming && streamState !== "streaming" && streamState !== "starting" && streamState !== "stalled") {
           setStreamState("idle", "Ready");
         }
       }
@@ -981,11 +1061,17 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   startBtn.addEventListener("click", () => {
+    clearStallRecovery();
+    stallRestartCount = 0;
+    startRetryCount = 0;
     startStreaming();
   });
 
   stopBtn.addEventListener("click", () => {
     desiredStreaming = false;
+    clearStallRecovery();
+    stallRestartCount = 0;
+    startRetryCount = 0;
     if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
     if (renderWatchTimer) { clearInterval(renderWatchTimer); renderWatchTimer = null; }
     send("webcam_stop");

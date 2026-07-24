@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeMessageBox, normalizeOpenUrl } from "./client-command-routes";
+import {
+  buildCursorBigScript,
+  buildMessageBoxScript,
+  buildOpenUrlScript,
+  normalizeCursorBig,
+  normalizeMessageBox,
+  normalizeOpenUrl,
+  psSingleQuote,
+} from "./client-command-routes";
 
 describe("normalizeOpenUrl", () => {
   test("accepts https urls", () => {
@@ -12,6 +20,28 @@ describe("normalizeOpenUrl", () => {
     const result = normalizeOpenUrl("example.com");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.url).toBe("https://example.com/");
+  });
+
+  test("adds https for www hosts", () => {
+    const result = normalizeOpenUrl("www.example.com");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.url).toBe("https://www.example.com/");
+  });
+
+  test("repairs http: and https: without slashes", () => {
+    const httpResult = normalizeOpenUrl("http:example.com/path");
+    expect(httpResult.ok).toBe(true);
+    if (httpResult.ok) expect(httpResult.url).toBe("http://example.com/path");
+
+    const httpsResult = normalizeOpenUrl("https:www.example.com");
+    expect(httpsResult.ok).toBe(true);
+    if (httpsResult.ok) expect(httpsResult.url).toBe("https://www.example.com/");
+  });
+
+  test("handles protocol-relative urls", () => {
+    const result = normalizeOpenUrl("//example.com/x");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.url).toBe("https://example.com/x");
   });
 
   test("rejects non-http schemes", () => {
@@ -54,5 +84,57 @@ describe("normalizeMessageBox", () => {
   test("rejects invalid icon", () => {
     const result = normalizeMessageBox({ text: "x", icon: "skull" });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("normalizeCursorBig", () => {
+  test("defaults duration to 30 seconds", () => {
+    const result = normalizeCursorBig({});
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.durationSec).toBe(30);
+  });
+
+  test("accepts duration within range", () => {
+    const result = normalizeCursorBig({ durationSec: 60 });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.durationSec).toBe(60);
+  });
+
+  test("rejects duration below minimum", () => {
+    const result = normalizeCursorBig({ durationSec: 2 });
+    expect(result.ok).toBe(false);
+  });
+
+  test("rejects duration above maximum", () => {
+    const result = normalizeCursorBig({ durationSec: 999 });
+    expect(result.ok).toBe(false);
+  });
+
+  test("buildCursorBigScript embeds duration and SPI_SETCURSORS", () => {
+    const script = buildCursorBigScript(30);
+    expect(script).toContain("$duration = 30");
+    expect(script).toContain("CursorBaseSize");
+    expect(script).toContain("0x57");
+    expect(script).toContain("Start-Process");
+  });
+
+  test("buildOpenUrlScript uses Start-Process with escaped url", () => {
+    const script = buildOpenUrlScript("https://example.com/a'b");
+    expect(script).toContain("Start-Process");
+    expect(script).toContain("https://example.com/a''b");
+    expect(script).toContain("Write-Output 'opened'");
+  });
+
+  test("buildMessageBoxScript launches detached WinForms dialog", () => {
+    const script = buildMessageBoxScript("Win'dows", "Hello", "warning");
+    expect(script).toContain("System.Windows.Forms.MessageBox");
+    expect(script).toContain("MessageBoxIcon]::Warning");
+    expect(script).toContain("Win''dows");
+    expect(script).toContain("Write-Output 'shown'");
+    expect(script).toContain("Start-Process");
+  });
+
+  test("psSingleQuote doubles apostrophes", () => {
+    expect(psSingleQuote("it's")).toBe("'it''s'");
   });
 });

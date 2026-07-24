@@ -6,7 +6,7 @@
     <script src="/assets/nav-prelude.js"></script>
     <link rel="modulepreload" href="/assets/nav.js" />
     <title>Overlord Remote Desktop</title>
-    <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
     <link rel="stylesheet" href="/vendor/inter/400.css" />
     <link rel="stylesheet" href="/vendor/inter/600.css" />
     <link rel="stylesheet" href="/vendor/inter/700.css" />
@@ -21,12 +21,12 @@
     <aside id="sidePanel" class="side-panel" style="display:none"></aside>
     <main class="px-3 py-3 flex-1 flex flex-col rd-focus-view">
       <div class="flex-1 flex flex-col gap-4" style="max-width: 100%">
-        <div class="flex flex-wrap gap-2 items-center">
-          <div class="flex items-center gap-2 rd-toolbar">
-            <button id="startBtn" class="button primary rd-toolbar-btn">
+        <div class="flex flex-wrap gap-1.5 items-center rd-toolbar-row">
+          <div class="flex items-center gap-1 rd-toolbar">
+            <button id="startBtn" class="button primary rd-toolbar-btn" title="Start">
               <i class="fa-solid fa-play"></i><span>Start</span>
             </button>
-            <button id="stopBtn" class="button ghost rd-toolbar-btn">
+            <button id="stopBtn" class="button ghost rd-toolbar-btn" title="Stop">
               <i class="fa-solid fa-stop"></i><span>Stop</span>
             </button>
             <button id="recordBtn" class="button ghost rd-toolbar-btn" disabled title="Record on the server using Canvas transport">
@@ -82,7 +82,7 @@
                 </div>
               </div>
             </div>
-            <button id="fullscreenBtn" class="button ghost rd-toolbar-btn">
+            <button id="fullscreenBtn" class="button ghost rd-toolbar-btn" title="Fullscreen">
               <i class="fa-solid fa-expand"></i><span>Fullscreen</span>
             </button>
             <div class="rd-mic-wrap">
@@ -103,34 +103,29 @@
 
           <div
             id="streamStatus"
-            class="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-sm"
+            class="rd-stream-status inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-xs"
           >
             <i class="fa-solid fa-circle-notch fa-spin"></i>
             <span>Connecting</span>
           </div>
 
           <div
-            class="flex items-center gap-2 bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-300"
+            class="rd-fps-chip inline-flex items-center gap-1 font-mono text-[11px] text-slate-400"
+            title="Agent FPS → Viewer FPS"
           >
-            <span class="uppercase tracking-wide text-xs text-slate-500">fps</span>
-            <span id="agentFps" class="pill pill-ghost font-mono text-emerald-200">--</span>
+            <span id="agentFps" class="text-emerald-300">--</span>
             <span class="text-slate-600">→</span>
-            <span id="viewerFps" class="pill pill-ghost font-mono text-sky-200">--</span>
-          </div>
-          <div
-            class="flex items-center gap-2 bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-300"
-          >
-            <span class="uppercase tracking-wide text-xs text-slate-500" title="Round-trip input latency from last mouse/keyboard event">Latency</span>
-            <span id="inputLatency" class="pill pill-ghost font-mono text-amber-200" title="Round-trip input latency from last mouse/keyboard event">-- ms</span>
+            <span id="viewerFps" class="text-sky-300">--</span>
           </div>
 
           <div class="relative ml-auto" id="rdSettingsWrap">
             <button
               id="rdSettingsBtn"
               type="button"
-              class="button ghost"
+              class="button ghost rd-toolbar-btn"
               aria-haspopup="true"
               aria-expanded="false"
+              title="Settings"
             >
               <i class="fa-solid fa-sliders"></i><span>Settings</span>
               <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 ml-1"></i>
@@ -185,10 +180,10 @@
                     class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
                     title="Resolution and frame-rate combinations supported by this computer"
                   >
-                    <option value="720:30">30 FPS - 720p</option>
+                    <option value="720:30" selected>30 FPS - 720p</option>
                     <option value="720:60">60 FPS - 720p</option>
                     <option value="1080:30">30 FPS - 1080p</option>
-                    <option value="1080:60" selected>60 FPS - 1080p</option>
+                    <option value="1080:60">60 FPS - 1080p</option>
                   </select>
                 </div>
                 <div id="streamProfileDetail" class="mb-2 text-xs text-slate-500">Checking hardware encoder profiles…</div>

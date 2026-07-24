@@ -378,7 +378,7 @@ export function createRenderer({
               <th class="cv-th-status">Status</th>
               <th class="cv-th-last">Last seen</th>
               ${prefs.system !== false ? `<th class="cv-th-system">System</th>` : ""}
-              <th class="cv-th-ping">Ping</th>
+              ${prefs.ping !== false ? `<th class="cv-th-ping">Ping</th>` : ""}
               ${prefs.group !== false ? `<th class="cv-th-group">Group</th>` : ""}
               <th class="cv-th-actions">Actions</th>
             </tr>
@@ -516,13 +516,16 @@ export function createRenderer({
         return;
       }
 
-      const thumbImg = e.target.closest(".thumb-img");
-      if (thumbImg) {
+      const thumbHost = e.target.closest(".cv-thumb-host, .thumb-img");
+      if (thumbHost) {
+        e.stopPropagation();
         if (card.dataset.online === "true") {
           if (pingClient) pingClient(clientId);
-          requestThumbnail(clientId);
+          window.open(`/viewer?clientId=${encodeURIComponent(clientId)}&mode=desktop`, "_blank", "noopener");
+        } else {
+          const thumbImg = card.querySelector(".thumb-img");
+          if (thumbImg?.src) openModal(thumbImg.src);
         }
-        if (thumbImg.src) openModal(thumbImg.src);
         return;
       }
 
@@ -997,14 +1000,14 @@ export function createRenderer({
       </div>
       <div class="cv-time">
         <span class="cv-time-line"><i class="fa-regular fa-clock"></i> ${formatAgo(client.lastSeen)}</span>
-        <span class="cv-ping-line ${pingTone(client.pingMs)}"><i class="fa-solid fa-satellite-dish"></i> ${formatPing(client.pingMs)}</span>
+        ${showField("ping") ? `<span class="cv-ping-line ${pingTone(client.pingMs)}"><i class="fa-solid fa-satellite-dish"></i> ${formatPing(client.pingMs)}</span>` : ""}
       </div>
       ${showField("group") ? `<div class="cv-group-cell">${groupPillHtml(client) || `<span class="cv-group-empty">—</span>`}</div>` : ""}
       <div class="cv-spacer"></div>
       <div class="cv-actions">
-        ${isViewer ? "" : `<button class="command-btn cv-btn-primary" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-terminal"></i><span>Commands</span></button>`}
+        ${isViewer || !showField("commands") ? "" : `<button class="command-btn cv-btn-primary" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-terminal"></i><span>Commands</span></button>`}
         ${webcamButtonHtml(client)}
-        <button class="cv-icon-btn cv-ping-btn" title="Ping" ${client.online ? "" : "disabled"}><i class="fa-solid fa-satellite-dish"></i></button>
+        ${showField("ping") ? `<button class="cv-icon-btn cv-ping-btn" title="Ping" ${client.online ? "" : "disabled"}><i class="fa-solid fa-satellite-dish"></i></button>` : ""}
         <button class="cv-icon-btn cv-expand-btn" title="More info" aria-expanded="false"><i class="fa-solid fa-chevron-down"></i></button>
       </div>
       <div class="cv-expand-panel hidden">
@@ -1083,11 +1086,11 @@ export function createRenderer({
       ${showField("system") ? `<td class="cv-td-system">
         <span class="cv-system-cell"><span class="cv-os cv-tone-${os.tone}"><i class="fa ${os.icon}"></i> ${escapeHtml(shortOsLabel(client.os))}</span> <span class="cv-arch-chip cv-tone-${arch.tone}">${escapeHtml(arch.label)}</span></span>
       </td>` : ""}
-      <td class="cv-td-ping cv-tab-num cv-mono ${pingTone(client.pingMs)}">${formatPing(client.pingMs)}</td>
+      ${showField("ping") ? `<td class="cv-td-ping cv-tab-num cv-mono ${pingTone(client.pingMs)}">${formatPing(client.pingMs)}</td>` : ""}
       ${showField("group") ? `<td class="cv-td-group">${groupPillHtml(client) || `<span class="cv-group-empty">—</span>`}</td>` : ""}
       <td class="cv-td-actions">
         <div class="cv-actions cv-actions-table">
-          ${isViewer ? "" : `<button class="command-btn cv-btn-primary cv-btn-sm" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-terminal"></i><span>Commands</span></button>`}
+          ${isViewer || !showField("commands") ? "" : `<button class="command-btn cv-btn-primary cv-btn-sm" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-terminal"></i><span>Commands</span></button>`}
           ${webcamButtonHtml(client, "cv-icon-sm")}
           ${isViewer ? "" : `<button class="cv-icon-btn cv-icon-sm kebab-btn" title="More" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-ellipsis-vertical"></i></button>`}
         </div>
@@ -1153,9 +1156,9 @@ export function createRenderer({
         <div class="cv-card-status">
           ${statusDot(client)} <span>${client.online ? "Online" : "Offline"}</span> <span class="cv-mid">·</span> <span class="cv-card-ago">${formatAgo(client.lastSeen)}</span>
         </div>
-        <div class="cv-card-ping ${pingTone(client.pingMs)}">
+        ${showField("ping") ? `<div class="cv-card-ping ${pingTone(client.pingMs)}">
           <i class="fa-solid fa-satellite-dish"></i> <span class="cv-mono">${formatPing(client.pingMs)}</span>
-        </div>
+        </div>` : ""}
       </header>
       <div class="cv-card-body">
         <div class="cv-name-line">
@@ -1180,9 +1183,9 @@ export function createRenderer({
         </div>` : ""}
         ${macPermDetail ? `<div class="cv-card-perms">${macPermDetail}</div>` : ""}
         <div class="cv-card-actions">
-          ${isViewer ? "" : `<button class="command-btn cv-btn-primary cv-btn-flex" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-terminal"></i><span>Commands</span></button>`}
+          ${isViewer || !showField("commands") ? "" : `<button class="command-btn cv-btn-primary cv-btn-flex" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-terminal"></i><span>Commands</span></button>`}
           ${webcamButtonHtml(client)}
-          <button class="cv-icon-btn cv-ping-btn" title="Ping" ${client.online ? "" : "disabled"}><i class="fa-solid fa-satellite-dish"></i></button>
+          ${showField("ping") ? `<button class="cv-icon-btn cv-ping-btn" title="Ping" ${client.online ? "" : "disabled"}><i class="fa-solid fa-satellite-dish"></i></button>` : ""}
         </div>
       </div>
     `;

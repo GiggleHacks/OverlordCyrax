@@ -131,6 +131,11 @@ export async function handleAssetsRoutes(
   }
 
   if (req.method === "GET" && url.pathname === "/favicon.ico") {
+    const svg = Bun.file(path.join(deps.PUBLIC_ROOT, "assets", "favicon.svg"));
+    if (await svg.exists()) {
+      const headers = { ...deps.secureHeaders("image/svg+xml"), "Cache-Control": STATIC_ASSET_CACHE };
+      return new Response(svg, { headers });
+    }
     const file = Bun.file(path.join(deps.PUBLIC_ROOT, "assets", "favicon.ico"));
     if (await file.exists()) {
       const headers = { ...deps.secureHeaders("image/x-icon"), "Cache-Control": STATIC_ASSET_CACHE };

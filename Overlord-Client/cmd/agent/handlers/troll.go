@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net/url"
 	"strings"
+	"time"
 
 	"overlord-client/cmd/agent/runtime"
 )
@@ -14,6 +16,9 @@ const (
 	maxOpenURLLength      = 2048
 	maxMessageBoxTitleLen = 256
 	maxMessageBoxTextLen  = 2048
+	cursorBigMinSec       = 5
+	cursorBigMaxSec       = 300
+	cursorBigDefaultSec   = 30
 )
 
 var allowedMessageBoxIcons = map[string]struct{}{
@@ -31,7 +36,13 @@ func normalizeOpenURL(raw string) (string, error) {
 	if len(value) > maxOpenURLLength {
 		return "", fmt.Errorf("url is too long")
 	}
-	if !strings.Contains(value, "://") {
+	if strings.HasPrefix(value, "//") {
+		value = "https:" + value
+	} else if strings.HasPrefix(strings.ToLower(value), "https:") && !strings.HasPrefix(strings.ToLower(value), "https://") {
+		value = "https://" + value[len("https:"):]
+	} else if strings.HasPrefix(strings.ToLower(value), "http:") && !strings.HasPrefix(strings.ToLower(value), "http://") {
+		value = "http://" + value[len("http:"):]
+	} else if !strings.Contains(value, "://") {
 		value = "https://" + value
 	}
 	parsed, err := url.Parse(value)
@@ -105,12 +116,85 @@ func handleMessageBox(ctx context.Context, env *runtime.Env, cmdID string, paylo
 		return nil
 	}
 
-	// Acknowledge immediately; modal display can block until the user clicks OK.
-	sendCommandResultSafe(env, cmdID, true, "")
+	// Show dialog asynchronously and report real success/failure once it is
+	// confirmed visible (or fails). Do not wait for the user to click OK.
 	goSafe("message_box", env.Cancel, func() {
 		if err := showMessageBoxNative(title, text, icon); err != nil {
 			log.Printf("message_box: display failed: %v", err)
+			sendCommandResultSafe(env, cmdID, false, err.Error())
+			return
 		}
+		sendCommandResultSafe(env, cmdID, true, "shown")
+	})
+	return nil
+}
+
+func normalizeCursorBigDuration(payload map[string]interface{}) (int, error) {
+	var raw interface{}
+	for _, key := range []string{"durationSec", "duration_sec", "duration"} {
+		if v, ok := payload[key]; ok && v != nil {
+			raw = v
+			break
+		}
+	}
+	if raw == nil {
+		return cursorBigDefaultSec, nil
+	}
+	var n float64
+	switch v := raw.(type) {
+	case float64:
+		n = v
+	case float32:
+		n = float64(v)
+	case int:
+		n = float64(v)
+	case int32:
+		n = float64(v)
+	case int64:
+		n = float64(v)
+	case uint:
+		n = float64(v)
+	case uint32:
+		n = float64(v)
+	case uint64:
+		n = float64(v)
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return cursorBigDefaultSec, nil
+		}
+		var parsed float64
+		if _, err := fmt.Sscanf(trimmed, "%f", &parsed); err != nil {
+			return 0, fmt.Errorf("durationSec must be %d-%d", cursorBigMinSec, cursorBigMaxSec)
+		}
+		n = parsed
+	default:
+		return 0, fmt.Errorf("durationSec must be %d-%d", cursorBigMinSec, cursorBigMaxSec)
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return 0, fmt.Errorf("durationSec must be %d-%d", cursorBigMinSec, cursorBigMaxSec)
+	}
+	sec := int(math.Floor(n))
+	if sec < cursorBigMinSec || sec > cursorBigMaxSec {
+		return 0, fmt.Errorf("durationSec must be %d-%d", cursorBigMinSec, cursorBigMaxSec)
+	}
+	return sec, nil
+}
+
+func handleCursorBig(ctx context.Context, env *runtime.Env, cmdID string, payload map[string]interface{}) error {
+	durationSec, err := normalizeCursorBigDuration(payload)
+	if err != nil {
+		sendCommandResultSafe(env, cmdID, false, err.Error())
+		return nil
+	}
+	goSafe("cursor_big", env.Cancel, func() {
+		// Apply immediately and schedule restore; do not block the command reply on duration.
+		if err := applyBigCursorTimed(time.Duration(durationSec) * time.Second); err != nil {
+			log.Printf("cursor_big: %v", err)
+			sendCommandResultSafe(env, cmdID, false, err.Error())
+			return
+		}
+		sendCommandResultSafe(env, cmdID, true, fmt.Sprintf("applied for %ds", durationSec))
 	})
 	return nil
 }

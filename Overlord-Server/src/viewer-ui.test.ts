@@ -127,11 +127,11 @@ describe("unified viewer UI", () => {
   test("uses capability-driven desktop profiles with safe defaults", async () => {
     const html = await publicFile("remotedesktop.html");
     const js = await publicFile("assets/remotedesktop.js");
-    expect(html).toContain('<option value="720:30">30 FPS - 720p</option>');
-    expect(html).toContain('<option value="1080:60" selected>60 FPS - 1080p</option>');
+    expect(html).toContain('<option value="720:30" selected>30 FPS - 720p</option>');
+    expect(html).toContain('<option value="1080:60">60 FPS - 1080p</option>');
     expect(html).toContain('id="streamProfileDetail"');
     expect(js).toContain('sendCmd("desktop_encoder_capabilities"');
-    expect(js).toContain('streamProfileSelect?.value || "1080:60"');
+    expect(js).toContain('streamProfileSelect?.value || "720:30"');
   });
 
   test("uses resolution presets instead of webcam quality percentage", async () => {
@@ -139,6 +139,30 @@ describe("unified viewer UI", () => {
     expect(html).toContain('id="resolutionSelect"');
     expect(html).not.toContain('id="qualitySlider"');
     expect(html).toContain('value="360" selected');
+  });
+
+  test("auto-recovers stalled desktop and webcam streams with countdown", async () => {
+    const rd = await publicFile("assets/remotedesktop.js");
+    expect(rd).toContain("function beginStallRecovery");
+    expect(rd).toContain("const MAX_STALL_RESTARTS = 3");
+    expect(rd).toContain("Retrying in ${remaining}...");
+    expect(rd).toContain("function startDesktopStream");
+    expect(rd).toContain("No frames · retries exhausted");
+
+    const cam = await publicFile("assets/webcam.js");
+    expect(cam).toContain("function beginStallRecovery");
+    expect(cam).toContain("const MAX_STALL_RESTARTS = 3");
+    expect(cam).toContain("Retrying in ${remaining}...");
+    expect(cam).toContain('offline: "bg-rose-900/40 text-rose-100 border-rose-700/70"');
+
+    const viewer = await publicFile("assets/viewer.js");
+    expect(viewer).toContain('offline: "Client offline"');
+    expect(viewer).toContain("client.online === false");
+    expect(viewer).toContain("Client offline");
+    expect(viewer).toContain("is-offline");
+
+    const css = await publicFile("assets/main.css");
+    expect(css).toContain(".viewer-capability.is-offline");
   });
 });
 

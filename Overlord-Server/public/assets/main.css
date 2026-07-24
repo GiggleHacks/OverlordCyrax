@@ -1783,6 +1783,7 @@ article.card[data-bookmarked="true"] {
 .viewer-id b { color: #ff61d7; font-weight: 600; }
 .viewer-capability { margin-left: auto; color: #83939b; flex-shrink: 0; white-space: nowrap; }
 .viewer-capability.is-available { color: #70f7a5; }
+.viewer-capability.is-offline { color: #fda4af; }
 /* Inline webcam controls in the single toolbar (no second full-width bar) */
 .viewer-webcam-bar,
 .viewer-toolbar-cam {
@@ -1845,9 +1846,14 @@ body.viewer-has-webcam-bar .viewer-toolbar-cam:not([hidden]) { display: flex; }
   background: #0f172a;
   color: #94a3b8;
 }
-.viewer-cam-status[data-status="streaming"] { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
+.viewer-cam-status[data-status="streaming"] { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); background: rgba(6, 78, 59, 0.35); }
+.viewer-cam-status[data-status="starting"],
+.viewer-cam-status[data-status="connecting"] { color: #7dd3fc; border-color: rgba(14, 165, 233, 0.4); background: rgba(12, 74, 110, 0.35); }
+.viewer-cam-status[data-status="stalled"],
+.viewer-cam-status[data-status="stopping"] { color: #fcd34d; border-color: rgba(245, 158, 11, 0.4); background: rgba(120, 53, 15, 0.35); }
 .viewer-cam-status[data-status="error"],
-.viewer-cam-status[data-status="offline"] { color: #fda4af; border-color: rgba(244, 63, 94, 0.35); }
+.viewer-cam-status[data-status="offline"] { color: #fecdd3; border-color: rgba(190, 24, 93, 0.55); background: rgba(136, 19, 55, 0.4); }
+.viewer-cam-status[data-status="disconnected"] { color: #cbd5e1; border-color: #334155; background: #0f172a; }
 .viewer-cam-dot-live { color: #34d399; }
 .viewer-cam-dot-idle { color: #64748b; }
 .viewer-cam-fps {
@@ -1912,12 +1918,21 @@ body.viewer-has-webcam-bar .viewer-toolbar-cam:not([hidden]) { display: flex; }
 .viewer-panels { flex: 1; min-height: 0; display: grid; gap: 2px; background: #0f1117; }
 .viewer-panels[data-mode="webcam"] { grid-template-columns: 1fr; }
 .viewer-panels[data-mode="desktop"] { grid-template-columns: 1fr; }
-/* Split = desktop left (main work) + webcam right — only side-by-side layout */
+/* Split = desktop left (main work) + webcam right — only side-by-side layout.
+   gap:0 so divider drag px math matches tracks (no snap-back from gap overflow). */
 .viewer-panels[data-mode="split"] {
-  grid-template-columns: minmax(280px, 7fr) 6px minmax(220px, 3fr);
+  gap: 0;
+  grid-template-columns: minmax(200px, 7fr) 6px minmax(200px, 3fr);
 }
 .viewer-panels[data-mode="split"] .viewer-panel-desktop { order: 1; }
-.viewer-panels[data-mode="split"] .viewer-divider { order: 2; display: block; }
+.viewer-panels[data-mode="split"] .viewer-divider {
+  order: 2;
+  display: block;
+  width: 6px;
+  min-width: 6px;
+  flex-shrink: 0;
+  touch-action: none;
+}
 .viewer-panels[data-mode="split"] .viewer-panel-webcam { order: 3; }
 .viewer-panels[data-mode="split-v"] { grid-template-columns: 1fr; grid-template-rows: minmax(160px, 280px) 6px 1fr; }
 .viewer-panels[data-mode="pip"] { grid-template-columns: 1fr; position: relative; }
@@ -2217,8 +2232,81 @@ body.rd-embedded .rd-focus-view {
 }
 body.rd-embedded .rd-focus-view > div {
   height: 100%;
-  padding: 8px;
+  padding: 4px;
   box-sizing: border-box;
+  gap: 4px !important;
+}
+body.rd-embedded .rd-toolbar-row {
+  flex-wrap: nowrap;
+  gap: 4px !important;
+  /* visible: overflow clips absolute Settings/Rec dropdowns */
+  overflow: visible;
+  min-height: 0;
+  position: relative;
+  z-index: 40;
+}
+body.rd-embedded .rd-toolbar {
+  gap: 3px !important;
+  flex-shrink: 0;
+}
+body.rd-embedded .rd-toolbar-btn {
+  min-height: 24px !important;
+  min-width: 24px !important;
+  padding: 2px 6px !important;
+  font-size: 10px !important;
+  gap: 0 !important;
+  border-radius: 5px !important;
+}
+/* Icon-only action buttons; keep Settings/Rec labels readable */
+body.rd-embedded .rd-toolbar-btn > span {
+  display: none !important;
+}
+body.rd-embedded #rdSettingsBtn > span,
+body.rd-embedded #rdRecordingSettingsBtn > span {
+  display: inline !important;
+  font-size: 10px;
+  margin-left: 3px;
+}
+body.rd-embedded #rdSettingsBtn,
+body.rd-embedded #rdRecordingSettingsBtn {
+  gap: 2px !important;
+  padding: 2px 7px !important;
+}
+body.rd-embedded .rd-toolbar-btn .fa-chevron-down {
+  display: none !important;
+}
+body.rd-embedded .rd-toolbar-btn i {
+  font-size: 11px;
+  margin: 0 !important;
+}
+body.rd-embedded #rdSettingsWrap,
+body.rd-embedded #rdRecordingSettingsWrap {
+  position: relative;
+  z-index: 50;
+  flex-shrink: 0;
+  overflow: visible;
+}
+body.rd-embedded #rdSettingsMenu,
+body.rd-embedded #rdRecordingSettingsMenu {
+  z-index: 100 !important;
+}
+body.rd-embedded .rd-stream-status {
+  padding: 2px 7px !important;
+  font-size: 10px !important;
+  gap: 4px !important;
+  flex-shrink: 0;
+}
+body.rd-embedded .rd-fps-chip {
+  font-size: 10px !important;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+body.rd-embedded .rd-mic-wrap {
+  gap: 3px;
+}
+body.rd-embedded .rd-mic-wave {
+  width: 56px !important;
+  height: 18px !important;
 }
 body.rd-embedded #canvasContainer {
   min-height: 0 !important;
@@ -2474,8 +2562,7 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(0, 0, 0, 0.62);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.45);
 }
 .sp-modal {
   width: min(420px, 100%);
@@ -2551,6 +2638,23 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
   box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.12);
 }
 .sp-textarea { resize: vertical; min-height: 72px; }
+.sp-field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.sp-field-check > span {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+.sp-help {
+  margin: 8px 0 0;
+  font: 400 11.5px/1.4 "Inter", system-ui, sans-serif;
+  color: #94a3b8;
+}
 .sp-hint {
   margin: 0;
   font: 400 11.5px/1.4 "Inter", system-ui, sans-serif;
@@ -3929,7 +4033,30 @@ tbody tr:hover {
 .cv-pill-webcam { background: rgba(20, 184, 166, 0.12); color: #99f6e4; border-color: rgba(20, 184, 166, 0.3); }
 .cv-mini-pill.cv-webcam-btn { padding: 0; cursor: pointer; }
 .cv-mini-pill.cv-webcam-btn:hover { background: rgba(20, 184, 166, 0.20); border-color: rgba(20, 184, 166, 0.5); }
-.online-ascii-status { align-self:center; color:#75f59a; font:700 16px/1 "JetBrains Mono", monospace; letter-spacing:.14em; text-shadow:0 0 10px rgba(117,245,154,.35); white-space:nowrap; border-left:2px solid #ff4fd8; padding-left:8px; }
+.online-ascii-status {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  padding: 0 2px 0 0;
+}
+.online-status-globe {
+  color: #5ee7ff;
+  font-size: 15px;
+  line-height: 1;
+  animation: online-globe-spin 8s linear infinite;
+}
+.online-ascii-count {
+  color: #75f59a;
+  font: 700 16px/1 "JetBrains Mono", monospace;
+  letter-spacing: .14em;
+  text-shadow: 0 0 10px rgba(117, 245, 154, 0.35);
+}
+@keyframes online-globe-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .nav-brand-stack { display:inline-flex; flex-direction:column; line-height:1.05; min-width:7.5em; }.nav-brand-stack small { color:#94a3b8; font:8px/1 "JetBrains Mono",monospace; letter-spacing:.08em; margin-top:2px; }
 .nav-brand-stack.is-typing #nav-brand-name,
 .nav-brand-stack.is-typing #nav-mobile-brand-name,
@@ -3969,21 +4096,29 @@ tbody tr:hover {
 
 /* Remote desktop toolbar — compact height aligned with webcam controls, labels kept */
 .rd-toolbar-btn {
-  min-height: 34px !important;
-  padding: 5px 9px !important;
+  min-height: 28px !important;
+  padding: 3px 7px !important;
   font-size: 11px !important;
-  gap: 6px !important;
-  border-radius: 8px !important;
-  line-height: 1.2;
+  gap: 4px !important;
+  border-radius: 6px !important;
+  line-height: 1.15;
 }
 .rd-toolbar-btn i { font-size: 11px; transition: transform 150ms ease; }
 .rd-toolbar-btn:hover:not(:disabled) i { transform: scale(1.08); }
 .rd-toolbar-btn:active:not(:disabled) { transform: translateY(0) scale(0.97); }
 .rd-toolbar-btn--compact {
-  padding: 5px 8px !important;
-  gap: 4px !important;
+  padding: 3px 6px !important;
+  gap: 3px !important;
 }
 .rd-toolbar-btn--compact span { max-width: 3.5rem; }
+.rd-fps-chip {
+  white-space: nowrap;
+  user-select: none;
+  letter-spacing: 0.02em;
+}
+.rd-stream-status {
+  white-space: nowrap;
+}
 .rd-mic-wrap {
   display: inline-flex;
   align-items: center;
@@ -4137,7 +4272,7 @@ tbody tr:hover {
 .dashboard-icon-btn:active, .layout-toggle-btn:active, .cv-webcam-btn:active { transform:scale(.92); }
 @media (prefers-reduced-motion: reduce) { .cv-row, .cv-card, .dashboard-icon-btn, .layout-toggle-btn, .webcam-workspace { transition:none !important; transform:none !important; } }
 @media (max-width: 900px) { .webcam-focus { padding:10px; } .webcam-workspace--60 { width:100%; min-width:0; } }
-.webcam-tile-page{padding:16px}.webcam-tile-page header{display:flex;justify-content:space-between;align-items:center;color:#67e8f9;font:12px "JetBrains Mono",monospace;letter-spacing:.14em;margin-bottom:12px}.webcam-tile-page header .header-left{display:flex;align-items:center;gap:12px}.webcam-tile-page header .divider-line{color:rgba(255,255,255,0.15);font-weight:300}.webcam-tile-page header a.nav-brand-link{color:#f1f5f9;text-decoration:none;display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:13px;letter-spacing:0.05em;transition:color 0.15s}.webcam-tile-page header a.nav-brand-link:hover{color:#818cf8}.webcam-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}.webcam-tile{position:relative;aspect-ratio:16/10;border:1px solid #155e75;background:#020617;overflow:hidden;border-radius:10px}.webcam-tile iframe{width:100%;height:100%;border:0}.tile-expand{position:absolute;z-index:2;left:8px;top:8px;padding:7px;border-radius:7px;background:#1e3a5f;color:#a5f3fc;cursor:pointer;border:none;font-size:13px;opacity:.7;transition:opacity .15s}.tile-expand:hover{opacity:1;background:#2563eb}.tile-stop{position:absolute;z-index:2;right:8px;top:8px;padding:7px;border-radius:7px;background:#7f1d1d;color:#fff;cursor:pointer;border:none}.webcam-tile.is-stopped{opacity:.5}
+.webcam-tile-page{padding:16px}.webcam-tile-page header{display:flex;justify-content:space-between;align-items:center;color:#67e8f9;font:12px "JetBrains Mono",monospace;letter-spacing:.14em;margin-bottom:12px}.webcam-tile-page header .header-left{display:flex;align-items:center;gap:12px}.webcam-tile-page header .divider-line{color:rgba(255,255,255,0.15);font-weight:300}.webcam-tile-page header a.nav-brand-link{color:#f1f5f9;text-decoration:none;display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:13px;letter-spacing:0.05em;transition:color 0.15s}.webcam-tile-page header a.nav-brand-link:hover{color:#818cf8}.webcam-tiles{display:grid;gap:8px;align-content:stretch;justify-content:stretch}.webcam-tile{position:relative;aspect-ratio:auto;min-width:0;min-height:0;border:1px solid #155e75;background:#020617;overflow:hidden;border-radius:10px}.webcam-tile iframe{width:100%;height:100%;border:0}.tile-expand{position:absolute;z-index:2;left:8px;top:8px;padding:7px;border-radius:7px;background:#1e3a5f;color:#a5f3fc;cursor:pointer;border:none;font-size:13px;opacity:.7;transition:opacity .15s}.tile-expand:hover{opacity:1;background:#2563eb}.tile-stop{position:absolute;z-index:2;right:8px;top:8px;padding:7px;border-radius:7px;background:#7f1d1d;color:#fff;cursor:pointer;border:none}.webcam-tile.is-stopped{opacity:.5}
 .tile-status{position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-50%);color:#67e8f9;background:#020617cc;padding:6px 12px;border-radius:6px;font:10px "JetBrains Mono",monospace;white-space:nowrap;pointer-events:none;display:flex;align-items:center;gap:6px}
 .tile-status--ok{color:#70f7a5;background:transparent;font-size:9px;top:auto;bottom:6px;left:auto;right:7px;transform:none;padding:3px 5px}
 .tile-status--warn{color:#fcd34d}
@@ -4224,9 +4359,14 @@ body.webcam-embedded{
 .webcam-embedded #webrtcVideo{display:none}
 .webcam-embedded #webrtcVideo.is-active{display:block!important}
 .webcam-embedded #frameCanvas.is-hidden{display:none!important}
-.webcam-tile-page{height:100vh;padding:24px;display:flex;flex-direction:column;box-sizing:border-box}.webcam-tile-page header{align-items:center;flex-shrink:0}.webcam-tile-page header button{margin-left:auto;background:#7f1d1d;color:#fff;border-radius:6px;padding:7px 10px}.webcam-tiles{flex:1;min-height:0;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:8px}.webcam-tiles[data-count="1"],.webcam-tiles.is-focused{grid-template-columns:1fr;grid-template-rows:1fr}.webcam-tiles[data-count="2"]{grid-template-columns:repeat(2,1fr);grid-template-rows:1fr}.webcam-tiles[data-count="3"],.webcam-tiles[data-count="4"]{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)}.webcam-tiles[data-count="7"],.webcam-tiles[data-count="8"],.webcam-tiles[data-count="9"]{grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr)}.webcam-tiles[data-count="10"],.webcam-tiles[data-count="11"],.webcam-tiles[data-count="12"]{grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(3,1fr)}.webcam-tile{aspect-ratio:auto;min-height:0}.webcam-tile.is-stopped{display:none}.tile-client{position:absolute;z-index:2;left:7px;bottom:6px;color:#a5f3fc;background:#020617aa;padding:3px 5px;border-radius:3px;font:9px "JetBrains Mono",monospace}.webcam-tile iframe{position:absolute;inset:0}.tile-expand{z-index:2}.tile-stop{z-index:3}
-.webcam-tiles.webcam-tiles--many{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));grid-template-rows:none;grid-auto-rows:minmax(138px,1fr);align-content:start;overflow-y:auto;padding-right:4px}.webcam-tiles.webcam-tiles--many .webcam-tile{aspect-ratio:16/10}
-@media (max-width: 700px){.webcam-tile-page{padding:12px}.webcam-tile-page header .divider-line,.webcam-tile-page header .page-title{display:none}.webcam-tiles.webcam-tiles--many{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));grid-auto-rows:minmax(102px,1fr)}}
+html:has(.webcam-tile-page),
+html:has(.webcam-tile-page) body{
+  height:100%;
+  margin:0;
+  overflow:hidden;
+}
+.webcam-tile-page{height:100vh;height:100dvh;padding:24px;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden}.webcam-tile-page header{align-items:center;flex-shrink:0;margin-bottom:12px}.webcam-tile-page header button{margin-left:auto;background:#7f1d1d;color:#fff;border-radius:6px;padding:7px 10px}.webcam-tiles{flex:1;min-height:0;width:100%;height:100%;overflow:hidden}.webcam-tile{aspect-ratio:auto;min-height:0;height:100%}.webcam-tile.is-stopped{display:none}.tile-client{position:absolute;z-index:2;left:7px;bottom:6px;color:#a5f3fc;background:#020617aa;padding:3px 5px;border-radius:3px;font:9px "JetBrains Mono",monospace}.webcam-tile iframe{position:absolute;inset:0}.tile-expand{z-index:2}.tile-stop{z-index:3}
+@media (max-width: 700px){.webcam-tile-page{padding:12px}.webcam-tile-page header .divider-line,.webcam-tile-page header .page-title{display:none}}
 .webcam-embedded-controls .webcam-workspace>div:first-child{display:flex!important;padding:6px 8px;gap:6px;background:#080d14;border-bottom:1px solid #173849;flex-shrink:0}
 .webcam-embedded-controls #canvasContainer>div:first-child{display:none}
 .webcam-embedded-controls #canvasContainer{height:auto;flex:1}

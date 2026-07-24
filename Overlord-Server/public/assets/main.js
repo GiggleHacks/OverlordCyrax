@@ -74,6 +74,8 @@ const DEFAULT_DISPLAY_FIELDS = {
   group: true,
   hardware: true,
   battery: true,
+  commands: true,
+  ping: true,
 };
 let displayFields = { ...DEFAULT_DISPLAY_FIELDS };
 
@@ -1516,7 +1518,7 @@ bulkWebcamsBtn?.addEventListener("click", () => {
   const overlay = document.createElement("div");
   overlay.className = "webcam-bulk-confirm";
   const performanceNote = ids.length > 12 ? " Large webcam arrays can use significant browser and network resources." : "";
-  overlay.innerHTML = `<section><div class="webcam-bulk-preview"><i></i><i></i><i></i><i></i><i></i><i></i></div><h2>Open tiled webcam view?</h2><p>${ids.length} selected webcam${ids.length === 1 ? "" : "s"} will begin streaming in a tiled layout. Selecting a tile stops the others and opens its focused view.${performanceNote}</p><div><button data-cancel>Cancel</button><button data-confirm>View Webcams</button></div></section>`;
+  overlay.innerHTML = `<section><div class="webcam-bulk-preview"><i></i><i></i><i></i><i></i><i></i><i></i></div><h2>Open tiled webcam view?</h2><p>${ids.length} selected webcam${ids.length === 1 ? "" : "s"} will begin streaming in a tiled layout. Expanding a tile opens a focused viewer popup and pauses the array until you close it.${performanceNote}</p><div><button data-cancel>Cancel</button><button data-confirm>View Webcams</button></div></section>`;
   overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
   overlay.querySelector("[data-confirm]").onclick = () => location.assign(`/webcams?clientIds=${encodeURIComponent(ids.join(","))}`);
   document.body.append(overlay);

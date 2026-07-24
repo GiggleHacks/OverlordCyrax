@@ -68,6 +68,11 @@ let detectedHomePath = "";
 let lastDriveEntries = [];
 let pendingDeletes = new Map();
 let pendingCommands = new Map();
+let deleteCancelRequested = false;
+// OneDrive known-folder fallback: null = unknown, "" = standard home, "\\OneDrive" = redirected
+let homeBaseOverride = null;
+let pendingPlaceFallback = null;
+let expectingFallbackPath = null;
 let soundsEnabled = true;
 let soundManifest = null;
 const audioCache = {};
@@ -161,6 +166,16 @@ const els = {
   promptOk: document.getElementById("promptOk"),
   promptCancel: document.getElementById("promptCancel"),
   promptClose: document.getElementById("promptClose"),
+  deleteModal: document.getElementById("deleteModal"),
+  deleteTitle: document.getElementById("deleteTitle"),
+  deleteLabel: document.getElementById("deleteLabel"),
+  deleteCount: document.getElementById("deleteCount"),
+  deleteBarFill: document.getElementById("deleteBarFill"),
+  deleteStatus: document.getElementById("deleteStatus"),
+  deleteErrors: document.getElementById("deleteErrors"),
+  deleteCancel: document.getElementById("deleteCancel"),
+  deleteOk: document.getElementById("deleteOk"),
+  deleteClose: document.getElementById("deleteClose"),
 };
 
 try {

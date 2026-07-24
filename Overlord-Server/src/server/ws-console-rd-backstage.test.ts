@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { decode as msgpackDecode } from "@msgpack/msgpack";
 import * as clientManager from "../clientManager";
 import { decodeMessage } from "../protocol";
 import * as sessionManager from "../sessions/sessionManager";
@@ -11,9 +12,11 @@ import {
   handleRemoteDesktopViewerOpen,
   handleWebcamViewerMessage,
   handleWebcamViewerOpen,
+  notifyRemoteDesktopStatus,
   webcamStreamingState,
   backstageStreamingState,
   rdStreamingState,
+  shouldRequestDesktopKeyframe,
 } from "./ws-console-rd-backstage";
 
 type MockWs = {
@@ -117,6 +120,33 @@ describe("webcam viewer control", () => {
 });
 
 describe("remote desktop viewer control", () => {
+  test("rate-limits repeated desktop keyframe requests per client", () => {
+    const clientId = `rd-keyframe-gate-${Date.now().toString(36)}`;
+    const now = Date.now();
+    expect(shouldRequestDesktopKeyframe(clientId, now)).toBe(true);
+    expect(shouldRequestDesktopKeyframe(clientId, now + 100)).toBe(false);
+    expect(shouldRequestDesktopKeyframe(clientId, now + 1100)).toBe(true);
+  });
+
+  test("forwards one decoder-backpressure keyframe request per interval", () => {
+    const clientId = `rd-keyframe-forward-${Date.now().toString(36)}`;
+    const { agentWs } = createClient(clientId);
+    const viewer = createMockWs({ clientId });
+    handleRemoteDesktopViewerOpen(viewer as any);
+
+    const request = JSON.stringify({
+      type: "desktop_request_keyframe",
+      reason: "decoder_backpressure",
+    });
+    handleRemoteDesktopViewerMessage(viewer as any, request);
+    handleRemoteDesktopViewerMessage(viewer as any, request);
+
+    const commands = agentCommands(agentWs)
+      .filter((msg) => msg.commandType === "desktop_request_keyframe");
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.payload?.reason).toBe("decoder_backpressure");
+  });
+
   test("starts once, ignores duplicate starts, and only stops after the last viewer leaves", () => {
     const clientId = `rd-control-${Date.now().toString(36)}`;
     const { agentWs } = createClient(clientId);
@@ -189,6 +219,46 @@ describe("remote desktop viewer control", () => {
     expect(commands.filter((msg) => msg.commandType === "desktop_start")).toHaveLength(1);
     expect(commands.filter((msg) => msg.commandType === "desktop_request_keyframe")).toHaveLength(0);
     expect(rdStreamingState.get(clientId)?.isStreaming).toBe(true);
+  });
+});
+
+describe("viewer status fanout", () => {
+  test("notifies rd, webcam, and backstage viewers on client offline", () => {
+    const clientId = `status-fanout-${Date.now().toString(36)}`;
+    createClient(clientId);
+    const rdViewer = createMockWs({ role: "rd_viewer", clientId });
+    const camViewer = createMockWs({ role: "webcam_viewer", clientId });
+    const bsViewer = createMockWs({ role: "backstage_viewer", clientId });
+    handleRemoteDesktopViewerOpen(rdViewer as any);
+    handleWebcamViewerOpen(camViewer as any);
+    handlebackstageViewerOpen(bsViewer as any);
+
+    rdViewer.sent.length = 0;
+    camViewer.sent.length = 0;
+    bsViewer.sent.length = 0;
+
+    notifyRemoteDesktopStatus(clientId, "offline", "Client offline");
+
+    const parseOffline = (viewer: MockWs) =>
+      viewer.sent
+        .map((msg) => {
+          try {
+            if (typeof msg === "string") return JSON.parse(msg);
+            if (msg instanceof Uint8Array || ArrayBuffer.isView(msg)) {
+              return msgpackDecode(msg as Uint8Array);
+            }
+            return msg;
+          } catch {
+            return null;
+          }
+        })
+        .find((msg: any) => msg && msg.type === "status" && msg.status === "offline");
+
+    for (const viewer of [rdViewer, camViewer, bsViewer]) {
+      const offline = parseOffline(viewer) as any;
+      expect(offline).toBeTruthy();
+      expect(offline.reason).toBe("Client offline");
+    }
   });
 });
 

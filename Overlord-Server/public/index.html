@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
     <link rel="stylesheet" href="/vendor/flag-icons/css/flag-icons.min.css" />
     <link rel="stylesheet" href="/vendor/gridstack/gridstack.min.css" />
-    <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
     <link rel="stylesheet" href="/assets/main.css" />
     <link rel="stylesheet" href="/assets/custom.css" />
     <script defer src="/vendor/animejs/anime.min.js"></script>
@@ -152,7 +152,10 @@
           </div>
         </section>
         <div class="dashboard-toolbar">
-          <output id="online-ascii-status" class="online-ascii-status" aria-live="polite">000</output>
+          <div class="online-ascii-status" title="Online clients">
+            <i class="fa-solid fa-globe online-status-globe" aria-hidden="true"></i>
+            <output id="online-ascii-status" class="online-ascii-count" aria-live="polite">000</output>
+          </div>
           <label
             id="search-shell"
             class="dashboard-search flex items-center gap-2 bg-slate-800/70 border border-slate-700/60 rounded-lg px-3 py-2"
@@ -222,6 +225,8 @@
                 <label><input type="checkbox" data-field="group" checked /> Group</label>
                 <label><input type="checkbox" data-field="hardware" checked /> Hardware</label>
                 <label><input type="checkbox" data-field="battery" checked /> Battery</label>
+                <label><input type="checkbox" data-field="commands" checked /> Commands</label>
+                <label><input type="checkbox" data-field="ping" checked /> Ping</label>
               </div>
             </details>
             <button id="select-all" class="dashboard-icon-btn" title="Select all">

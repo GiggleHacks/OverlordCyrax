@@ -51,8 +51,15 @@ export function normalizeOpenUrl(raw: unknown): { ok: true; url: string } | { ok
   if (value.length > MAX_OPEN_URL_LENGTH) return { ok: false, error: "url is too long" };
 
   let candidate = value;
-  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) {
-    candidate = `https://${candidate}`;
+  if (candidate.startsWith("//")) {
+    candidate = `https:${candidate}`;
+  } else {
+    const bareScheme = candidate.match(/^(https?):(?!\/\/)(.+)$/i);
+    if (bareScheme) {
+      candidate = `${bareScheme[1].toLowerCase()}://${bareScheme[2]}`;
+    } else if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) {
+      candidate = `https://${candidate}`;
+    }
   }
 
   let parsed: URL;
@@ -94,6 +101,130 @@ export function normalizeMessageBox(body: any): {
   }
 
   return { ok: true, title, text, icon };
+}
+
+const CURSOR_BIG_MIN_SEC = 5;
+const CURSOR_BIG_MAX_SEC = 300;
+const CURSOR_BIG_DEFAULT_SEC = 30;
+
+export function normalizeCursorBig(body: any): { ok: true; durationSec: number } | { ok: false; error: string } {
+  const raw = body?.durationSec ?? body?.duration_sec ?? body?.duration;
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, durationSec: CURSOR_BIG_DEFAULT_SEC };
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return { ok: false, error: `durationSec must be ${CURSOR_BIG_MIN_SEC}-${CURSOR_BIG_MAX_SEC}` };
+  }
+  const durationSec = Math.floor(parsed);
+  if (durationSec < CURSOR_BIG_MIN_SEC || durationSec > CURSOR_BIG_MAX_SEC) {
+    return { ok: false, error: `durationSec must be ${CURSOR_BIG_MIN_SEC}-${CURSOR_BIG_MAX_SEC}` };
+  }
+  return { ok: true, durationSec };
+}
+
+/** Escape a string for use inside single-quoted PowerShell literals. */
+export function psSingleQuote(value: string): string {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+/** Open URL via Start-Process — works on existing agents without open_url handler. */
+export function buildOpenUrlScript(url: string): string {
+  const quoted = psSingleQuote(url);
+  return `
+$ErrorActionPreference = 'Stop'
+Start-Process ${quoted}
+Write-Output 'opened'
+`.trim();
+}
+
+/** Message box via WinForms, launched detached so script_exec returns immediately. */
+export function buildMessageBoxScript(title: string, text: string, icon: string): string {
+  const iconMap: Record<string, string> = {
+    error: "Error",
+    warning: "Warning",
+    question: "Question",
+    info: "Information",
+  };
+  const psIcon = iconMap[icon] || "Information";
+  const qTitle = psSingleQuote(title);
+  const qText = psSingleQuote(text);
+  // Nested single-quoted PS: double single-quotes already applied by psSingleQuote.
+  return `
+$ErrorActionPreference = 'Stop'
+$show = @'
+Add-Type -AssemblyName System.Windows.Forms
+[void][System.Windows.Forms.MessageBox]::Show(${qText}, ${qTitle}, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::${psIcon})
+'@
+Start-Process -WindowStyle Hidden -FilePath powershell.exe -ArgumentList @(
+  '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',$show
+) | Out-Null
+Write-Output 'shown'
+`.trim();
+}
+
+/** PowerShell for existing agents (no cursor_big binary required). Applies max cursor size, restores after duration. */
+export function buildCursorBigScript(durationSec: number): string {
+  const sec = Math.max(CURSOR_BIG_MIN_SEC, Math.min(CURSOR_BIG_MAX_SEC, Math.floor(durationSec)));
+  return `
+$ErrorActionPreference = 'Stop'
+$duration = ${sec}
+$key = 'HKCU:\\Control Panel\\Cursors'
+$name = 'CursorBaseSize'
+$prev = 32
+try {
+  $existing = (Get-ItemProperty -Path $key -Name $name -ErrorAction Stop).$name
+  if ($existing -and [int]$existing -gt 0 -and [int]$existing -lt 256) { $prev = [int]$existing }
+} catch {}
+if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force | Out-Null }
+Set-ItemProperty -Path $key -Name $name -Value 256 -Type DWord
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class CursorSizer {
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+}
+"@
+[void][CursorSizer]::SystemParametersInfo(0x57, 0, [IntPtr]::Zero, 3)
+$restore = @"
+Start-Sleep -Seconds $duration
+Set-ItemProperty -Path 'HKCU:\\Control Panel\\Cursors' -Name 'CursorBaseSize' -Value $prev -Type DWord -ErrorAction SilentlyContinue
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class CursorSizer2{[DllImport("user32.dll",SetLastError=true)]public static extern bool SystemParametersInfo(uint a,uint b,System.IntPtr c,uint d);}'
+[void][CursorSizer2]::SystemParametersInfo(0x57,0,[IntPtr]::Zero,3)
+"@
+Start-Process -WindowStyle Hidden -FilePath powershell.exe -ArgumentList @(
+  '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',$restore
+) | Out-Null
+Write-Output ("applied for {0}s (restore to {1})" -f $duration, $prev)
+`.trim();
+}
+
+type ScriptExecResult = { ok?: boolean; result?: string; error?: string };
+
+async function runClientPowerShell(
+  target: ClientInfo,
+  deps: ClientCommandDeps,
+  script: string,
+  timeoutMs: number,
+): Promise<ScriptExecResult> {
+  const cmdId = uuidv4();
+  const resultPromise: Promise<ScriptExecResult> = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      deps.pendingScripts.delete(cmdId);
+      reject(new Error("Command timed out"));
+    }, timeoutMs);
+    deps.pendingScripts.set(cmdId, { resolve, reject, timeout, clientId: target.id });
+  });
+
+  target.ws.send(encodeMessage({
+    type: "command",
+    commandType: "script_exec",
+    id: cmdId,
+    payload: { script, type: "powershell" },
+  }));
+
+  return resultPromise;
 }
 
 export function dispatchPingBulk(target: ClientInfo, countValue: unknown): number {
@@ -303,44 +434,135 @@ export async function handleClientCommandRoute(
       metrics.recordCommand("silent_exec");
       logAudit({ timestamp: Date.now(), username: user.username, ip, action: AuditAction.SILENT_EXECUTE, targetClientId: targetId, success: true, details: JSON.stringify({ command, args, cwd }) });
     } else if (action === "open_url") {
+      // script_exec so currently deployed agents work without a native open_url handler.
       const normalized = normalizeOpenUrl(body?.url);
       if (!normalized.ok) {
         return Response.json({ ok: false, error: normalized.error }, { status: 400, headers: deps.CORS_HEADERS });
       }
-      const cmdId = uuidv4();
-      target.ws.send(encodeMessage({ type: "command", commandType: "open_url", id: cmdId, payload: { url: normalized.url } }));
       metrics.recordCommand("open_url");
-      logAudit({
-        timestamp: Date.now(),
-        username: user.username,
-        ip,
-        action: AuditAction.COMMAND,
-        targetClientId: targetId,
-        success: true,
-        details: `open_url:${normalized.url.slice(0, 200)}`,
-      });
+      try {
+        const result = await runClientPowerShell(target, deps, buildOpenUrlScript(normalized.url), 45_000);
+        const ok = !!result?.ok;
+        const message = ok
+          ? (result.result || "opened")
+          : (result?.error || result?.result || "Open URL failed on client");
+        logAudit({
+          timestamp: Date.now(),
+          username: user.username,
+          ip,
+          action: AuditAction.COMMAND,
+          targetClientId: targetId,
+          success: ok,
+          details: `open_url:${normalized.url.slice(0, 200)}:${String(message).slice(0, 80)}`,
+        });
+        if (!ok) {
+          return Response.json(
+            { ok: false, error: message, url: normalized.url },
+            { status: 502, headers: deps.CORS_HEADERS },
+          );
+        }
+        return Response.json({ ok: true, url: normalized.url, message }, { headers: deps.CORS_HEADERS });
+      } catch (error: any) {
+        logAudit({
+          timestamp: Date.now(),
+          username: user.username,
+          ip,
+          action: AuditAction.COMMAND,
+          targetClientId: targetId,
+          success: false,
+          details: `open_url:${normalized.url.slice(0, 200)}`,
+          errorMessage: error?.message || "Open URL timed out",
+        });
+        return Response.json({ ok: false, error: error?.message || "Open URL timed out" }, { status: 504, headers: deps.CORS_HEADERS });
+      }
     } else if (action === "message_box") {
+      // script_exec so currently deployed agents work without a native message_box handler.
       const normalized = normalizeMessageBox(body);
       if (!normalized.ok) {
         return Response.json({ ok: false, error: normalized.error }, { status: 400, headers: deps.CORS_HEADERS });
       }
-      const cmdId = uuidv4();
-      target.ws.send(encodeMessage({
-        type: "command",
-        commandType: "message_box",
-        id: cmdId,
-        payload: { title: normalized.title, text: normalized.text, icon: normalized.icon },
-      }));
       metrics.recordCommand("message_box");
-      logAudit({
-        timestamp: Date.now(),
-        username: user.username,
-        ip,
-        action: AuditAction.COMMAND,
-        targetClientId: targetId,
-        success: true,
-        details: `message_box:${normalized.icon}:${normalized.title.slice(0, 80)}`,
-      });
+      try {
+        const result = await runClientPowerShell(
+          target,
+          deps,
+          buildMessageBoxScript(normalized.title, normalized.text, normalized.icon),
+          45_000,
+        );
+        const ok = !!result?.ok;
+        const message = ok
+          ? (result.result || "shown")
+          : (result?.error || result?.result || "Message box failed on client");
+        logAudit({
+          timestamp: Date.now(),
+          username: user.username,
+          ip,
+          action: AuditAction.COMMAND,
+          targetClientId: targetId,
+          success: ok,
+          details: `message_box:${normalized.icon}:${normalized.title.slice(0, 80)}:${String(message).slice(0, 80)}`,
+        });
+        if (!ok) {
+          return Response.json({ ok: false, error: message }, { status: 502, headers: deps.CORS_HEADERS });
+        }
+        return Response.json({ ok: true, message }, { headers: deps.CORS_HEADERS });
+      } catch (error: any) {
+        logAudit({
+          timestamp: Date.now(),
+          username: user.username,
+          ip,
+          action: AuditAction.COMMAND,
+          targetClientId: targetId,
+          success: false,
+          details: `message_box:${normalized.icon}:${normalized.title.slice(0, 80)}`,
+          errorMessage: error?.message || "Message box timed out",
+        });
+        return Response.json({ ok: false, error: error?.message || "Message box timed out" }, { status: 504, headers: deps.CORS_HEADERS });
+      }
+    } else if (action === "cursor_big") {
+      // script_exec so currently deployed agents work without a native cursor_big handler.
+      const normalized = normalizeCursorBig(body);
+      if (!normalized.ok) {
+        return Response.json({ ok: false, error: normalized.error }, { status: 400, headers: deps.CORS_HEADERS });
+      }
+      metrics.recordCommand("cursor_big");
+      try {
+        const result = await runClientPowerShell(
+          target,
+          deps,
+          buildCursorBigScript(normalized.durationSec),
+          60_000,
+        );
+        const ok = !!result?.ok;
+        const message = ok
+          ? (result.result || `applied for ${normalized.durationSec}s`)
+          : (result?.error || result?.result || "Big mouse failed on client");
+        logAudit({
+          timestamp: Date.now(),
+          username: user.username,
+          ip,
+          action: AuditAction.COMMAND,
+          targetClientId: targetId,
+          success: ok,
+          details: `cursor_big:duration=${normalized.durationSec}:${String(message).slice(0, 120)}`,
+        });
+        if (!ok) {
+          return Response.json({ ok: false, error: message }, { status: 502, headers: deps.CORS_HEADERS });
+        }
+        return Response.json({ ok: true, message }, { headers: deps.CORS_HEADERS });
+      } catch (error: any) {
+        logAudit({
+          timestamp: Date.now(),
+          username: user.username,
+          ip,
+          action: AuditAction.COMMAND,
+          targetClientId: targetId,
+          success: false,
+          details: `cursor_big:duration=${normalized.durationSec}`,
+          errorMessage: error?.message || "Big mouse timed out",
+        });
+        return Response.json({ ok: false, error: error?.message || "Big mouse timed out" }, { status: 504, headers: deps.CORS_HEADERS });
+      }
     } else if (action === "uninstall") {
       try {
         requirePermission(user, "clients:uninstall");

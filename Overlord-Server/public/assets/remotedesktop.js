@@ -4,9 +4,12 @@ import { WhepClient } from "./whep.js";
 import { P2PClient } from "./webrtc-p2p.js";
 import { createKeyboardCapture } from "./keyboard-capture.js";
 import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
+import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 
 import { initSidePanel } from "./side-panel.js";
 import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.js";
+
+const REMOTE_DESKTOP_JS_VERSION = "1.0.1";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
@@ -33,6 +36,7 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
 
   const clientLabel = document.getElementById("clientLabel");
   clientLabel.textContent = clientId;
+  clientLabel.title = `remotedesktop.js v${REMOTE_DESKTOP_JS_VERSION}`;
 
   let ws = null;
   let reconnectTimer = null;
@@ -120,6 +124,12 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
   let streamState = "connecting";
   let frameWatchTimer = null;
   let offlineTimer = null;
+  let stallRestartCount = 0;
+  let stallRecoveryTimer = null;
+  let stallRecoveryInProgress = false;
+  const STALL_MS = 2000;
+  const MAX_STALL_RESTARTS = 3;
+  const STALL_COUNTDOWN_SEC = 3;
   let frameWidth = 0;
   let frameHeight = 0;
   let latencyAvg = null;
@@ -138,6 +148,8 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
   let h264KeyframeErrorStreak = 0;
   let h264RecoveryAttempts = 0;
   let h264LastDecodeWarnAt = 0;
+  let h264AwaitingKeyframe = false;
+  let h264LastKeyframeRequestAt = 0;
   const H264_LOW_FPS_THRESHOLD = 6;
   const H264_FALLBACK_WARMUP_MS = 10000;
   const H264_MIN_FRAMES_BEFORE_FALLBACK = 120;
@@ -172,6 +184,7 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
     h264FirstFrameAt = 0;
     h264FramesSeen = 0;
     h264KeyframeErrorStreak = 0;
+    h264AwaitingKeyframe = false;
   }
 
   /* ── Remote Desktop Audio (system audio from client) ── */
@@ -444,7 +457,7 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
     const profile = selectedStreamProfile();
     return {
       display: Number(displaySelect?.value || 0),
-      streamProfile: streamProfileSelect?.value || "1080:60",
+      streamProfile: streamProfileSelect?.value || "720:30",
       // Keep the legacy fields so backstage and older remote-desktop builds that
       // share these preferences continue to receive equivalent settings.
       resolution: String(profile.maxHeight),
@@ -525,8 +538,9 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
               state === "offline" ? "Client offline" :
                 state === "disconnected" ? "Disconnected" :
                   state === "stalled" ? "No frames" :
-                    state === "idle" ? "Stopped" :
-                      "Connecting");
+                    state === "error" ? "Error" :
+                      state === "idle" ? "Stopped" :
+                        "Connecting");
 
       statusEl.innerHTML = `${icons[state] || icons.idle} <span>${label}</span>`;
       const base = "inline-flex items-center gap-2 px-3 py-2 rounded-full border text-sm";
@@ -567,12 +581,13 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
     const isStalled = streamState === "stalled";
     const isBlocked = streamState === "offline" || streamState === "disconnected" || streamState === "error";
     const recordingActive = isRecording();
+    const recovering = stallRecoveryInProgress;
 
     if (startBtn) {
-      startBtn.disabled = !wsOpen || isStarting || isStreaming || isStopping || isBlocked;
+      startBtn.disabled = !wsOpen || isStarting || isStreaming || isStopping || isBlocked || recovering;
     }
     if (stopBtn) {
-      stopBtn.disabled = !wsOpen || (!isStarting && !isStreaming && !isStopping && !isStalled);
+      stopBtn.disabled = !wsOpen || (!isStarting && !isStreaming && !isStopping && !isStalled && !recovering);
     }
     if (recordBtn) {
       recordBtn.disabled =
@@ -857,17 +872,116 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
     }
   }
 
+  function clearStallRecovery() {
+    if (stallRecoveryTimer) {
+      clearTimeout(stallRecoveryTimer);
+      stallRecoveryTimer = null;
+    }
+    stallRecoveryInProgress = false;
+  }
+
   function scheduleOffline(reason) {
     clearOfflineTimer();
+    clearStallRecovery();
     setStreamState("connecting", "Reconnecting");
     offlineTimer = setTimeout(() => {
       const now = performance.now();
       if (!lastFrameAt || now - lastFrameAt > 3000) {
         if (elevationPending) return;
         desiredStreaming = false;
-        setStreamState("offline", reason || "Client offline");
+        clearStallRecovery();
+        setStreamState("offline", "Client offline");
       }
     }, 3000);
+  }
+
+  function stopDesktopStream({ userInitiated = false } = {}) {
+    if (userInitiated) {
+      desiredStreaming = false;
+      clearStallRecovery();
+      stallRestartCount = 0;
+    }
+    lastFrameAt = 0;
+    if (isRecording()) stopRecording();
+    disablePrivacyIfActive();
+    sendCmd("desktop_stop", {});
+    disconnectAudio();
+    stopAllWebrtc();
+    if (userInitiated) {
+      setStreamState("idle", "Stopped");
+    }
+  }
+
+  function startDesktopStream({ resetFrameClock = true } = {}) {
+    const mode = getWebrtcMode();
+    if (displaySelect && displaySelect.value !== undefined) {
+      sendCmd("desktop_select_display", {
+        display: parseInt(displaySelect.value, 10) || 0,
+      });
+    }
+    if (qualitySlider) {
+      pushQuality(qualitySlider.value);
+    }
+    if (prefersH264 && !useSoftwareH264()) {
+      ensureDuplicationForH264();
+    }
+    pushStreamProfile();
+    pushInputToggles();
+    pushCaptureToggles();
+    desiredStreaming = true;
+    if (resetFrameClock) {
+      lastFrameAt = 0;
+      firstFrameLogged = false;
+      resetH264SessionState();
+    }
+    setStreamState("starting", "Opening display · waiting for first frame");
+    if (mode === "relayed") {
+      sendCmd("desktop_start", { webrtc: true });
+    } else if (mode === "p2p") {
+      sendCmd("desktop_start", {});
+      startP2P();
+    } else {
+      sendCmd("desktop_start", {});
+    }
+    if (audioCtrl && audioCtrl.checked) {
+      connectAudio();
+    }
+  }
+
+  function beginStallRecovery() {
+    if (stallRecoveryInProgress || !desiredStreaming) return;
+    if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
+    if (elevationPending) return;
+    if (stallRestartCount >= MAX_STALL_RESTARTS) {
+      setStreamState("error", "No frames · retries exhausted");
+      return;
+    }
+    stallRecoveryInProgress = true;
+    stallRestartCount += 1;
+    let remaining = STALL_COUNTDOWN_SEC;
+    const tick = () => {
+      if (!desiredStreaming || streamState === "offline" || streamState === "disconnected") {
+        clearStallRecovery();
+        return;
+      }
+      if (remaining > 0) {
+        setStreamState("stalled", `Retrying in ${remaining}...`);
+        remaining -= 1;
+        stallRecoveryTimer = setTimeout(tick, 1000);
+        return;
+      }
+      stallRecoveryTimer = null;
+      setStreamState("starting", `Restarting stream · attempt ${stallRestartCount}/${MAX_STALL_RESTARTS}`);
+      stopDesktopStream({ userInitiated: false });
+      stallRecoveryTimer = setTimeout(() => {
+        stallRecoveryTimer = null;
+        stallRecoveryInProgress = false;
+        if (!desiredStreaming) return;
+        if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
+        startDesktopStream({ resetFrameClock: true });
+      }, 300);
+    };
+    tick();
   }
 
   function handleStatus(msg) {
@@ -912,7 +1026,8 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
     }
     if (msg.status === "stopped") {
       clearOfflineTimer();
-      desiredStreaming = false;
+      // Ignore stop acks during stall recovery or while the user still wants the stream.
+      if (stallRecoveryInProgress || desiredStreaming) return;
       lastFrameAt = 0;
       setStreamState("idle", "Stopped");
       return;
@@ -924,29 +1039,10 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
         desiredStreaming = true;
       }
       if (desiredStreaming) {
-        const shouldRequestStart = !["starting", "streaming", "stalled"].includes(streamState);
-        const mode = getWebrtcMode();
+        const shouldRequestStart = !["starting", "streaming", "stalled"].includes(streamState) && !stallRecoveryInProgress;
         if (shouldRequestStart) {
           setStreamState("starting", "Reconnecting");
-        }
-        if (displaySelect && displaySelect.value !== undefined) {
-          sendCmd("desktop_select_display", {
-            display: parseInt(displaySelect.value, 10) || 0,
-          });
-        }
-        pushInputToggles();
-        pushCaptureToggles();
-        if (qualitySlider) pushQuality(qualitySlider.value);
-        pushStreamProfile();
-        if (shouldRequestStart) {
-          if (mode === "relayed") {
-            sendCmd("desktop_start", { webrtc: true });
-          } else if (mode === "p2p") {
-            sendCmd("desktop_start", {});
-            startP2P();
-          } else {
-            sendCmd("desktop_start", {});
-          }
+          startDesktopStream({ resetFrameClock: true });
         }
       } else {
         setStreamState("idle", "Stopped");
@@ -1314,12 +1410,12 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
   }
 
   function selectedStreamProfile() {
-    const [heightValue, fpsValue] = String(streamProfileSelect?.value || "1080:60").split(":");
+    const [heightValue, fpsValue] = String(streamProfileSelect?.value || "720:30").split(":");
     const maxHeight = Number.parseInt(heightValue, 10);
     const fps = Number.parseInt(fpsValue, 10);
     return {
-      maxHeight: Number.isFinite(maxHeight) ? maxHeight : 1080,
-      fps: Number.isFinite(fps) ? Math.max(1, Math.min(240, fps)) : 60,
+      maxHeight: Number.isFinite(maxHeight) ? maxHeight : 720,
+      fps: Number.isFinite(fps) ? Math.max(1, Math.min(240, fps)) : 30,
     };
   }
 
@@ -1358,13 +1454,13 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
     }
     if (!streamProfileSelect.options.length) {
       const option = document.createElement("option");
-      option.value = "1080:60";
-      option.textContent = "60 FPS - 1080p";
+      option.value = "720:30";
+      option.textContent = "30 FPS - 720p";
       streamProfileSelect.appendChild(option);
     }
     if (!setSelectValue(streamProfileSelect, savedStreamProfile) &&
         !setSelectValue(streamProfileSelect, previous) &&
-        !setSelectValue(streamProfileSelect, "1080:60")) {
+        !setSelectValue(streamProfileSelect, "720:30")) {
       streamProfileSelect.selectedIndex = 0;
     }
     savedStreamProfile = streamProfileSelect.value;
@@ -1430,47 +1526,13 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
       }
       firewallWarningAcked = true;
     }
-    if (displaySelect && displaySelect.value !== undefined) {
-      sendCmd("desktop_select_display", {
-        display: parseInt(displaySelect.value, 10) || 0,
-      });
-    }
-    if (qualitySlider) {
-      pushQuality(qualitySlider.value);
-    }
-    if (prefersH264 && !useSoftwareH264()) {
-      ensureDuplicationForH264();
-    }
-    pushStreamProfile();
-    desiredStreaming = true;
-    lastFrameAt = 0;
-    firstFrameLogged = false;
-    resetH264SessionState();
-    setStreamState("starting", "Opening display · waiting for first frame");
-    if (mode === "relayed") {
-      // Server replies with `webrtc_ready { whepPath }`; startWhep happens then.
-      sendCmd("desktop_start", { webrtc: true });
-    } else if (mode === "p2p") {
-      // Kick off the P2P offer asynchronously; capture starts in parallel.
-      sendCmd("desktop_start", {});
-      startP2P();
-    } else {
-      sendCmd("desktop_start", {});
-    }
-    if (audioCtrl && audioCtrl.checked) {
-      connectAudio();
-    }
+    clearStallRecovery();
+    stallRestartCount = 0;
+    startDesktopStream({ resetFrameClock: true });
   });
   stopBtn.addEventListener("click", function () {
-    if (isRecording()) stopRecording();
-    desiredStreaming = false;
-    lastFrameAt = 0;
     setStreamState("stopping", "Stopping stream");
-    disablePrivacyIfActive();
-    sendCmd("desktop_stop", {});
-    disconnectAudio();
-    stopAllWebrtc();
-    setStreamState("idle", "Stopped");
+    stopDesktopStream({ userInitiated: true });
   });
   if (recordBtn) {
     recordBtn.addEventListener("click", function () {
@@ -1607,6 +1669,8 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
   function markFrameReceived() {
     lastFrameAt = performance.now();
     clearOfflineTimer();
+    clearStallRecovery();
+    stallRestartCount = 0;
     if (!firstFrameLogged) {
       firstFrameLogged = true;
       rdDebug("first frame received", {
@@ -1914,6 +1978,33 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
 
       const isKey = isH264KeyFrame(h264Bytes);
 
+      if (h264AwaitingKeyframe && !isKey) {
+        const now = Date.now();
+        if (now - h264LastKeyframeRequestAt >= 1000) {
+          h264LastKeyframeRequestAt = now;
+          sendCmd("desktop_request_keyframe", { reason: "decoder_backpressure" });
+        }
+        return;
+      }
+
+      if (h264AwaitingKeyframe && isKey) {
+        try { videoDecoder.reset(); } catch {}
+        h264AwaitingKeyframe = false;
+      }
+
+      if (isVideoDecoderBackpressured(videoDecoder, 2)) {
+        try { videoDecoder.reset(); } catch {}
+        if (!isKey) {
+          h264AwaitingKeyframe = true;
+          const now = Date.now();
+          if (now - h264LastKeyframeRequestAt >= 1000) {
+            h264LastKeyframeRequestAt = now;
+            sendCmd("desktop_request_keyframe", { reason: "decoder_backpressure" });
+          }
+          return;
+        }
+      }
+
       // If software H264 encode on the agent cannot keep up, automatically
       // fall back to JPEG blocks for a smoother interactive stream.
       const h264ElapsedMs = performance.now() - h264FirstFrameAt;
@@ -2138,13 +2229,23 @@ import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.j
     frameWatchTimer = setInterval(() => {
       const now = performance.now();
       if (desiredStreaming) {
-        if (lastFrameAt && now - lastFrameAt > 2000) {
-          setStreamState("stalled", "No frames");
+        if (lastFrameAt && now - lastFrameAt > STALL_MS) {
+          if (stallRecoveryInProgress) return;
+          if (stallRestartCount >= MAX_STALL_RESTARTS) {
+            if (streamState !== "error") {
+              setStreamState("error", "No frames · retries exhausted");
+            }
+            return;
+          }
+          if (streamState !== "stalled") {
+            setStreamState("stalled", "No frames");
+          }
+          beginStallRecovery();
         } else if (!lastFrameAt && streamState === "starting") {
           setStreamState("starting", "Starting stream");
         }
       } else if (streamState !== "offline" && streamState !== "disconnected" && streamState !== "error") {
-        if (lastFrameAt && now - lastFrameAt < 2000) {
+        if (lastFrameAt && now - lastFrameAt < STALL_MS) {
           if (streamState !== "stopping") {
             setStreamState("stopping", "Stopping stream");
           }

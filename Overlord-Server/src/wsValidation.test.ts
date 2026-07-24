@@ -10,6 +10,7 @@ describe("wsValidation", () => {
   test("allowed client message types include core types", () => {
     expect(ALLOWED_CLIENT_MESSAGE_TYPES.has("hello")).toBe(true);
     expect(ALLOWED_CLIENT_MESSAGE_TYPES.has("ping")).toBe(true);
+    expect(ALLOWED_CLIENT_MESSAGE_TYPES.has("capacity_update")).toBe(true);
     expect(ALLOWED_CLIENT_MESSAGE_TYPES.has("frame")).toBe(true);
   });
 

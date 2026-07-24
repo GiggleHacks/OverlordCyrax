@@ -76,7 +76,7 @@ function applyPendingOffline(
   if (clientManager.hasClient(clientId)) return;
   pending.deps.notifyDashboardClientEvent("client_offline", pending.payload);
   pending.deps.broadcastClientEvent("client_offline", pending.payload);
-  pending.deps.notifyRemoteDesktopStatus(clientId, "offline", "Client disconnected");
+  pending.deps.notifyRemoteDesktopStatus(clientId, "offline", "Client offline");
   offlineUpdates.push({
     id: clientId,
     disconnectReason: pending.disconnectReason,
@@ -764,6 +764,11 @@ export async function handleWebSocketMessage(
         break;
       case "pong":
         handlePong(client, payload);
+        break;
+      case "capacity_update":
+        // Newer agents use this as lightweight liveness/capacity telemetry.
+        // Accepting it keeps mixed-version fleets online even when this server
+        // does not consume the optional capacity fields yet.
         break;
       case "frame":
         if ((payload as any)?.header?.fps === 0) {

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 func openURLNative(target string) error {
@@ -25,11 +26,28 @@ func openURLNative(target string) error {
 }
 
 func showMessageBoxNative(title, text, icon string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return showMessageBoxDarwin(title, text, icon)
-	default:
-		return showMessageBoxLinux(title, text, icon)
+	return showMessageBoxWithAck(func() error {
+		switch runtime.GOOS {
+		case "darwin":
+			return showMessageBoxDarwin(title, text, icon)
+		default:
+			return showMessageBoxLinux(title, text, icon)
+		}
+	})
+}
+
+// showMessageBoxWithAck returns nil once the dialog is confirmed visible
+// (or immediately on failure), without waiting for the user to dismiss it.
+func showMessageBoxWithAck(show func() error) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- show()
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-time.After(400 * time.Millisecond):
+		return nil
 	}
 }
 
@@ -90,4 +108,9 @@ func showMessageBoxLinux(title, text, icon string) error {
 		return nil
 	}
 	return fmt.Errorf("message box requires zenity or notify-send on this system")
+}
+
+func applyBigCursorTimed(duration time.Duration) error {
+	_ = duration
+	return fmt.Errorf("big mouse is only supported on Windows")
 }

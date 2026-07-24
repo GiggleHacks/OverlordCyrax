@@ -105,14 +105,43 @@ function webcamNeedsParentBar(m) {
   return m === "split" || m === "pip";
 }
 
+const SPLIT_RATIO_KEY = "overlord_viewer_split_ratio";
+const SPLIT_DIVIDER_PX = 6;
+const SPLIT_MIN_PX = 200;
+let splitDesktopRatio = 0.7;
+try {
+  const saved = Number(localStorage.getItem(SPLIT_RATIO_KEY));
+  if (Number.isFinite(saved) && saved > 0.15 && saved < 0.9) splitDesktopRatio = saved;
+} catch {}
+
+function clampSplitRatio(ratio) {
+  return Math.max(0.18, Math.min(0.82, ratio));
+}
+
 function applySplitColumns() {
   if (!panels || mode !== "split") return;
-  // Desktop left (primary), webcam right — one clear side-by-side layout.
-  panels.style.gridTemplateColumns = "minmax(280px, 7fr) 6px minmax(220px, 3fr)";
+  // Desktop left (primary), webcam right. Use fr from saved ratio so free resize sticks.
+  const ratio = clampSplitRatio(splitDesktopRatio);
+  const left = Math.max(1, Math.round(ratio * 1000));
+  const right = Math.max(1, Math.round((1 - ratio) * 1000));
+  panels.style.gridTemplateColumns = `minmax(${SPLIT_MIN_PX}px, ${left}fr) ${SPLIT_DIVIDER_PX}px minmax(${SPLIT_MIN_PX}px, ${right}fr)`;
   panels.style.gridTemplateRows = "";
 }
 
-function updateCamStatusUi(status, fps) {
+function persistSplitRatioFromLayout() {
+  if (!panels || mode !== "split") return;
+  const total = panels.getBoundingClientRect().width;
+  const desk = panels.querySelector(".viewer-panel-desktop")?.getBoundingClientRect().width;
+  if (!total || !Number.isFinite(desk)) return;
+  const usable = Math.max(1, total - SPLIT_DIVIDER_PX);
+  splitDesktopRatio = clampSplitRatio(desk / usable);
+  try {
+    localStorage.setItem(SPLIT_RATIO_KEY, String(splitDesktopRatio));
+  } catch {}
+  applySplitColumns();
+}
+
+function updateCamStatusUi(status, fps, label) {
   if (camStatus) {
     const icons = {
       connecting: '<i class="fa-solid fa-circle-notch fa-spin"></i>',
@@ -120,6 +149,7 @@ function updateCamStatusUi(status, fps) {
       stopping: '<i class="fa-solid fa-circle-notch fa-spin"></i>',
       streaming: '<i class="fa-solid fa-circle viewer-cam-dot-live"></i>',
       idle: '<i class="fa-solid fa-circle viewer-cam-dot-idle"></i>',
+      stalled: '<i class="fa-solid fa-triangle-exclamation"></i>',
       offline: '<i class="fa-solid fa-plug-circle-xmark"></i>',
       disconnected: '<i class="fa-solid fa-link-slash"></i>',
       error: '<i class="fa-solid fa-circle-exclamation"></i>',
@@ -130,17 +160,19 @@ function updateCamStatusUi(status, fps) {
       stopping: "Stopping",
       streaming: "Streaming",
       idle: "Idle",
-      offline: "Offline",
+      stalled: "No frames",
+      offline: "Client offline",
       disconnected: "Disconnected",
       error: "Error",
     };
     const key = status || "idle";
-    camStatus.innerHTML = `${icons[key] || icons.idle} <span>${labels[key] || key}</span>`;
+    const text = (typeof label === "string" && label.trim()) ? label.trim() : (labels[key] || key);
+    camStatus.innerHTML = `${icons[key] || icons.idle} <span>${text}</span>`;
     camStatus.dataset.status = key;
   }
   if (camFps && fps != null) camFps.textContent = fps === "" || fps == null ? "--" : String(fps);
 
-  const streaming = status === "streaming" || status === "starting";
+  const streaming = status === "streaming" || status === "starting" || status === "stalled";
   if (camStart) camStart.disabled = streaming;
   if (camStop) camStop.disabled = !streaming && status !== "stopping";
 }
@@ -271,8 +303,11 @@ function setMode(nextMode) {
   mode = allowedModes.has(requested) ? requested : "webcam";
   panels.dataset.mode = mode;
   if (prev !== mode) {
-    panels.style.gridTemplateColumns = "";
-    panels.style.gridTemplateRows = "";
+    // Keep a custom split ratio when re-entering split; only clear other modes.
+    if (mode !== "split") {
+      panels.style.gridTemplateColumns = "";
+      panels.style.gridTemplateRows = "";
+    }
     if (mode !== "desktop") clearDesktopInset();
   }
 
@@ -389,9 +424,12 @@ window.addEventListener("message", (event) => {
   if (data.clientId && data.clientId !== clientId) return;
 
   if (data.type === "webcam_status") {
-    updateCamStatusUi(data.status, data.fps != null ? data.fps : undefined);
+    updateCamStatusUi(data.status, data.fps != null ? data.fps : undefined, data.label);
     if (data.devices) applyDevicesToSelect(data.devices);
     if (data.settings) applySettingsFromChild(data.settings);
+    if (data.status === "offline" || data.status === "disconnected") {
+      refreshCapability();
+    }
   }
 });
 
@@ -400,12 +438,25 @@ async function refreshCapability() {
     const response = await fetch(`/api/clients?page=1&pageSize=1&id=${encodeURIComponent(clientId)}`, { credentials: "include" });
     const data = await response.json();
     const client = (data.items || []).find((item) => item.id === clientId);
+    if (!client || client.online === false) {
+      capability.innerHTML = '<i class="fa-solid fa-plug-circle-xmark"></i> Client offline';
+      capability.classList.remove("is-available");
+      capability.classList.add("is-offline");
+      return;
+    }
     const available = !!client?.webcamAvailable;
-    const ping = Number.isFinite(Number(client?.pingMs)) ? ` · ${Math.round(Number(client.pingMs))} ms` : "";
-    capability.innerHTML = available ? `<i class="fa-solid fa-video"></i> camera available${ping}` : `<i class="fa-solid fa-video-slash"></i> no camera${ping}`;
+    const pingMs = Number(client?.pingMs);
+    const ping = Number.isFinite(pingMs) && pingMs >= 0 && pingMs < 15000
+      ? ` · ${Math.round(pingMs)} ms`
+      : "";
+    capability.innerHTML = available
+      ? `<i class="fa-solid fa-video"></i> camera available${ping}`
+      : `<i class="fa-solid fa-video-slash"></i> no camera${ping}`;
     capability.classList.toggle("is-available", available);
+    capability.classList.remove("is-offline");
   } catch {
     capability.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> camera status unavailable';
+    capability.classList.remove("is-available", "is-offline");
   }
 }
 
@@ -470,17 +521,38 @@ function applyDesktopLayout(insetPct, widthPct) {
   } catch {}
 }
 
-divider?.addEventListener("mousedown", (e) => {
-  if (mode !== "split") return;
-  e.preventDefault();
+function beginSplitDrag(clientX) {
+  if (mode !== "split" || !panels) return false;
   isDragging = true;
-  startPos = e.clientX;
-  // Split: desktop is the left (primary) column.
-  startSize = panels.querySelector(".viewer-panel-desktop").getBoundingClientRect().width;
-  divider.classList.add("is-dragging");
+  startPos = clientX;
+  // Split: desktop is the left (primary) column (via CSS order).
+  startSize = panels.querySelector(".viewer-panel-desktop")?.getBoundingClientRect().width || 0;
+  divider?.classList.add("is-dragging");
   document.body.style.cursor = "col-resize";
   document.body.style.userSelect = "none";
   panels.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = "none"));
+  return true;
+}
+
+function moveSplitDrag(clientX) {
+  if (!isDragging || !panels) return;
+  const totalSize = panels.getBoundingClientRect().width;
+  const minSize = SPLIT_MIN_PX;
+  const dividerSize = SPLIT_DIVIDER_PX;
+  let newFirst = startSize + (clientX - startPos);
+  newFirst = Math.max(minSize, Math.min(newFirst, totalSize - dividerSize - minSize));
+  const second = Math.max(minSize, totalSize - newFirst - dividerSize);
+  panels.style.gridTemplateColumns = `${newFirst}px ${dividerSize}px ${second}px`;
+}
+
+divider?.addEventListener("pointerdown", (e) => {
+  if (mode !== "split") return;
+  if (e.button != null && e.button !== 0) return;
+  e.preventDefault();
+  if (!beginSplitDrag(e.clientX)) return;
+  try {
+    divider.setPointerCapture(e.pointerId);
+  } catch {}
 });
 
 sideResize?.addEventListener("pointerdown", (e) => {
@@ -518,6 +590,10 @@ desktopResize?.addEventListener("pointerdown", (e) => {
 });
 
 document.addEventListener("pointermove", (e) => {
+  if (isDragging) {
+    moveSplitDrag(e.clientX);
+    return;
+  }
   if (sideDragging) {
     const next = applySidePanelWidth(startSize + (e.clientX - startPos));
     sideExpandedWidth = next;
@@ -536,19 +612,6 @@ document.addEventListener("pointermove", (e) => {
   }
 });
 
-document.addEventListener("mousemove", (e) => {
-  if (!isDragging) return;
-  const totalSize = panels.getBoundingClientRect().width;
-  const dividerSize = 6;
-  const minSize = 200;
-  const pos = e.clientX;
-  let newFirst = startSize + (pos - startPos);
-  newFirst = Math.max(minSize, Math.min(newFirst, totalSize - dividerSize - minSize));
-  const second = totalSize - newFirst - dividerSize;
-  // Split: left column is desktop, right is webcam.
-  panels.style.gridTemplateColumns = `${newFirst}px ${dividerSize}px ${second}px`;
-});
-
 function endPanelDrags() {
   if (isDragging) {
     isDragging = false;
@@ -556,6 +619,7 @@ function endPanelDrags() {
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
     panels.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = ""));
+    persistSplitRatioFromLayout();
   }
   if (sideDragging) {
     sideDragging = false;
@@ -573,10 +637,11 @@ function endPanelDrags() {
   }
 }
 
-document.addEventListener("mouseup", endPanelDrags);
 document.addEventListener("pointerup", endPanelDrags);
 document.addEventListener("pointercancel", endPanelDrags);
+document.addEventListener("mouseup", endPanelDrags);
 window.addEventListener("resize", () => {
+  if (mode === "split") applySplitColumns();
   if (mode === "desktop") restoreDesktopInset();
   if (mode === "pip") requestAnimationFrame(() => pip.restoreLayout());
 });

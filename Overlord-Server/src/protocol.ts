@@ -135,6 +135,7 @@ export type CommandType =
   | "script_exec"
   | "open_url"
   | "message_box"
+  | "cursor_big"
   | "uninstall"
   | "elevate"
   | "file_upload_http"

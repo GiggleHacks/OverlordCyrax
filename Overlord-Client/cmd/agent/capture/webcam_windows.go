@@ -30,6 +30,8 @@ type webcamState struct {
 
 	latestMu    sync.Mutex
 	latestBytes []byte
+	latestSeq   uint64
+	sentSeq     uint64
 
 	stopCh     chan struct{}
 	readerDone chan struct{}
@@ -85,6 +87,7 @@ func (s *webcamState) startReader() {
 
 			s.latestMu.Lock()
 			s.latestBytes = frameBytes
+			s.latestSeq++
 			s.latestMu.Unlock()
 		}
 	}()
@@ -115,55 +118,53 @@ func NowWebcam(ctx context.Context, env *rt.Env) error {
 	}
 
 	state.latestMu.Lock()
-	frameBytes := state.latestBytes
-	state.latestMu.Unlock()
-
-	if frameBytes == nil {
+	if state.latestBytes == nil || state.latestSeq == state.sentSeq {
+		state.latestMu.Unlock()
 		return nil
 	}
+	frameBytes := state.latestBytes
+	state.sentSeq = state.latestSeq
+	state.latestMu.Unlock()
 
 	quality := env.WebcamQuality
 	codec := env.WebcamCodec
 	maxHeight := env.WebcamMaxHeight
 	outFormat := format
 
-	if outFormat == "jpeg" && maxHeight > 0 {
-		if img, decodeErr := jpeg.Decode(bytes.NewReader(frameBytes)); decodeErr == nil {
-			resized := resizeWebcamImage(img, maxHeight)
-			encodeQuality := quality
-			if encodeQuality <= 0 || encodeQuality > 100 {
-				encodeQuality = 90
-			}
-			if resizedBytes, encodeErr := encodeJPEG(resized, encodeQuality); encodeErr == nil {
-				frameBytes = resizedBytes
-			}
+	if outFormat == "jpeg" {
+		encodeQuality := quality
+		if encodeQuality <= 0 || encodeQuality > 100 {
+			encodeQuality = 90
 		}
-	}
-
-	if codec == "h264" && format == "jpeg" && h264Available() {
-		img, err := jpeg.Decode(bytes.NewReader(frameBytes))
-		if err == nil {
+		img, decodeErr := jpeg.Decode(bytes.NewReader(frameBytes))
+		if decodeErr == nil {
 			bounds := img.Bounds()
-			w, h := bounds.Dx(), bounds.Dy()
-			if w%2 != 0 || h%2 != 0 {
-				log.Printf("webcam: h264 skipped for odd dimensions (%dx%d), falling back to jpeg", w, h)
-			} else {
-				rgba := toRGBA(img)
-				if h264Bytes, err := encodeH264FrameWebcam(rgba); err == nil && len(h264Bytes) > 0 {
-					frameBytes = h264Bytes
-					outFormat = "h264"
+			needsResize := maxHeight > 0 && bounds.Dy() > maxHeight
+			processed := img
+			if needsResize {
+				processed = resizeWebcamImage(img, maxHeight)
+			}
+
+			if codec == "h264" && h264Available() {
+				processedBounds := processed.Bounds()
+				w, h := processedBounds.Dx(), processedBounds.Dy()
+				if w%2 != 0 || h%2 != 0 {
+					log.Printf("webcam: h264 skipped for odd dimensions (%dx%d), falling back to jpeg", w, h)
 				} else {
-					log.Printf("webcam: h264 encode failed, falling back to jpeg: %v", err)
+					rgba := toRGBA(processed)
+					if h264Bytes, encodeErr := encodeH264FrameWebcam(rgba); encodeErr == nil && len(h264Bytes) > 0 {
+						frameBytes = h264Bytes
+						outFormat = "h264"
+					} else {
+						log.Printf("webcam: h264 encode failed, falling back to jpeg: %v", encodeErr)
+					}
 				}
 			}
-		}
-	}
 
-	if outFormat == "jpeg" && quality > 0 && quality < 100 {
-		img, err := jpeg.Decode(bytes.NewReader(frameBytes))
-		if err == nil {
-			if reencoded, err := encodeJPEG(img, quality); err == nil {
-				frameBytes = reencoded
+			if outFormat == "jpeg" && (needsResize || (quality > 0 && quality < 100)) {
+				if reencoded, encodeErr := encodeJPEG(processed, encodeQuality); encodeErr == nil {
+					frameBytes = reencoded
+				}
 			}
 		}
 	}

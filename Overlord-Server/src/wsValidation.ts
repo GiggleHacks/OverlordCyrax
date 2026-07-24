@@ -6,6 +6,7 @@ export const ALLOWED_CLIENT_MESSAGE_TYPES = new Set([
   "hello",
   "ping",
   "pong",
+  "capacity_update",
   "frame",
   "status",
   "console_output",

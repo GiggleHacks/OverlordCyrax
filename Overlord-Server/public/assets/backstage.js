@@ -121,6 +121,12 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   let streamState = "connecting";
   let frameWatchTimer = null;
   let offlineTimer = null;
+  let stallRestartCount = 0;
+  let stallRecoveryTimer = null;
+  let stallRecoveryInProgress = false;
+  const STALL_MS = 2000;
+  const MAX_STALL_RESTARTS = 3;
+  const STALL_COUNTDOWN_SEC = 3;
   let frameDecodeBusy = false;
   let pendingFrame = null;
   let hasCanvasBase = false;
@@ -290,13 +296,15 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     const isStarting = streamState === "starting";
     const isStreaming = streamState === "streaming";
     const isStopping = streamState === "stopping";
+    const isStalled = streamState === "stalled";
     const isBlocked = streamState === "offline" || streamState === "disconnected" || streamState === "error";
+    const recovering = stallRecoveryInProgress;
 
     if (startBtn) {
-      startBtn.disabled = !wsOpen || isStarting || isStreaming || isStopping || isBlocked;
+      startBtn.disabled = !wsOpen || isStarting || isStreaming || isStopping || isBlocked || recovering;
     }
     if (stopBtn) {
-      stopBtn.disabled = !wsOpen || (!isStarting && !isStreaming);
+      stopBtn.disabled = !wsOpen || (!isStarting && !isStreaming && !isStopping && !isStalled && !recovering);
     }
   }
 
@@ -353,14 +361,94 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
   }
 
+  function clearStallRecovery() {
+    if (stallRecoveryTimer) {
+      clearTimeout(stallRecoveryTimer);
+      stallRecoveryTimer = null;
+    }
+    stallRecoveryInProgress = false;
+  }
+
+  function stopBackstageStream({ userInitiated = false } = {}) {
+    if (userInitiated) {
+      desiredStreaming = false;
+      clearStallRecovery();
+      stallRestartCount = 0;
+    }
+    lastFrameAt = 0;
+    sendCmd("backstage_stop", {});
+    stopAllWebrtc();
+    if (userInitiated) {
+      setStreamState("idle", "Stopped");
+    }
+  }
+
+  function startBackstageStream({ resetFrameClock = true } = {}) {
+    const mode = getWebrtcMode();
+    if (displaySelect && displaySelect.value !== undefined) {
+      sendCmd("backstage_select_display", {
+        display: parseInt(displaySelect.value, 10) || 0,
+      });
+    }
+    pushTransportQuality(mode);
+    pushTargetFps();
+    desiredStreaming = true;
+    if (resetFrameClock) lastFrameAt = 0;
+    setStreamState("starting", "Starting stream");
+    sendCmd("backstage_start", {
+      autoStartExplorer: false,
+      webrtc: mode === "relayed",
+      ...(virtualMode ? { virtual_mode: true, hidden_mode: true } : {}),
+    });
+    if (mode === "p2p") startP2P();
+    syncInputEnableState();
+  }
+
+  function beginStallRecovery() {
+    if (stallRecoveryInProgress || !desiredStreaming) return;
+    if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
+    if (stallRestartCount >= MAX_STALL_RESTARTS) {
+      setStreamState("error", "No frames · retries exhausted");
+      return;
+    }
+    stallRecoveryInProgress = true;
+    stallRestartCount += 1;
+    let remaining = STALL_COUNTDOWN_SEC;
+    const tick = () => {
+      if (!desiredStreaming || streamState === "offline" || streamState === "disconnected") {
+        clearStallRecovery();
+        return;
+      }
+      if (remaining > 0) {
+        setStreamState("stalled", `Retrying in ${remaining}...`);
+        remaining -= 1;
+        stallRecoveryTimer = setTimeout(tick, 1000);
+        return;
+      }
+      stallRecoveryTimer = null;
+      setStreamState("starting", `Restarting stream · attempt ${stallRestartCount}/${MAX_STALL_RESTARTS}`);
+      stopBackstageStream({ userInitiated: false });
+      stallRecoveryTimer = setTimeout(() => {
+        stallRecoveryTimer = null;
+        stallRecoveryInProgress = false;
+        if (!desiredStreaming) return;
+        if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
+        startBackstageStream({ resetFrameClock: true });
+      }, 300);
+    };
+    tick();
+  }
+
   function scheduleOffline(reason) {
     clearOfflineTimer();
+    clearStallRecovery();
     setStreamState("connecting", "Reconnecting");
     offlineTimer = setTimeout(() => {
       const now = performance.now();
       if (!lastFrameAt || now - lastFrameAt > 3000) {
         desiredStreaming = false;
-        setStreamState("offline", reason || "Client offline");
+        clearStallRecovery();
+        setStreamState("offline", "Client offline");
       }
     }, 3000);
   }
@@ -376,24 +464,19 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       setStreamState("connecting", "Connecting");
       return;
     }
+    if (msg.status === "stopped") {
+      clearOfflineTimer();
+      if (stallRecoveryInProgress || desiredStreaming) return;
+      lastFrameAt = 0;
+      setStreamState("idle", "Stopped");
+      return;
+    }
     if (msg.status === "online") {
       clearOfflineTimer();
       if (desiredStreaming) {
+        if (stallRecoveryInProgress) return;
         setStreamState("starting", "Reconnecting");
-        const mode = getWebrtcMode();
-        if (displaySelect && displaySelect.value !== undefined) {
-          sendCmd("backstage_select_display", {
-            display: parseInt(displaySelect.value, 10) || 0,
-          });
-        }
-        pushTargetFps();
-        sendCmd("backstage_start", {
-          autoStartExplorer: false,
-          webrtc: mode === "relayed",
-          ...(virtualMode ? { virtual_mode: true, hidden_mode: true } : {}),
-        });
-        if (mode === "p2p") startP2P();
-        syncInputEnableState();
+        startBackstageStream({ resetFrameClock: true });
       } else {
         setStreamState("idle", "Stopped");
       }
@@ -794,6 +877,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     const tick = (now) => {
       lastFrameAt = performance.now();
       clearOfflineTimer();
+      clearStallRecovery();
+      stallRestartCount = 0;
       webrtcFpsCount += 1;
       const elapsed = now - webrtcFpsWindowStart;
       if (elapsed >= 1000) {
@@ -1074,30 +1159,13 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   startBtn.addEventListener("click", function () {
-    const mode = getWebrtcMode();
-    if (displaySelect && displaySelect.value !== undefined) {
-      sendCmd("backstage_select_display", {
-        display: parseInt(displaySelect.value, 10) || 0,
-      });
-    }
-    pushTransportQuality(mode);
-    pushTargetFps();
-    desiredStreaming = true;
-    lastFrameAt = 0;
-    setStreamState("starting", "Starting stream");
-    sendCmd("backstage_start", {
-      autoStartExplorer: false,
-      webrtc: mode === "relayed",
-      ...(virtualMode ? { virtual_mode: true, hidden_mode: true } : {}),
-    });
-    if (mode === "p2p") startP2P();
-    syncInputEnableState();
+    clearStallRecovery();
+    stallRestartCount = 0;
+    startBackstageStream({ resetFrameClock: true });
   });
   stopBtn.addEventListener("click", function () {
-    desiredStreaming = false;
     setStreamState("stopping", "Stopping stream");
-    sendCmd("backstage_stop", {});
-    stopAllWebrtc();
+    stopBackstageStream({ userInitiated: true });
   });
   if (killAllBtn) {
     killAllBtn.addEventListener("click", function () {
@@ -1157,6 +1225,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   function markFrameReceived() {
     lastFrameAt = performance.now();
     clearOfflineTimer();
+    clearStallRecovery();
+    stallRestartCount = 0;
     if (streamState !== "streaming") {
       desiredStreaming = true;
       setStreamState("streaming", "Streaming");
@@ -1474,8 +1544,18 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     frameWatchTimer = setInterval(() => {
       const now = performance.now();
       if (desiredStreaming) {
-        if (lastFrameAt && now - lastFrameAt > 2000) {
-          setStreamState("stalled", "No frames");
+        if (lastFrameAt && now - lastFrameAt > STALL_MS) {
+          if (stallRecoveryInProgress) return;
+          if (stallRestartCount >= MAX_STALL_RESTARTS) {
+            if (streamState !== "error") {
+              setStreamState("error", "No frames · retries exhausted");
+            }
+            return;
+          }
+          if (streamState !== "stalled") {
+            setStreamState("stalled", "No frames");
+          }
+          beginStallRecovery();
         } else if (!lastFrameAt && streamState === "starting") {
           setStreamState("starting", "Starting stream");
         }

@@ -615,6 +615,67 @@ html, body {
   transition: width 120ms linear;
 }
 
+/* ── Delete progress dialog ── */
+.delete-dialog {
+  width: min(430px, calc(100vw - 24px));
+}
+.delete-body {
+  align-items: flex-start;
+}
+.delete-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.delete-label {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.delete-count {
+  margin: 0;
+  color: #404040;
+  font-size: 11px;
+}
+.delete-progress {
+  height: 18px;
+  padding: 2px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.delete-progress .progress-indicator-bar {
+  height: 100%;
+  width: 0%;
+  transition: width 120ms linear;
+}
+.delete-status {
+  margin: 0;
+  min-height: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #222;
+  font-size: 11px;
+}
+.delete-errors {
+  max-height: 110px;
+  overflow: auto;
+  background: #fff;
+  border: 2px solid;
+  border-color: #808080 #fff #fff #808080;
+  box-shadow: inset 1px 1px #000, inset -1px -1px #dfdfdf;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
 /* ── Hover quick-look popover ── */
 .ql-popover {
   position: fixed;

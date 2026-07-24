@@ -43,11 +43,13 @@ describe("webcam tile failures", () => {
     const js = await publicAsset("webcam.js");
     expect(js).toContain("function fallbackToJpeg");
     expect(js).toContain("let prefersH264 = !embedded && typeof VideoDecoder === \"function\"");
-    expect(js).toContain("Stream stalled · reconnecting");
+    expect(js).toContain("Retrying in ${remaining}...");
+    expect(js).toContain("beginStallRecovery");
+    expect(js).toContain("const MAX_STALL_RESTARTS = 3");
     expect(js).toContain("intentionalRestart");
     expect(js).toContain('setStreamState("error", "Camera stopped delivering images")');
     expect(js).toContain("webrtcVideo?.addEventListener(\"timeupdate\", recordWebrtcFrame)");
-    expect(js).toContain("postStatusToParent(state)");
+    expect(js).toContain("postStatusToParent(state");
     expect(js).toContain("noteFrameReceived");
     expect(js).toContain("const arrayTile = embedded && !showControls");
     expect(js).toContain("const requestedFps = arrayTile ? 15");

@@ -74,6 +74,10 @@ function applyIntervalToLoader() {
   loader.setRefreshInterval(ms);
 }
 
+function desktopViewerUrl(clientId) {
+  return `/viewer?clientId=${encodeURIComponent(clientId)}&mode=desktop`;
+}
+
 function buildTile(client) {
   const tile = document.createElement("a");
   tile.className = "wall-tile cv-thumb-host";
@@ -82,13 +86,15 @@ function buildTile(client) {
   tile.dataset.thumbClient = client.id;
   tile.dataset.thumbVersion = String(client.thumbnailVersion || 0);
   tile.dataset.thumbOnline = client.online ? "1" : "0";
+  tile.addEventListener("click", (e) => {
+    if (tile.dataset.thumbOnline !== "1") e.preventDefault();
+  });
   if (client.online) {
-    tile.href = `/remotedesktop?clientId=${encodeURIComponent(client.id)}`;
+    tile.href = desktopViewerUrl(client.id);
     tile.target = "_blank";
     tile.rel = "noopener";
   } else {
     tile.classList.add("is-offline");
-    tile.addEventListener("click", (e) => e.preventDefault());
   }
 
   const img = document.createElement("img");
@@ -150,7 +156,7 @@ function updateTile(tile, client) {
   const isOnline = !!client.online;
   tile.classList.toggle("is-offline", !isOnline);
   if (isOnline) {
-    tile.href = `/remotedesktop?clientId=${encodeURIComponent(client.id)}`;
+    tile.href = desktopViewerUrl(client.id);
     tile.target = "_blank";
     tile.rel = "noopener";
   } else {
