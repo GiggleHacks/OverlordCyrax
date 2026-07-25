@@ -4,12 +4,14 @@ import { readFile } from "node:fs/promises";
 const publicFile = (name: string) => readFile(new URL(`../public/${name}`, import.meta.url), "utf8");
 
 describe("unified viewer UI", () => {
-  test("provides webcam, desktop, split, and pip modes only", async () => {
+  test("provides webcam, desktop, split, pip, and dashboard2 modes", async () => {
     const html = await publicFile("viewer.html");
     expect(html).toContain('data-mode="webcam"');
     expect(html).toContain('data-mode="desktop"');
     expect(html).toContain('data-mode="split"');
     expect(html).toContain('data-mode="pip"');
+    expect(html).toContain('data-mode="dashboard2"');
+    expect(html).toContain("Dashboard 2.0");
     expect(html).not.toContain('data-mode="dock"');
     expect(html).toContain('id="viewerClientId"');
     expect(html).toContain('class="viewer-back"');
@@ -17,6 +19,77 @@ describe("unified viewer UI", () => {
     expect(html).toContain("Back to Clients");
     expect(html).toContain('id="sidePanelCollapse"');
     expect(html).toContain("viewer-toolbar-cam");
+    expect(html).toContain('id="viewerDashboard2"');
+    expect(html).toContain('id="viewerD2Desktop"');
+    expect(html).toContain('id="viewerD2Webcam"');
+    expect(html).toContain('id="viewerD2Processes"');
+    expect(html).toContain('data-d2-id="desktop"');
+    expect(html).toContain('data-d2-id="webcam"');
+    expect(html).toContain('data-d2-id="processes"');
+    expect(html).not.toContain('data-d2-id="status"');
+    expect(html).not.toContain("data-d2-status-id");
+    expect(html).toContain("data-d2-reset");
+    expect(html).toContain("data-d2-save");
+    expect(html).toContain("data-d2-cam-start");
+    expect(html).toContain("data-d2-cam-stop");
+    expect(html).toContain('data-mode="dashboard2"');
+    expect(html).toContain('data-mode="dashboard2"'); // default shell mode
+    expect(html).toMatch(/viewer-panels"[^>]*data-mode="dashboard2"/);
+  });
+
+  test("ships Dashboard 2.0 MDI controller and mode wiring", async () => {
+    const mdi = await publicFile("assets/dashboard2-mdi.js");
+    expect(mdi).toContain("export const DASHBOARD2_MDI_VERSION");
+    expect(mdi).toContain("0.2.1");
+    expect(mdi).toContain("export function initDashboard2Mdi");
+    expect(mdi).toContain("overlord_dashboard2_layout_v2");
+    expect(mdi).toContain("overlord_dashboard2_layout_saved_v2");
+    expect(mdi).toContain("savePreferredLayout");
+    expect(mdi).toContain("setPointerCapture");
+    expect(mdi).toContain("pointercancel");
+    expect(mdi).toContain("lostpointercapture");
+    expect(mdi).toContain('data-d2-edge');
+    expect(mdi).toContain("processes");
+    expect(mdi).not.toContain("refreshStatus");
+    const viewerJs = await publicFile("assets/viewer.js");
+    expect(viewerJs).toContain('from "./dashboard2-mdi.js"');
+    expect(viewerJs).toContain("VIEWER_JS_VERSION");
+    expect(viewerJs).toContain('"dashboard2"');
+    expect(viewerJs).toContain("viewer-dashboard2-active");
+    expect(viewerJs).toContain("viewerD2Desktop");
+    expect(viewerJs).toContain("viewerD2Webcam");
+    expect(viewerJs).toContain("viewerD2Processes");
+    expect(viewerJs).toContain("autostart=0");
+    expect(viewerJs).toContain("d2=1");
+    expect(viewerJs).toMatch(/webcamUrlD2[\s\S]*autostart=0/);
+    expect(viewerJs).not.toMatch(/webcamUrlD2[\s\S]*controls=1/);
+    expect(viewerJs).toContain("data-d2-cam-settings");
+    expect(viewerJs).toContain("is-d2-float");
+    expect(viewerJs).toContain("setD2NoCamera");
+    const viewerHtml = await publicFile("viewer.html");
+    expect(viewerHtml).toContain("data-d2-cam-settings");
+    expect(viewerHtml).toContain("data-d2-webcam-empty");
+    expect(viewerHtml).toContain("No webcam");
+    const webcamHtml = await publicFile("webcam.html");
+    expect(webcamHtml).toContain('id="webcamEmpty"');
+    expect(webcamHtml).toContain("No webcam");
+    const webcamJs = await publicFile("assets/webcam.js");
+    expect(webcamJs).toContain("webcam-embedded-d2");
+    expect(webcamJs).toContain("updateNoCameraUi");
+    expect(viewerJs).toContain("overlord_side_panel_d2_collapsed_v1");
+    expect(viewerJs).toContain(': "dashboard2"');
+    const css = await publicFile("assets/main.css");
+    expect(css).toContain('.viewer-panels[data-mode="dashboard2"]');
+    expect(css).toContain(".d2-workspace");
+    expect(css).toContain(".d2-titlebar");
+    expect(css).toContain(".d2-edge-n");
+    expect(css).toContain(".d2-edge-se");
+    expect(css).not.toContain(".d2-status-tree");
+    expect(css).toContain("body.rd-embedded #frameCanvas");
+    expect(css).toMatch(/body\.rd-embedded #frameCanvas[\s\S]*?object-fit:\s*contain/);
+    expect(css).not.toMatch(/body\.rd-embedded #frameCanvas[\s\S]*?object-fit:\s*fill/);
+    expect(css).toContain("body.processes-embedded");
+    expect(css).toContain(".sp-pins");
   });
 
   test("supports collapsible rail and desktop-primary split layout", async () => {
@@ -33,11 +106,15 @@ describe("unified viewer UI", () => {
     expect(css).toContain("order: 1");
   });
 
-  test("side panel exposes Clients home link", async () => {
+  test("side panel exposes Clients home link and shortcut pins", async () => {
     const js = await publicFile("assets/side-panel.js");
     expect(js).toContain('className = "sp-item sp-home"');
     expect(js).toContain('home.href = "/"');
     expect(js).toContain("Clients");
+    expect(js).toContain("overlord_side_panel_pins_v1");
+    expect(js).toContain("Create Shortcut");
+    expect(js).toContain("buildPinsFooter");
+    expect(js).toContain("mode=dashboard2");
   });
 
   test("hosts PiP webcam overlay inside the desktop video panel", async () => {
@@ -112,11 +189,14 @@ describe("unified viewer UI", () => {
     expect(viewerJs).toContain("webcam_cmd");
     expect(viewerJs).toContain("webcamNeedsParentBar");
     expect(viewerJs).toContain('m === "split" || m === "pip"');
+    expect(viewerJs).not.toContain('m === "split" || m === "pip" || m === "dashboard2"');
     const webcamJs = await publicFile("assets/webcam.js");
     expect(webcamJs).toContain('data.type !== "webcam_cmd"');
     expect(webcamJs).toContain('action === "start"');
     expect(webcamJs).toContain("postStatusToParent");
     expect(webcamJs).toContain("|| 360");
+    expect(webcamJs).toContain('autostartParam !== "0"');
+    expect(webcamJs).toContain("allowAutostart");
   });
 
   test("registers the unified viewer as a protected client page", async () => {
@@ -163,6 +243,98 @@ describe("unified viewer UI", () => {
 
     const css = await publicFile("assets/main.css");
     expect(css).toContain(".viewer-capability.is-offline");
+  });
+
+  test("process manager supports embedded compact mode", async () => {
+    const html = await publicFile("processes.html");
+    expect(html).toContain("embedded");
+    expect(html).toContain("processes-embedded-check.js");
+    expect(html).toContain("processes-bootstrap.js");
+    expect(html).toContain("proc-toolbar");
+    expect(html).toContain("proc-list-wrap");
+    expect(html).toContain("proc-list-placeholder");
+    expect(html).toContain("Connecting...");
+    // CSP (script-src 'self') forbids inline scripts — bootstraps must be external
+    expect(html).not.toMatch(/<script(?![^>]*src=)[^>]*>/);
+    const embeddedCheck = await publicFile("assets/processes-embedded-check.js");
+    expect(embeddedCheck).toContain("processes-embedded-root");
+    expect(embeddedCheck).toContain("processes-embedded");
+    const bootstrap = await publicFile("assets/processes-bootstrap.js");
+    expect(bootstrap).toContain("/assets/processes.js");
+    expect(bootstrap).toContain("/assets/nav.js");
+    const js = await publicFile("assets/processes.js");
+    expect(js).toContain("PROCESSES_JS_VERSION");
+    expect(js).toContain("processes-embedded");
+    expect(js).toContain('get("embedded") === "1"');
+    expect(js).toContain("setListPlaceholder");
+    const css = await publicFile("assets/main.css");
+    expect(css).toContain("body.processes-embedded");
+    expect(css).toContain("html.processes-embedded-root");
+    expect(css).toContain(".proc-list-wrap");
+    expect(css).toContain("display: contents !important");
+    const mdi = await publicFile("assets/dashboard2-mdi.js");
+    expect(mdi).toContain("overlord_dashboard2_layout_v2");
+    expect(mdi).toMatch(/processes:\s*\{[^}]*w:\s*0\.24/);
+  });
+
+  test("process manager 2.0 ships compact page wired into dashboard2", async () => {
+    const html = await publicFile("processes2.html");
+    expect(html).toContain("Process Manager 2.0");
+    expect(html).toContain("proc2-toolbar");
+    expect(html).toContain("proc2-list");
+    expect(html).toContain("proc2-search-input");
+    expect(html).toContain("proc2-sort-name");
+    expect(html).toContain("proc2-sort-cpu");
+    expect(html).toContain("proc2-sort-memory");
+    expect(html).toContain("/assets/processes2-bootstrap.js");
+    expect(html).not.toContain("nav.js");
+    // CSP (script-src 'self') forbids inline scripts — bootstraps must be external
+    expect(html).not.toMatch(/<script(?![^>]*src=)[^>]*>/);
+    const bootstrap2 = await publicFile("assets/processes2-bootstrap.js");
+    expect(bootstrap2).toContain("/assets/processes2.js");
+    const js = await publicFile("assets/processes2.js");
+    expect(js).toContain("PROCESSES2_JS_VERSION");
+    expect(js).toContain("process_kill");
+    expect(js).toContain("process_suspend");
+    expect(js).toContain("process_resume");
+    expect(js).toContain("process_icon");
+    expect(js).toContain('checkFeatureAccess("processes", clientId)');
+    const viewerJs = await publicFile("assets/viewer.js");
+    expect(viewerJs).toContain("/processes2?embedded=1");
+    expect(viewerJs).not.toContain("/processes?embedded=1");
+    const viewerHtml = await publicFile("viewer.html");
+    expect(viewerHtml).toContain("Process Manager 2.0");
+    const routes = await readFile(new URL("../src/server/routes/page-routes.ts", import.meta.url), "utf8");
+    expect(routes).toContain("processes2.html");
+  });
+
+  test("dashboard2 renders draggable desktop shortcut icons from side-panel pins", async () => {
+    const icons = await publicFile("assets/dashboard2-icons.js");
+    expect(icons).toContain("DASHBOARD2_ICONS_VERSION");
+    expect(icons).toContain('from "./side-panel.js"');
+    expect(icons).toContain("overlord_dashboard2_icons_v1");
+    expect(icons).toContain("overlord_side_panel_pins_v1");
+    expect(icons).toContain("runPinnedCommand");
+    expect(icons).toContain("initDashboard2Icons");
+    expect(icons).toContain("overlord:pins-changed");
+    expect(icons).toContain("setPointerCapture");
+    const sidePanel = await publicFile("assets/side-panel.js");
+    expect(sidePanel).toContain("export { SIDE_PINS_KEY, loadPins, runPinnedCommand }");
+    expect(sidePanel).toContain("overlord:pins-changed");
+    const viewerJs = await publicFile("assets/viewer.js");
+    expect(viewerJs).toContain('from "./dashboard2-icons.js"');
+    expect(viewerJs).toContain("dashboard2Icons.activate()");
+    expect(viewerJs).toContain("dashboard2Icons.deactivate()");
+    const css = await publicFile("assets/main.css");
+    expect(css).toContain(".d2-icon");
+    expect(css).toContain(".d2-icon-img");
+    expect(css).toContain(".d2-icon-label");
+    expect(css).toContain(".d2-icon.is-dragging");
+    // every MDI window keeps drag (titlebar) + 8-way resize handles
+    const mdi = await publicFile("assets/dashboard2-mdi.js");
+    expect(mdi).toContain('["n", "s", "e", "w", "ne", "nw", "se", "sw"]');
+    expect(css).toContain(".d2-edge-se");
+    expect(css).toContain("cursor: move");
   });
 });
 

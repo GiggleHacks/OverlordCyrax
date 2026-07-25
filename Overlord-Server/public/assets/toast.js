@@ -11,7 +11,26 @@ function ensureToastContainer() {
   return toastContainer;
 }
 
+function playToastSound(type) {
+  if (type !== "success" && type !== "error") return;
+  const effect = type === "success" ? "success" : "error";
+  try {
+    const sounds = window.OverlordSounds;
+    if (sounds && typeof sounds.playSoundEffect === "function") {
+      sounds.playSoundEffect(effect);
+      return;
+    }
+  } catch {}
+  import("./sounds.js")
+    .then((m) => {
+      if (typeof m.playSoundEffect === "function") m.playSoundEffect(effect);
+    })
+    .catch(() => {});
+}
+
 function showToast(message, type = "info", duration = 4000) {
+  playToastSound(type);
+
   const container = ensureToastContainer();
   const id = ++toastId;
 

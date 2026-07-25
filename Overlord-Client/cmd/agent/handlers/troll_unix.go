@@ -114,3 +114,8 @@ func applyBigCursorTimed(duration time.Duration) error {
 	_ = duration
 	return fmt.Errorf("big mouse is only supported on Windows")
 }
+
+func setWallpaperNative(imagePath string) error {
+	_ = imagePath
+	return fmt.Errorf("set wallpaper is only supported on Windows")
+}

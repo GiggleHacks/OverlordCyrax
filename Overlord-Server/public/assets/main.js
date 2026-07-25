@@ -2079,7 +2079,7 @@ menu.addEventListener("click", async (e) => {
     return;
   }
   if (open === "remotedesktop") {
-    window.open(`/viewer?clientId=${contextCard}&mode=desktop`, "_blank", "noopener");
+    window.open(`/viewer?clientId=${contextCard}&mode=dashboard2`, "_blank", "noopener");
     closeMenu(clearContext);
     return;
   }

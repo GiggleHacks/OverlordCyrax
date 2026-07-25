@@ -521,7 +521,7 @@ export function createRenderer({
         e.stopPropagation();
         if (card.dataset.online === "true") {
           if (pingClient) pingClient(clientId);
-          window.open(`/viewer?clientId=${encodeURIComponent(clientId)}&mode=desktop`, "_blank", "noopener");
+          window.open(`/viewer?clientId=${encodeURIComponent(clientId)}&mode=dashboard2`, "_blank", "noopener");
         } else {
           const thumbImg = card.querySelector(".thumb-img");
           if (thumbImg?.src) openModal(thumbImg.src);

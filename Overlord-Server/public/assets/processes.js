@@ -1,7 +1,14 @@
 import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 import { checkFeatureAccess } from "./feature-gate.js";
 
+const PROCESSES_JS_VERSION = "1.2.0";
 const clientId = window.location.pathname.split("/")[1];
+const processesEmbedded = new URLSearchParams(location.search).get("embedded") === "1";
+if (processesEmbedded) {
+  document.body.classList.add("processes-embedded");
+  document.getElementById("top-nav")?.setAttribute("hidden", "");
+  document.documentElement.classList.add("processes-embedded-root");
+}
 let ws = null;
 let processes = [];
 let processMap = new Map();
@@ -27,8 +34,16 @@ const killBtn = document.getElementById("kill-btn");
 const searchInput = document.getElementById("search-input");
 const clientIdHeader = document.getElementById("client-id-header");
 
+function setListPlaceholder(html) {
+  if (!processListEl) return;
+  processListEl.innerHTML = `<div class="proc-list-placeholder px-4 py-6 text-center text-slate-500 text-sm">${html}</div>`;
+}
+
 if (clientIdHeader) {
-  clientIdHeader.innerHTML = `<i class="fa-solid fa-microchip mr-1.5 text-sky-400"></i>${escapeHtml(clientId)}`;
+  clientIdHeader.innerHTML = processesEmbedded
+    ? `<span class="proc-emb-id">${escapeHtml(clientId.slice(0, 12))}</span>`
+    : `<i class="fa-solid fa-microchip mr-1.5 text-sky-400"></i>${escapeHtml(clientId)}`;
+  clientIdHeader.title = `processes.js v${PROCESSES_JS_VERSION}`;
 }
 
 function connect() {
@@ -42,6 +57,7 @@ function connect() {
     console.log("Process manager connected");
     updateStatus("connected", "Connected");
     enableControls(true);
+    setListPlaceholder('<i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading processes...');
     requestProcessList();
   };
 
@@ -111,6 +127,7 @@ function handleMessage(msg) {
       if (msg.status === "offline") {
         updateStatus("error", "Client Offline");
         enableControls(false);
+        setListPlaceholder('<i class="fa-solid fa-plug-circle-xmark mr-2"></i>Client offline');
       }
       break;
     case "process_list_result":
@@ -134,7 +151,7 @@ function requestProcessList() {
 
 function handleProcessList(msg) {
   if (msg.error) {
-    processListEl.innerHTML = `<div class="px-4 py-6 text-center text-red-400"><i class="fa-solid fa-exclamation-triangle mr-2"></i>${escapeHtml(msg.error)}</div>`;
+    processListEl.innerHTML = `<div class="proc-list-placeholder px-4 py-6 text-center text-red-400 text-sm"><i class="fa-solid fa-exclamation-triangle mr-2"></i>${escapeHtml(msg.error)}</div>`;
     updateStatus("error", "Error loading processes");
     return;
   }
@@ -249,7 +266,7 @@ function renderProcesses() {
 
   if (filtered.length === 0) {
     processListEl.innerHTML =
-      '<div class="px-4 py-6 text-center text-slate-400"><i class="fa-solid fa-inbox mr-2"></i>No processes found</div>';
+      '<div class="proc-list-placeholder px-4 py-6 text-center text-slate-400 text-sm"><i class="fa-solid fa-inbox mr-2"></i>No processes found</div>';
     rowsByPid.clear();
     return;
   }
@@ -693,5 +710,14 @@ function applyProcIconToDom(key, entry) {
 }
 
 updateStatus("connecting", "Connecting...");
-checkFeatureAccess("processes", clientId).then(ok => ok && connect());
+if (!clientId) {
+  updateStatus("error", "Missing client");
+  setListPlaceholder('<i class="fa-solid fa-exclamation-triangle mr-2"></i>Missing client ID');
+} else {
+  setListPlaceholder('<i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Connecting...');
+  checkFeatureAccess("processes", clientId).then((ok) => {
+    if (ok) connect();
+    else setListPlaceholder('<i class="fa-solid fa-lock mr-2"></i>Access denied');
+  });
+}
 updateSortIndicators();

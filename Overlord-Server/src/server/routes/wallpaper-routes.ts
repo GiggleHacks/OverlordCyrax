@@ -426,23 +426,15 @@ async function waitForScriptResultWithReconnectRetry(
   };
 }
 
-function verificationScript(remotePath: string): string {
-  const escapedPath = remotePath.replace(/'/g, "''");
-  return `
-$path = '${escapedPath}'
-if (Test-Path -LiteralPath $path -PathType Leaf) {
-  Write-Output 'exists:true'
-  exit 0
-}
-Write-Output 'exists:false'
-exit 2
-`.trim();
-}
-
 function applyWallpaperScript(remotePath: string): string {
   const escapedPath = remotePath.replace(/'/g, "''");
   return `
 $path = '${escapedPath}'
+if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+  Write-Output 'wallpaper_applied:false'
+  Write-Output 'reason:missing_file'
+  exit 2
+}
 Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name WallpaperStyle -Value '6' -ErrorAction SilentlyContinue
 Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name TileWallpaper -Value '0' -ErrorAction SilentlyContinue
 
@@ -462,6 +454,40 @@ if ($ok -eq 0) {
 Write-Output 'wallpaper_applied:true'
 exit 0
 `.trim();
+}
+
+function isUnknownCommand(message?: string): boolean {
+  return /unknown command/i.test(String(message || ""));
+}
+
+function isPowerShellCrash(message?: string): boolean {
+  return /0xc0000005|access violation/i.test(String(message || ""));
+}
+
+function applyWallpaperFailureMessage(clientMessage?: string, connectionFailed = false): { code: string; message: string } {
+  if (connectionFailed) {
+    return {
+      code: "apply_wallpaper_connection_failed",
+      message: "upload completed, but repeated client reconnects interrupted the wallpaper apply command",
+    };
+  }
+  if (isPowerShellCrash(clientMessage)) {
+    return {
+      code: "apply_wallpaper_powershell_crash",
+      message:
+        "upload completed, but PowerShell crashed while applying wallpaper (exit 0xc0000005). Update the client agent to use native set_wallpaper, or repair PowerShell on the host",
+    };
+  }
+  if (/missing_file|wallpaper file not found|cannot find the (file|path)/i.test(String(clientMessage || ""))) {
+    return {
+      code: "apply_wallpaper_missing_file",
+      message: "upload command completed but destination file was not found on the client",
+    };
+  }
+  return {
+    code: "apply_wallpaper_failed",
+    message: "upload completed but Windows did not apply the file as wallpaper",
+  };
 }
 
 async function runWallpaperJob(job: WallpaperJob, deps: WallpaperRouteDeps, user: any, ip: string) {
@@ -503,49 +529,72 @@ async function runWallpaperJob(job: WallpaperJob, deps: WallpaperRouteDeps, user
       return;
     }
 
+    // Successful file_upload_http already size-checks and renames atomically.
     job.transferComplete = true;
     job.bytesTransferred = job.totalBytes;
     job.percent = 95;
-    setJobPhase(job, "verify_remote_file", 96);
+    setJobPhase(job, "apply_wallpaper", 98);
 
-    const verifyResult = await waitForScriptResultWithReconnectRetry(
+    const scriptTimeoutMs = deps.scriptTimeoutMs ?? SCRIPT_TIMEOUT_MS;
+    const nativeApply = await waitForCommandReply(
       deps,
       job.clientId,
-      verificationScript(job.destinationPath),
-      "powershell",
-      deps.scriptTimeoutMs ?? SCRIPT_TIMEOUT_MS,
+      {
+        type: "command",
+        commandType: "set_wallpaper",
+        id: uuidv4(),
+        payload: { path: job.destinationPath },
+      },
+      {
+        code: "apply_wallpaper_timeout",
+        message: "set_wallpaper timed out on the client",
+      },
+      scriptTimeoutMs,
     );
-    const verifyOutput = String(verifyResult.result || "");
-    if (!verifyResult.ok || !verifyOutput.toLowerCase().includes("exists:true")) {
-      failJob(job, "verify_remote_file_failed", "upload command completed but destination file was not found on the client", {
-        phase: "verify_remote_file",
-        clientMessage: verifyResult.error || verifyOutput,
+
+    let applied = false;
+    let applyClientMessage = nativeApply.message || "";
+
+    if (nativeApply.ok) {
+      applied = true;
+      logger.info(`[wallpaper] applied via native set_wallpaper for ${job.clientId}`);
+    } else if (isUnknownCommand(nativeApply.message)) {
+      logger.info(`[wallpaper] client ${job.clientId} lacks set_wallpaper; falling back to PowerShell apply`);
+      const applyResult = await waitForScriptResultWithReconnectRetry(
+        deps,
+        job.clientId,
+        applyWallpaperScript(job.destinationPath),
+        "powershell",
+        scriptTimeoutMs,
+      );
+      const applyOutput = String(applyResult.result || "");
+      applyClientMessage = applyResult.error || applyOutput;
+      applied = Boolean(applyResult.ok && applyOutput.toLowerCase().includes("wallpaper_applied:true"));
+
+      if (!applied) {
+        const connectionFailed = isTransientClientConnectionError(applyResult.error);
+        const failure = applyWallpaperFailureMessage(applyClientMessage, connectionFailed);
+        failJob(job, failure.code, failure.message, {
+          phase: "apply_wallpaper",
+          clientMessage: applyClientMessage,
+        });
+        return;
+      }
+    } else {
+      const connectionFailed = isTransientClientConnectionError(nativeApply.message);
+      const failure = applyWallpaperFailureMessage(applyClientMessage, connectionFailed);
+      failJob(job, nativeApply.code || failure.code, failure.message, {
+        phase: "apply_wallpaper",
+        clientMessage: applyClientMessage,
       });
       return;
     }
 
-    setJobPhase(job, "apply_wallpaper", 98);
-    const applyResult = await waitForScriptResultWithReconnectRetry(
-      deps,
-      job.clientId,
-      applyWallpaperScript(job.destinationPath),
-      "powershell",
-      deps.scriptTimeoutMs ?? SCRIPT_TIMEOUT_MS,
-    );
-    const applyOutput = String(applyResult.result || "");
-    if (!applyResult.ok || !applyOutput.toLowerCase().includes("wallpaper_applied:true")) {
-      const connectionFailed = isTransientClientConnectionError(applyResult.error);
-      failJob(
-        job,
-        connectionFailed ? "apply_wallpaper_connection_failed" : "apply_wallpaper_failed",
-        connectionFailed
-          ? "file exists on the client, but repeated client reconnects interrupted the wallpaper apply command"
-          : "file exists on the client but Windows did not apply it as wallpaper",
-        {
-          phase: "apply_wallpaper",
-          clientMessage: applyResult.error || applyOutput,
-        },
-      );
+    if (!applied) {
+      failJob(job, "apply_wallpaper_failed", "upload completed but Windows did not apply the file as wallpaper", {
+        phase: "apply_wallpaper",
+        clientMessage: applyClientMessage,
+      });
       return;
     }
 

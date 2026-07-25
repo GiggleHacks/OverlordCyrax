@@ -2,6 +2,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
+const SERVER_VERSION = "1.0.0";
+
 const root = __dirname;
 http
   .createServer((request, response) => {
@@ -19,4 +21,6 @@ http
       response.end(body);
     });
   })
-  .listen(8333, "127.0.0.1");
+  .listen(8333, "127.0.0.1", () => {
+    console.log(`Overlord progress server v${SERVER_VERSION} listening on http://127.0.0.1:8333/`);
+  });

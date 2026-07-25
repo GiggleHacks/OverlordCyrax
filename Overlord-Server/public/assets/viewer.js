@@ -1,12 +1,17 @@
 import { initSidePanel } from "./side-panel.js";
 import { initPipOverlay } from "./pip-overlay.js";
+import { initDashboard2Mdi, DASHBOARD2_MDI_VERSION } from "./dashboard2-mdi.js";
+import { initDashboard2Icons, DASHBOARD2_ICONS_VERSION } from "./dashboard2-icons.js";
+
+/** viewer.js — unified remote viewer shell */
+export const VIEWER_JS_VERSION = "1.4.0";
 
 const params = new URLSearchParams(location.search);
 const clientId = params.get("clientId") || "";
-const allowedModes = new Set(["webcam", "desktop", "split", "pip"]);
+const allowedModes = new Set(["webcam", "desktop", "split", "pip", "dashboard2"]);
 // Legacy "dock" / "space" URLs map to split (one clear side-by-side layout).
 const rawMode = params.get("mode") === "dock" ? "split" : params.get("mode");
-let mode = allowedModes.has(rawMode) ? rawMode : "webcam";
+let mode = allowedModes.has(rawMode) ? rawMode : "dashboard2";
 
 /* Side action panel */
 const sidePanelRoot = document.getElementById("sidePanel");
@@ -18,6 +23,14 @@ const pipWebcam = document.getElementById("viewerPipWebcam");
 const pipOverlayEl = document.getElementById("viewerPipOverlay");
 const desktopPanel = document.getElementById("viewerDesktopPanel");
 const webcamPanel = document.getElementById("viewerWebcamPanel");
+const dashboard2Root = document.getElementById("viewerDashboard2");
+const d2Desktop = document.getElementById("viewerD2Desktop");
+const d2Webcam = document.getElementById("viewerD2Webcam");
+const d2Processes = document.getElementById("viewerD2Processes");
+const d2CamStart = document.querySelector("[data-d2-cam-start]");
+const d2CamStop = document.querySelector("[data-d2-cam-stop]");
+const d2CamSettings = document.querySelector("[data-d2-cam-settings]");
+const d2WebcamEmpty = document.querySelector("[data-d2-webcam-empty]");
 const idLabel = document.getElementById("viewerClientId");
 const capability = document.getElementById("viewerCapability");
 const webcamBar = document.getElementById("viewerWebcamBar");
@@ -35,12 +48,24 @@ const camMaxFps = document.getElementById("viewerCamMaxFps");
 const camH264 = document.getElementById("viewerCamH264");
 
 idLabel.textContent = clientId.slice(0, 12) || "unknown";
+idLabel.title = `viewer.js v${VIEWER_JS_VERSION} · dashboard2-mdi v${DASHBOARD2_MDI_VERSION} · d2-icons v${DASHBOARD2_ICONS_VERSION}`;
+
+const dashboard2 = initDashboard2Mdi({
+  root: dashboard2Root,
+});
+const dashboard2Icons = initDashboard2Icons({
+  root: dashboard2Root,
+  clientId,
+});
 const transition = params.get("transition") || "";
 const fromArray = params.get("fromArray") === "1";
 // Webcam-only mode keeps in-frame controls; split/pip use the parent bar (no embedded chrome).
 const webcamUrlFull = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&controls=1${transition ? "&transition=1" : ""}`;
 const webcamUrlBar = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1${transition ? "&transition=1" : ""}`;
+// D2: full-bleed video; Start/Stop/Settings live on the MDI titlebar (not over the feed).
+const webcamUrlD2 = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&autostart=0&d2=1`;
 const desktopUrl = `/remotedesktop?clientId=${encodeURIComponent(clientId)}&embedded=1`;
+const processesUrlD2 = clientId ? `/${encodeURIComponent(clientId)}/processes2?embedded=1` : "about:blank";
 
 function notifyArrayViewerClosed() {
   if (!fromArray || !clientId) return;
@@ -76,6 +101,7 @@ function unloadFrame(frame) {
 
 function activeWebcamFrame() {
   if (mode === "pip") return pipWebcam;
+  if (mode === "dashboard2") return d2Webcam;
   if (mode === "split" || mode === "webcam") return webcam;
   return null;
 }
@@ -103,6 +129,25 @@ function setWebcamBarVisible(visible) {
 
 function webcamNeedsParentBar(m) {
   return m === "split" || m === "pip";
+}
+
+let d2HasCamera = null;
+
+function setD2NoCamera(noCam) {
+  if (d2WebcamEmpty) d2WebcamEmpty.hidden = !noCam;
+  document.body.classList.toggle("d2-webcam-missing", !!noCam);
+  if (noCam) {
+    if (d2CamStart) d2CamStart.disabled = true;
+    if (d2CamStop) d2CamStop.disabled = true;
+  }
+}
+
+function syncD2CamButtons(status) {
+  const streaming = status === "streaming" || status === "starting" || status === "stalled" || status === "connecting";
+  const noCam = d2HasCamera === false;
+  if (d2CamStart) d2CamStart.disabled = noCam || streaming;
+  if (d2CamStop) d2CamStop.disabled = noCam || (!streaming && status !== "stopping");
+  if (d2CamSettings) d2CamSettings.disabled = false;
 }
 
 const SPLIT_RATIO_KEY = "overlord_viewer_split_ratio";
@@ -171,6 +216,7 @@ function updateCamStatusUi(status, fps, label) {
     camStatus.dataset.status = key;
   }
   if (camFps && fps != null) camFps.textContent = fps === "" || fps == null ? "--" : String(fps);
+  syncD2CamButtons(status || "idle");
 
   const streaming = status === "streaming" || status === "starting" || status === "stalled";
   if (camStart) camStart.disabled = streaming;
@@ -215,6 +261,7 @@ const sidePanelEl = sidePanelRoot;
 const sideCollapseBtn = document.getElementById("sidePanelCollapse");
 const SIDE_WIDTH_KEY = "overlord_side_panel_width_v1";
 const SIDE_COLLAPSED_KEY = "overlord_side_panel_collapsed_v1";
+const SIDE_D2_COLLAPSED_KEY = "overlord_side_panel_d2_collapsed_v1";
 const DESKTOP_LAYOUT_KEY = "overlord_desktop_layout_v1";
 const SIDE_MIN = 140;
 const SIDE_MAX = 420;
@@ -258,11 +305,30 @@ function setSideCollapsed(collapsed) {
     applySidePanelWidth(sideExpandedWidth);
   }
   try {
-    localStorage.setItem(SIDE_COLLAPSED_KEY, sideCollapsed ? "1" : "0");
+    if (mode === "dashboard2") {
+      localStorage.setItem(SIDE_D2_COLLAPSED_KEY, sideCollapsed ? "1" : "0");
+    } else {
+      localStorage.setItem(SIDE_COLLAPSED_KEY, sideCollapsed ? "1" : "0");
+    }
   } catch {}
   if (typeof pip !== "undefined" && mode === "pip") {
     requestAnimationFrame(() => pip.restoreLayout());
   }
+}
+
+function applySideCollapseForMode(m) {
+  let collapsed = false;
+  try {
+    if (m === "dashboard2") {
+      const d2 = localStorage.getItem(SIDE_D2_COLLAPSED_KEY);
+      collapsed = d2 === null ? true : d2 === "1";
+    } else {
+      collapsed = localStorage.getItem(SIDE_COLLAPSED_KEY) === "1";
+    }
+  } catch {
+    collapsed = m === "dashboard2";
+  }
+  setSideCollapsed(collapsed);
 }
 
 function loadSidePanelWidth() {
@@ -273,11 +339,7 @@ function loadSidePanelWidth() {
   } catch {
     sideExpandedWidth = SIDE_DEFAULT;
   }
-  let collapsed = false;
-  try {
-    collapsed = localStorage.getItem(SIDE_COLLAPSED_KEY) === "1";
-  } catch {}
-  setSideCollapsed(collapsed);
+  applySideCollapseForMode(mode);
   return sideCollapsed ? SIDE_RAIL : sideExpandedWidth;
 }
 
@@ -300,8 +362,9 @@ loadSidePanelWidth();
 function setMode(nextMode) {
   const prev = mode;
   const requested = nextMode === "dock" ? "split" : nextMode;
-  mode = allowedModes.has(requested) ? requested : "webcam";
+  mode = allowedModes.has(requested) ? requested : "dashboard2";
   panels.dataset.mode = mode;
+  document.body.classList.toggle("viewer-dashboard2-active", mode === "dashboard2");
   if (prev !== mode) {
     // Keep a custom split ratio when re-entering split; only clear other modes.
     if (mode !== "split") {
@@ -309,6 +372,7 @@ function setMode(nextMode) {
       panels.style.gridTemplateRows = "";
     }
     if (mode !== "desktop") clearDesktopInset();
+    applySideCollapseForMode(mode);
   }
 
   if (webcamPanel) {
@@ -323,10 +387,27 @@ function setMode(nextMode) {
 
   document.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("is-active", button.dataset.mode === mode));
 
+  const needsDashboard2 = mode === "dashboard2";
   const needsWebcam = mode === "webcam" || mode === "split";
   const needsDesktop = mode === "desktop" || mode === "split" || mode === "pip";
   const needsPip = mode === "pip";
   const showBar = webcamNeedsParentBar(mode);
+
+  if (needsDashboard2) {
+    ensureFrame(d2Desktop, desktopUrl);
+    ensureFrame(d2Webcam, webcamUrlD2);
+    ensureFrame(d2Processes, processesUrlD2);
+    dashboard2.activate();
+    dashboard2Icons.activate();
+    syncD2CamButtons("idle");
+    setTimeout(() => postToWebcam({ type: "webcam_cmd", action: "ping" }), 600);
+  } else {
+    dashboard2.deactivate();
+    dashboard2Icons.deactivate();
+    unloadFrame(d2Desktop);
+    unloadFrame(d2Webcam);
+    unloadFrame(d2Processes);
+  }
 
   if (needsWebcam) {
     ensureFrame(webcam, mode === "split" ? webcamUrlBar : webcamUrlFull);
@@ -379,22 +460,84 @@ document.querySelectorAll("[data-mode]").forEach((button) => button.addEventList
 
 camStart?.addEventListener("click", () => postToWebcam({ type: "webcam_cmd", action: "start" }));
 camStop?.addEventListener("click", () => postToWebcam({ type: "webcam_cmd", action: "stop" }));
+d2CamStart?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  postToWebcam({ type: "webcam_cmd", action: "start" });
+  syncD2CamButtons("starting");
+});
+d2CamStop?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  postToWebcam({ type: "webcam_cmd", action: "stop" });
+  syncD2CamButtons("stopping");
+});
 camRefresh?.addEventListener("click", () => postToWebcam({ type: "webcam_cmd", action: "refresh_cameras" }));
+
+function positionCamSettingsMenu(anchorEl, fromD2) {
+  if (!camSettingsMenu || !anchorEl) return;
+  const r = anchorEl.getBoundingClientRect();
+  const menuW = fromD2 ? 260 : 300;
+  const pad = 8;
+  const maxH = Math.min(fromD2 ? 320 : window.innerHeight * 0.7, window.innerHeight - pad * 2);
+  // Prefer opening left of the gear so it sits over chrome, not the video center.
+  let left = Math.max(pad, r.right - menuW);
+  left = Math.min(left, window.innerWidth - menuW - pad);
+  let top = r.bottom + 6;
+  if (top + maxH > window.innerHeight - pad) {
+    top = Math.max(pad, r.top - maxH - 6);
+  }
+  camSettingsMenu.classList.toggle("is-d2-float", !!fromD2);
+  camSettingsMenu.style.position = "fixed";
+  camSettingsMenu.style.left = `${left}px`;
+  camSettingsMenu.style.right = "auto";
+  camSettingsMenu.style.top = `${top}px`;
+  camSettingsMenu.style.width = `${menuW}px`;
+  camSettingsMenu.style.maxHeight = `${maxH}px`;
+  camSettingsMenu.style.zIndex = "12000";
+}
+
+function setCamSettingsOpen(open, anchorEl, fromD2 = false) {
+  if (!camSettingsMenu) return;
+  camSettingsMenu.hidden = !open;
+  camSettingsBtn?.setAttribute("aria-expanded", open ? "true" : "false");
+  d2CamSettings?.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    // Detach from hidden parent bar so D2 can open settings while bar is hidden.
+    if (camSettingsMenu.parentElement !== document.body) {
+      document.body.appendChild(camSettingsMenu);
+    }
+    positionCamSettingsMenu(anchorEl || camSettingsBtn || d2CamSettings, fromD2);
+    postToWebcam({ type: "webcam_cmd", action: "ping" });
+    postToWebcam({ type: "webcam_cmd", action: "refresh_cameras" });
+  } else {
+    camSettingsMenu.classList.remove("is-d2-float");
+    camSettingsMenu.style.position = "";
+    camSettingsMenu.style.left = "";
+    camSettingsMenu.style.right = "";
+    camSettingsMenu.style.top = "";
+    camSettingsMenu.style.width = "";
+    camSettingsMenu.style.maxHeight = "";
+    camSettingsMenu.style.zIndex = "";
+  }
+}
 
 camSettingsBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
-  if (!camSettingsMenu) return;
-  const open = camSettingsMenu.hidden;
-  camSettingsMenu.hidden = !open;
-  camSettingsBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) postToWebcam({ type: "webcam_cmd", action: "ping" });
+  const open = !!camSettingsMenu?.hidden;
+  setCamSettingsOpen(open, camSettingsBtn, false);
+});
+
+d2CamSettings?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = !camSettingsMenu || camSettingsMenu.hidden;
+  setCamSettingsOpen(open, d2CamSettings, true);
 });
 
 document.addEventListener("click", (e) => {
   if (!camSettingsMenu || camSettingsMenu.hidden) return;
   if (e.target.closest(".viewer-cam-settings-wrap")) return;
-  camSettingsMenu.hidden = true;
-  camSettingsBtn?.setAttribute("aria-expanded", "false");
+  if (e.target.closest("[data-d2-cam-settings]")) return;
+  if (e.target.closest("#viewerCamSettingsMenu")) return;
+  setCamSettingsOpen(false);
 });
 
 function pushSettings(partial = {}) {
@@ -427,6 +570,14 @@ window.addEventListener("message", (event) => {
     updateCamStatusUi(data.status, data.fps != null ? data.fps : undefined, data.label);
     if (data.devices) applyDevicesToSelect(data.devices);
     if (data.settings) applySettingsFromChild(data.settings);
+    if (data.devicesLoaded || data.hasCamera != null) {
+      d2HasCamera = data.hasCamera === true || (Array.isArray(data.devices) && data.devices.length > 0);
+      if (data.devicesLoaded && Array.isArray(data.devices) && data.devices.length === 0) {
+        d2HasCamera = false;
+      }
+      setD2NoCamera(d2HasCamera === false);
+      syncD2CamButtons(data.status || "idle");
+    }
     if (data.status === "offline" || data.status === "disconnected") {
       refreshCapability();
     }
@@ -454,6 +605,12 @@ async function refreshCapability() {
       : `<i class="fa-solid fa-video-slash"></i> no camera${ping}`;
     capability.classList.toggle("is-available", available);
     capability.classList.remove("is-offline");
+    // Prefer live device list from the webcam pane; fall back to client capability.
+    if (d2HasCamera == null) {
+      d2HasCamera = available;
+      setD2NoCamera(!available);
+      syncD2CamButtons("idle");
+    }
   } catch {
     capability.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> camera status unavailable';
     capability.classList.remove("is-available", "is-offline");

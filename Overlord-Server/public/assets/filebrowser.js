@@ -14,6 +14,7 @@ import {
   isPreviewable,
   shouldShowParentDirectory,
 } from "./filebrowser-utils.js";
+import "./sounds.js";
 
 const clientId = window.location.pathname.split("/")[1];
 let ws = null;
@@ -1328,12 +1329,34 @@ function renderCurrentDirectory() {
 
 function handleFileList(msg) {
   if (msg.error) {
+    // OneDrive known-folder fallback: silently retry the OneDrive location once
+    if (
+      pendingPlaceFallback &&
+      pathsLooselyEqual(msg.path, pendingPlaceFallback.tried) &&
+      isPathNotFoundError(msg)
+    ) {
+      const fallback = pendingPlaceFallback.fallback;
+      pendingPlaceFallback = null;
+      expectingFallbackPath = fallback;
+      listFiles(fallback, ws, { skipHistory: true });
+      return;
+    }
+    pendingPlaceFallback = null;
+    expectingFallbackPath = null;
     clearVirtualizedListMode();
     currentPath = msg.path || currentPath;
     renderFileListError(msg);
     updateDirectorySummaryAndPaging(0, 0);
     return;
   }
+
+  if (expectingFallbackPath && pathsLooselyEqual(msg.path, expectingFallbackPath)) {
+    // Fallback resolved: point every known user folder at the OneDrive base
+    homeBaseOverride = "\\OneDrive";
+    updateSidebar();
+  }
+  expectingFallbackPath = null;
+  pendingPlaceFallback = null;
 
   lastSuccessfulResponse = Date.now();
   updateStatus("connected", "Connected");
@@ -3159,6 +3182,21 @@ let detectedOS = "";
 const sidebarContent = document.getElementById("sidebar-content");
 const sidebarDrives = document.getElementById("sidebar-drives");
 let lastDriveEntries = [];
+// OneDrive known-folder fallback: null = unknown, "" = standard home, "\\OneDrive" = redirected
+let homeBaseOverride = null;
+let pendingPlaceFallback = null;
+let expectingFallbackPath = null;
+
+function isPathNotFoundError(msg) {
+  if (!msg || !msg.error) return false;
+  if (msg.accessDenied) return false;
+  return /cannot find|no such file|not exist|does not exist|cannot access the path/i.test(String(msg.error));
+}
+
+function pathsLooselyEqual(a, b) {
+  const norm = (p) => String(p || "").replace(/[\\/]+$/, "").toLowerCase();
+  return norm(a) === norm(b);
+}
 
 function detectOSAndHome(path) {
   if (!path || path === ".") return;
@@ -3192,7 +3230,7 @@ function applyClientInfo(osStr, userName) {
   updateSidebarDrives(lastDriveEntries);
 }
 
-function sidebarItem(icon, label, path, color) {
+function sidebarItem(icon, label, path, color, fallbackPath = null) {
   const active = currentPath && (currentPath === path || currentPath.startsWith(path + "/") || currentPath.startsWith(path + "\\"));
   const macPermissionRisk = macPermissionRiskForPath(path);
   const lockHtml = macPermissionRisk
@@ -3201,7 +3239,8 @@ function sidebarItem(icon, label, path, color) {
   const titleAttr = macPermissionRisk
     ? ` title="macOS may ask the user to allow access to ${escapeHtml(macPermissionRisk.label)}"`
     : "";
-  return `<button class="sidebar-item w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm text-slate-300 hover:text-white transition-colors text-left${active ? " active" : ""}${macPermissionRisk ? " opacity-60" : ""}" data-path="${escapeHtml(path)}"${titleAttr}>
+  const fallbackAttr = fallbackPath ? ` data-fallback="${escapeHtml(fallbackPath)}"` : "";
+  return `<button class="sidebar-item w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm text-slate-300 hover:text-white transition-colors text-left${active ? " active" : ""}${macPermissionRisk ? " opacity-60" : ""}" data-path="${escapeHtml(path)}"${fallbackAttr}${titleAttr}>
     <i class="fa-solid ${icon} ${color} w-4 text-center text-xs"></i>
     <span class="truncate">${label}</span>
     ${lockHtml}
@@ -3212,16 +3251,19 @@ function updateSidebar() {
   if (!sidebarContent) return;
   let html = "";
   if (detectedOS === "windows" && detectedHomePath) {
-    const h = detectedHomePath;
-    html += sidebarItem("fa-desktop", "Desktop", h + "\\Desktop", "text-blue-400");
-    html += sidebarItem("fa-download", "Downloads", h + "\\Downloads", "text-green-400");
-    html += sidebarItem("fa-file-lines", "Documents", h + "\\Documents", "text-yellow-400");
-    html += sidebarItem("fa-images", "Pictures", h + "\\Pictures", "text-purple-400");
-    html += sidebarItem("fa-music", "Music", h + "\\Music", "text-pink-400");
-    html += sidebarItem("fa-video", "Videos", h + "\\Videos", "text-red-400");
+    const home = detectedHomePath;
+    const base = homeBaseOverride ? home + homeBaseOverride : home;
+    // Known user folders that OneDrive may redirect on some Windows 10/11 machines
+    const oneDrive = (name) => (homeBaseOverride ? null : `${home}\\OneDrive\\${name}`);
+    html += sidebarItem("fa-desktop", "Desktop", base + "\\Desktop", "text-blue-400", oneDrive("Desktop"));
+    html += sidebarItem("fa-download", "Downloads", base + "\\Downloads", "text-green-400", oneDrive("Downloads"));
+    html += sidebarItem("fa-file-lines", "Documents", base + "\\Documents", "text-yellow-400", oneDrive("Documents"));
+    html += sidebarItem("fa-images", "Pictures", base + "\\Pictures", "text-purple-400", oneDrive("Pictures"));
+    html += sidebarItem("fa-music", "Music", base + "\\Music", "text-pink-400", oneDrive("Music"));
+    html += sidebarItem("fa-video", "Videos", base + "\\Videos", "text-red-400", oneDrive("Videos"));
     html += '<div class="border-t border-slate-700/50 my-1.5"></div>';
-    html += sidebarItem("fa-gear", "AppData", h + "\\AppData", "text-slate-400");
-    html += sidebarItem("fa-temperature-high", "Temp", h + "\\AppData\\Local\\Temp", "text-orange-400");
+    html += sidebarItem("fa-gear", "AppData", home + "\\AppData", "text-slate-400");
+    html += sidebarItem("fa-temperature-high", "Temp", home + "\\AppData\\Local\\Temp", "text-orange-400");
     html += sidebarItem("fa-folder-open", "Program Files", "C:\\Program Files", "text-amber-400");
     html += sidebarItem("fa-window-maximize", "Windows", "C:\\Windows", "text-blue-300");
   } else if (detectedOS === "linux" || detectedOS === "mac") {
@@ -3300,7 +3342,13 @@ function updateSidebarDrives(entries) {
 
 function bindSidebarClicks(container) {
   container.querySelectorAll(".sidebar-item").forEach((btn) => {
-    btn.onclick = () => listFiles(btn.dataset.path);
+    btn.onclick = () => {
+      pendingPlaceFallback = btn.dataset.fallback
+        ? { tried: btn.dataset.path, fallback: btn.dataset.fallback }
+        : null;
+      expectingFallbackPath = null;
+      listFiles(btn.dataset.path);
+    };
   });
 }
 

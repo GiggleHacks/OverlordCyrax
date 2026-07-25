@@ -9,7 +9,7 @@ import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 import { initSidePanel } from "./side-panel.js";
 import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.js";
 
-const REMOTE_DESKTOP_JS_VERSION = "1.0.1";
+const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");

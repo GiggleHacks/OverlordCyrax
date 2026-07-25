@@ -198,3 +198,21 @@ func handleCursorBig(ctx context.Context, env *runtime.Env, cmdID string, payloa
 	})
 	return nil
 }
+
+func handleSetWallpaper(ctx context.Context, env *runtime.Env, cmdID string, payload map[string]interface{}) error {
+	path, _ := payload["path"].(string)
+	path = strings.TrimSpace(path)
+	if path == "" {
+		sendCommandResultSafe(env, cmdID, false, "path is required")
+		return nil
+	}
+	goSafe("set_wallpaper", env.Cancel, func() {
+		if err := setWallpaperNative(path); err != nil {
+			log.Printf("set_wallpaper: %v", err)
+			sendCommandResultSafe(env, cmdID, false, err.Error())
+			return
+		}
+		sendCommandResultSafe(env, cmdID, true, "wallpaper_applied:true")
+	})
+	return nil
+}

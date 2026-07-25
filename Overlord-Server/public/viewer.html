@@ -25,6 +25,7 @@
             <button type="button" data-mode="desktop" title="Desktop only"><i class="fa-solid fa-display"></i><span>Desktop</span></button>
             <button type="button" data-mode="split" title="Side by side — desktop left, webcam right"><i class="fa-solid fa-table-columns"></i><span>Split</span></button>
             <button type="button" data-mode="pip" title="Floating webcam over desktop"><i class="fa-solid fa-clone"></i><span>PiP</span></button>
+            <button type="button" data-mode="dashboard2" title="Dashboard 2.0 — MDI ops console"><i class="fa-solid fa-grip"></i><span>Dashboard 2.0</span></button>
           </nav>
           <div id="viewerWebcamBar" class="viewer-webcam-bar viewer-toolbar-cam" hidden>
             <button type="button" id="viewerCamStart" class="viewer-cam-btn viewer-cam-btn-primary" title="Start webcam">
@@ -90,7 +91,7 @@
           </div>
           <span id="viewerCapability" class="viewer-capability"><i class="fa-solid fa-video-slash"></i> checking camera</span>
         </header>
-        <main id="viewerPanels" class="viewer-panels" data-mode="webcam">
+        <main id="viewerPanels" class="viewer-panels" data-mode="dashboard2">
           <section class="viewer-panel viewer-panel-webcam" id="viewerWebcamPanel">
             <iframe id="viewerWebcam" title="Webcam"></iframe>
           </section>
@@ -148,6 +149,61 @@
               </span>
               <iframe id="viewerPipWebcam" title="Webcam overlay"></iframe>
               <div class="pip-resize-handle" data-pip-resize title="Resize"></div>
+            </div>
+          </section>
+          <section class="viewer-panel viewer-panel-dashboard2" id="viewerDashboard2" hidden aria-label="Dashboard 2.0">
+            <div class="d2-chrome">
+              <div class="d2-chrome-left">
+                <span class="d2-brand">OVERLORD</span>
+                <span class="d2-chrome-sep">//</span>
+                <span class="d2-chrome-title">Dashboard 2.0</span>
+                <span class="d2-version" data-d2-version>v0.2.0</span>
+              </div>
+              <div class="d2-chrome-right">
+                <button type="button" class="d2-chrome-btn" data-d2-save title="Save preferred layout">Save layout</button>
+                <button type="button" class="d2-chrome-btn" data-d2-reset title="Reset to factory layout">Reset layout</button>
+              </div>
+            </div>
+            <div class="d2-workspace" data-d2-workspace id="d2Workspace">
+              <div class="d2-window is-focused" data-d2-id="desktop">
+                <header class="d2-titlebar" data-d2-drag>
+                  <span class="d2-title"><i class="fa-solid fa-display"></i> Remote Desktop</span>
+                  <div class="d2-win-btns">
+                    <button type="button" data-d2-max title="Maximize" aria-label="Maximize">□</button>
+                  </div>
+                </header>
+                <div class="d2-body">
+                  <iframe id="viewerD2Desktop" title="Remote desktop"></iframe>
+                </div>
+              </div>
+              <div class="d2-window" data-d2-id="webcam">
+                <header class="d2-titlebar" data-d2-drag>
+                  <span class="d2-title"><i class="fa-solid fa-camera"></i> Webcam</span>
+                  <div class="d2-win-btns d2-cam-btns">
+                    <button type="button" class="d2-cam-btn d2-cam-start" data-d2-cam-start title="Start webcam">Start</button>
+                    <button type="button" class="d2-cam-btn d2-cam-stop" data-d2-cam-stop title="Stop webcam" disabled>Stop</button>
+                    <button type="button" class="d2-cam-btn d2-cam-settings" data-d2-cam-settings title="Webcam settings" aria-label="Webcam settings"><i class="fa-solid fa-sliders"></i></button>
+                  </div>
+                </header>
+                <div class="d2-body">
+                  <div class="d2-webcam-empty" data-d2-webcam-empty hidden>
+                    <i class="fa-solid fa-video-slash"></i>
+                    <span>No webcam</span>
+                  </div>
+                  <iframe id="viewerD2Webcam" title="Webcam"></iframe>
+                </div>
+              </div>
+              <div class="d2-window" data-d2-id="processes">
+                <header class="d2-titlebar" data-d2-drag>
+                  <span class="d2-title"><i class="fa-solid fa-list-check"></i> Process Manager 2.0</span>
+                  <div class="d2-win-btns">
+                    <button type="button" data-d2-max title="Maximize" aria-label="Maximize">□</button>
+                  </div>
+                </header>
+                <div class="d2-body">
+                  <iframe id="viewerD2Processes" title="Process Manager"></iframe>
+                </div>
+              </div>
             </div>
           </section>
         </main>

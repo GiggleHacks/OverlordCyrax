@@ -15,6 +15,7 @@
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
     <link rel="stylesheet" href="/assets/custom.css" />
     <script defer src="/vendor/msgpackr/msgpackr.js"></script>
+    <script src="/assets/processes-embedded-check.js"></script>
     <style>
       .process-row:hover {
         background-color: rgba(30, 41, 59, 0.62);
@@ -135,7 +136,7 @@
     <header id="top-nav"></header>
 
     <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div class="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+      <div class="proc-page-header mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 class="text-2xl font-bold text-slate-100">Process Manager</h1>
           <p id="client-id-header" class="text-slate-400 text-sm mt-1 font-mono">Loading client...</p>
@@ -145,11 +146,11 @@
         </span>
       </div>
 
-      <section class="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
-        <div class="p-4 sm:p-5 border-b border-slate-800 space-y-4">
-          <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div class="flex items-center gap-3">
-              <div class="flex items-center justify-center w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/30">
+      <section class="proc-section bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
+        <div class="proc-toolbar p-4 sm:p-5 border-b border-slate-800 space-y-4">
+          <div class="proc-toolbar-top flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div class="proc-toolbar-meta flex items-center gap-3">
+              <div class="proc-toolbar-icon flex items-center justify-center w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/30">
                 <i class="fa-solid fa-list-check text-sky-400"></i>
               </div>
               <div>
@@ -157,17 +158,17 @@
                 <p id="process-count" class="text-xs text-slate-400"><i class="fa-solid fa-list mr-1"></i>0 processes</p>
               </div>
             </div>
-            <div class="flex gap-2">
-              <button id="refresh-btn" class="flex-1 lg:flex-none inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed" disabled>
-                <i class="fa-solid fa-rotate"></i> Refresh
+            <div class="proc-toolbar-actions flex gap-2">
+              <button id="refresh-btn" title="Refresh" class="flex-1 lg:flex-none inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed" disabled>
+                <i class="fa-solid fa-rotate"></i><span class="proc-btn-label"> Refresh</span>
               </button>
-              <button id="kill-btn" class="flex-1 lg:flex-none inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-red-600/90 hover:bg-red-500 border border-red-500 text-white text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed" disabled>
-                <i class="fa-solid fa-skull-crossbones"></i> Kill selected
+              <button id="kill-btn" title="Kill selected" class="flex-1 lg:flex-none inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-red-600/90 hover:bg-red-500 border border-red-500 text-white text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed" disabled>
+                <i class="fa-solid fa-skull-crossbones"></i><span class="proc-btn-label"> Kill selected</span>
               </button>
             </div>
           </div>
 
-          <div class="flex flex-col xl:flex-row xl:items-center gap-3">
+          <div class="proc-toolbar-search flex flex-col xl:flex-row xl:items-center gap-3">
             <div class="relative flex-1 min-w-0">
               <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"></i>
               <input id="search-input" type="search" placeholder="Search by process name, PID, or user..."
@@ -184,7 +185,7 @@
           </div>
         </div>
 
-        <div class="overflow-hidden">
+        <div class="proc-list-wrap overflow-hidden">
           <div
             class="process-header grid grid-cols-12 gap-3 px-4 py-3 bg-slate-950/60 border-b border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-500"
           >
@@ -218,13 +219,14 @@
             id="process-list"
             class="divide-y divide-slate-800/80 min-h-80 max-h-[calc(100vh-22rem)] overflow-y-auto"
           >
-            <!-- Processes will be inserted here -->
+            <div class="proc-list-placeholder px-4 py-6 text-center text-slate-500 text-sm">
+              <i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Connecting...
+            </div>
           </div>
         </div>
       </section>
     </main>
 
-    <script type="module" src="/assets/nav.js"></script>
-    <script type="module" src="/assets/processes.js"></script>
+    <script type="module" src="/assets/processes-bootstrap.js"></script>
   </body>
 </html>

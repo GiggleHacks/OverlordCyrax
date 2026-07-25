@@ -5,12 +5,16 @@ import { P2PClient } from "./webrtc-p2p.js";
 import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
 import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 
-const WEBCAM_JS_VERSION = "1.0.0";
+const WEBCAM_JS_VERSION = "1.2.0";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
-  const embedded = new URLSearchParams(location.search).get("embedded") === "1";
-  const showControls = new URLSearchParams(location.search).get("controls") === "1";
+  const camParams = new URLSearchParams(location.search);
+  const embedded = camParams.get("embedded") === "1";
+  const showControls = camParams.get("controls") === "1";
+  const dashboard2Pane = camParams.get("d2") === "1";
+  const autostartParam = camParams.get("autostart");
+  const allowAutostart = autostartParam !== "0";
   const arrayTile = embedded && !showControls;
   if (!clientId) {
     alert("Missing clientId");
@@ -22,6 +26,7 @@ const WEBCAM_JS_VERSION = "1.0.0";
   if (embedded) {
     document.body.classList.add("webcam-embedded");
     if (showControls) document.body.classList.add("webcam-embedded-controls");
+    if (dashboard2Pane) document.body.classList.add("webcam-embedded-d2");
   }
 
   const clientLabel = document.getElementById("clientLabel");
@@ -47,6 +52,7 @@ const WEBCAM_JS_VERSION = "1.0.0";
   const webrtcAudio = document.getElementById("webrtcAudio");
   const viewerScaleBtn = document.getElementById("viewerScaleBtn");
   const webcamWorkspace = document.getElementById("webcamWorkspace");
+  const webcamEmpty = document.getElementById("webcamEmpty");
   let whepClient = null;
   let p2pClient = null;
   function getWebrtcMode() {
@@ -73,7 +79,7 @@ const WEBCAM_JS_VERSION = "1.0.0";
   clientLabel.textContent = clientId;
 
   let ws = null;
-  let desiredStreaming = true;
+  let desiredStreaming = allowAutostart;
   let viewerScale = 60;
   let streamState = "connecting";
   let renderCount = 0;
@@ -81,6 +87,7 @@ const WEBCAM_JS_VERSION = "1.0.0";
   let videoDecoder = null;
   let h264TimestampUs = 0;
   let availableDevices = [];
+  let devicesLoaded = false;
   let selectedDeviceIndex = 0;
   let hasRenderedFrame = false;
   let drawPending = false;
@@ -462,8 +469,21 @@ const WEBCAM_JS_VERSION = "1.0.0";
     send("webcam_list");
   }
 
+  function updateNoCameraUi() {
+    const noCam = devicesLoaded && availableDevices.length === 0;
+    if (webcamEmpty) {
+      webcamEmpty.hidden = !noCam;
+      const label = webcamEmpty.querySelector("span");
+      if (label) label.textContent = "No webcam";
+    }
+    document.body.classList.toggle("webcam-no-camera", noCam);
+    if (noCam && startBtn) startBtn.disabled = true;
+    postStatusToParent();
+  }
+
   function renderCameraList(devices, selected) {
     availableDevices = Array.isArray(devices) ? devices : [];
+    devicesLoaded = true;
     cameraSelect.innerHTML = "";
     if (!availableDevices.length) {
       const opt = document.createElement("option");
@@ -471,9 +491,11 @@ const WEBCAM_JS_VERSION = "1.0.0";
       opt.textContent = "No cameras detected";
       cameraSelect.appendChild(opt);
       cameraSelect.disabled = true;
+      updateNoCameraUi();
       return;
     }
     cameraSelect.disabled = false;
+    updateNoCameraUi();
     for (const dev of availableDevices) {
       const idx = Number(dev.index) || 0;
       const maxFps = Number(dev.maxFps) || 0;
@@ -638,8 +660,9 @@ const WEBCAM_JS_VERSION = "1.0.0";
 
     const wsOpen = ws && ws.readyState === WebSocket.OPEN;
     const streamLocked = streamState === "streaming" || streamState === "starting" || streamState === "stopping" || streamState === "stalled" || stallRecoveryInProgress;
-    startBtn.disabled = !wsOpen || streamState === "starting" || streamState === "streaming" || stallRecoveryInProgress;
-    stopBtn.disabled = !wsOpen || (streamState !== "starting" && streamState !== "streaming" && streamState !== "stalled" && !stallRecoveryInProgress);
+    const noCam = devicesLoaded && availableDevices.length === 0;
+    startBtn.disabled = noCam || !wsOpen || streamState === "starting" || streamState === "streaming" || stallRecoveryInProgress;
+    stopBtn.disabled = noCam || !wsOpen || (streamState !== "starting" && streamState !== "streaming" && streamState !== "stalled" && !stallRecoveryInProgress);
     screenshotBtn.disabled = !hasRenderedFrame;
     refreshCameras.disabled = !wsOpen;
     applyFps.disabled = !wsOpen || streamLocked;
@@ -667,6 +690,8 @@ const WEBCAM_JS_VERSION = "1.0.0";
         devices: Array.isArray(availableDevices)
           ? availableDevices.map((d) => ({ index: d.index, name: d.name, maxFps: d.maxFps }))
           : [],
+        hasCamera: !devicesLoaded ? null : availableDevices.length > 0,
+        devicesLoaded,
         settings: readSharedSettings(),
       }, "*");
     } catch (e) {}
@@ -1031,6 +1056,11 @@ const WEBCAM_JS_VERSION = "1.0.0";
   }
 
   function startStreaming(confirmFirewall = true) {
+    if (devicesLoaded && availableDevices.length === 0) {
+      setStreamState("error", "No webcam");
+      updateNoCameraUi();
+      return false;
+    }
     const mode = getWebrtcMode();
     if (confirmFirewall && needsWebrtcFirewallWarning(mode)) {
       if (!confirm("This agent is not elevated. Starting WebRTC will trigger a Windows Defender Firewall prompt on the target machine.\n\nContinue?")) {

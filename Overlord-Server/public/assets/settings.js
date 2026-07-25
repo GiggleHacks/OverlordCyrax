@@ -6,11 +6,19 @@ import {
   requestDesktopNotificationPermission,
 } from "./notify-client.js";
 import {
+  isClickSoundEnabled,
   isClientOnlineSoundEnabled,
+  isErrorSoundEnabled,
   isSoundEffectsEnabled,
+  isStartupSoundEnabled,
+  isSuccessSoundEnabled,
   playSoundEffect,
+  setClickSoundEnabled,
   setClientOnlineSoundEnabled,
+  setErrorSoundEnabled,
   setSoundEffectsEnabled,
+  setStartupSoundEnabled,
+  setSuccessSoundEnabled,
 } from "./sounds.js";
 import { escapeHtml, formatBytes as formatSharedBytes, formatDate as formatSharedDate } from "./format.js";
 
@@ -46,8 +54,11 @@ const prefNotificationsInput = document.getElementById("pref-notifications");
 const prefDesktopNotificationsInput = document.getElementById("pref-desktop-notifications");
 const prefDesktopNotificationsHint = document.getElementById("pref-desktop-notifications-hint");
 const prefSoundEffectsInput = document.getElementById("pref-sound-effects");
+const prefSoundStartupInput = document.getElementById("pref-sound-startup");
+const prefSoundSuccessInput = document.getElementById("pref-sound-success");
+const prefSoundErrorInput = document.getElementById("pref-sound-error");
+const prefSoundClickInput = document.getElementById("pref-sound-click");
 const prefClientOnlineSoundInput = document.getElementById("pref-client-online-sound");
-const prefSoundTestBtn = document.getElementById("pref-sound-test");
 const prefRefreshSecondsInput = document.getElementById("pref-refresh-seconds");
 
 const inputArchiveUserForm = document.getElementById("input-archive-user-form");
@@ -594,6 +605,18 @@ function loadPrefs() {
   if (prefSoundEffectsInput) {
     prefSoundEffectsInput.checked = isSoundEffectsEnabled();
   }
+  if (prefSoundStartupInput) {
+    prefSoundStartupInput.checked = isStartupSoundEnabled();
+  }
+  if (prefSoundSuccessInput) {
+    prefSoundSuccessInput.checked = isSuccessSoundEnabled();
+  }
+  if (prefSoundErrorInput) {
+    prefSoundErrorInput.checked = isErrorSoundEnabled();
+  }
+  if (prefSoundClickInput) {
+    prefSoundClickInput.checked = isClickSoundEnabled();
+  }
   if (prefClientOnlineSoundInput) {
     prefClientOnlineSoundInput.checked = isClientOnlineSoundEnabled();
   }
@@ -775,6 +798,18 @@ function savePrefs(event) {
   setNotificationsEnabled(prefNotificationsInput.checked);
   if (prefSoundEffectsInput) {
     setSoundEffectsEnabled(prefSoundEffectsInput.checked);
+  }
+  if (prefSoundStartupInput) {
+    setStartupSoundEnabled(prefSoundStartupInput.checked);
+  }
+  if (prefSoundSuccessInput) {
+    setSuccessSoundEnabled(prefSoundSuccessInput.checked);
+  }
+  if (prefSoundErrorInput) {
+    setErrorSoundEnabled(prefSoundErrorInput.checked);
+  }
+  if (prefSoundClickInput) {
+    setClickSoundEnabled(prefSoundClickInput.checked);
   }
   if (prefClientOnlineSoundInput) {
     setClientOnlineSoundEnabled(prefClientOnlineSoundInput.checked);
@@ -2635,7 +2670,12 @@ async function init() {
     if (mfaEnableBtn) mfaEnableBtn.addEventListener("click", enableMfa);
     if (mfaDisableBtn) mfaDisableBtn.addEventListener("click", disableMfa);
     prefsForm.addEventListener("submit", savePrefs);
-    if (prefSoundTestBtn) prefSoundTestBtn.addEventListener("click", () => playSoundEffect("purgatory", true));
+    document.querySelectorAll("[data-sound-test]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = btn.getAttribute("data-sound-test");
+        if (name) playSoundEffect(name, true);
+      });
+    });
 
     const sidebarBtn = document.getElementById("pref-nav-sidebar");
     const topbarBtn = document.getElementById("pref-nav-topbar");

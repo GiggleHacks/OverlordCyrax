@@ -319,20 +319,40 @@
                 <i class="fa-solid fa-triangle-exclamation mr-1"></i>
                 Browser permission was denied. Reset notification permissions for this site in your browser settings, then try again.
               </p>
-              <div class="flex items-center gap-2 text-sm">
+              <div class="flex flex-wrap items-center gap-2 text-sm">
                 <label class="flex items-center gap-2">
                   <input id="pref-sound-effects" type="checkbox" class="h-4 w-4 accent-violet-500" />
                   <span>Enable sound effects</span>
                 </label>
-                <button type="button" id="pref-sound-test" class="px-2 py-0.5 rounded text-xs bg-violet-600/20 text-violet-300 border border-violet-500/30 hover:bg-violet-600/40 transition-colors" title="Preview the purgatory chime">
-                  <i class="fa-solid fa-volume-high mr-1"></i>Test
-                </button>
+                <div class="flex flex-wrap items-center gap-1">
+                  <button type="button" id="pref-sound-test-startup" data-sound-test="startup" class="px-2 py-0.5 rounded text-xs bg-violet-600/20 text-violet-300 border border-violet-500/30 hover:bg-violet-600/40 transition-colors" title="Preview startup sound">Startup</button>
+                  <button type="button" id="pref-sound-test-success" data-sound-test="success" class="px-2 py-0.5 rounded text-xs bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/40 transition-colors" title="Preview success sound">Success</button>
+                  <button type="button" id="pref-sound-test-error" data-sound-test="error" class="px-2 py-0.5 rounded text-xs bg-rose-600/20 text-rose-300 border border-rose-500/30 hover:bg-rose-600/40 transition-colors" title="Preview error sound">Error</button>
+                  <button type="button" id="pref-sound-test-click" data-sound-test="click" class="px-2 py-0.5 rounded text-xs bg-sky-600/20 text-sky-300 border border-sky-500/30 hover:bg-sky-600/40 transition-colors" title="Preview click sound">Click</button>
+                  <button type="button" id="pref-sound-test-online" data-sound-test="clientOnline" class="px-2 py-0.5 rounded text-xs bg-amber-600/20 text-amber-300 border border-amber-500/30 hover:bg-amber-600/40 transition-colors" title="Preview client online sound">Online</button>
+                </div>
               </div>
+              <label class="flex items-center gap-2 text-sm pl-6">
+                <input id="pref-sound-startup" type="checkbox" class="h-4 w-4 accent-violet-500" />
+                <span>Startup sound after login</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm pl-6">
+                <input id="pref-sound-success" type="checkbox" class="h-4 w-4 accent-emerald-500" />
+                <span>Success sounds (upload, wallpaper, toasts)</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm pl-6">
+                <input id="pref-sound-error" type="checkbox" class="h-4 w-4 accent-rose-500" />
+                <span>Error sounds</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm pl-6">
+                <input id="pref-sound-click" type="checkbox" class="h-4 w-4 accent-sky-500" />
+                <span>Click sounds on primary actions</span>
+              </label>
               <label class="flex items-center gap-2 text-sm pl-6">
                 <input id="pref-client-online-sound" type="checkbox" class="h-4 w-4 accent-emerald-500" />
                 <span>Play sound when clients come online</span>
               </label>
-              <p class="text-xs text-slate-500 pl-6">The global sound setting still controls all dashboard sound effects.</p>
+              <p class="text-xs text-slate-500 pl-6">Master toggle gates all dashboard sound effects. Category toggles refine what plays.</p>
             </div>
 
             <div class="space-y-2">

@@ -7,7 +7,10 @@
  *   initSidePanel(clientId, document.getElementById("sidePanel"));
  */
 
-const SIDE_PANEL_JS_VERSION = "1.4.0";
+import { playClickSound, playErrorSound, playSuccessSound } from "./sounds.js";
+
+const SIDE_PANEL_JS_VERSION = "1.6.0";
+const SIDE_PINS_KEY = "overlord_side_panel_pins_v1";
 
 /* ──────────────────────────────────────────────────────────── */
 /*  Menu definition                                            */
@@ -83,7 +86,7 @@ const PANEL_GROUPS = [
 function resolveOpenUrl(clientId, target) {
   switch (target) {
     case "console":     return `/${clientId}/console`;
-    case "remotedesktop": return `/viewer?clientId=${clientId}&mode=desktop`;
+    case "remotedesktop": return `/viewer?clientId=${clientId}&mode=dashboard2`;
     case "webcam":      return `/viewer?clientId=${clientId}&mode=webcam`;
     case "Backstage":   return `/backstage?clientId=${clientId}`;
     case "files":       return `/${clientId}/files`;
@@ -133,6 +136,9 @@ function ensureToastContainer() {
 }
 
 function showToast(message, type = "info", durationMs = 4000) {
+  if (type === "success") playSuccessSound();
+  else if (type === "error") playErrorSound();
+
   ensureToastContainer();
   const toast = document.createElement("div");
   toast.className = `sp-toast sp-toast-${type}`;
@@ -884,6 +890,7 @@ async function openBigMouseModal(clientId) {
 /* ──────────────────────────────────────────────────────────── */
 
 async function handleAction(clientId, action) {
+  playClickSound();
   try {
     switch (action) {
       case "ping":
@@ -1125,7 +1132,201 @@ function buildPanel(clientId) {
     }
   });
 
+  /* ---- Shortcut pins footer ---- */
+  panel.appendChild(buildPinsFooter(clientId));
+
   return panel;
+}
+
+function loadPins() {
+  try {
+    const raw = localStorage.getItem(SIDE_PINS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePins(pins) {
+  try {
+    localStorage.setItem(SIDE_PINS_KEY, JSON.stringify(pins));
+  } catch {
+    /* ignore */
+  }
+  // Let Dashboard 2.0 desktop icons refresh in this tab (storage event only fires cross-tab)
+  try {
+    window.dispatchEvent(new CustomEvent("overlord:pins-changed"));
+  } catch {
+    /* ignore */
+  }
+}
+
+function listPinnableCommands() {
+  const out = [];
+  for (const group of PANEL_GROUPS) {
+    for (const item of group.items) {
+      if (item.divider) continue;
+      const id = item.open ? `open:${item.open}` : item.action ? `action:${item.action}` : null;
+      if (!id) continue;
+      out.push({
+        id,
+        label: item.label,
+        icon: item.icon,
+        color: item.color,
+        open: item.open || null,
+        action: item.action || null,
+        group: group.label,
+      });
+    }
+  }
+  return out;
+}
+
+function runPinnedCommand(clientId, pin) {
+  if (pin.open === "files") {
+    openFileBrowserWindow(clientId);
+    return;
+  }
+  if (pin.open === "files-classic") {
+    openFileBrowserWindow(clientId, "classic");
+    return;
+  }
+  if (pin.open) {
+    const url = resolveOpenUrl(clientId, pin.open);
+    if (url) window.open(url, "_blank");
+    return;
+  }
+  if (pin.action) {
+    handleAction(clientId, pin.action);
+  }
+}
+
+function buildPinsFooter(clientId) {
+  const footer = document.createElement("div");
+  footer.className = "sp-pins";
+  footer.dataset.spPins = "1";
+
+  const head = document.createElement("div");
+  head.className = "sp-pins-head";
+  head.innerHTML = `<span class="sp-pins-title">Shortcuts</span>`;
+  const createBtn = document.createElement("button");
+  createBtn.type = "button";
+  createBtn.className = "sp-pins-create";
+  createBtn.title = "Create Shortcut";
+  createBtn.innerHTML = `<i class="fa-solid fa-plus"></i><span>Create Shortcut</span>`;
+  head.appendChild(createBtn);
+  footer.appendChild(head);
+
+  const list = document.createElement("div");
+  list.className = "sp-pins-list";
+  footer.appendChild(list);
+
+  function renderPins() {
+    const pins = loadPins();
+    list.innerHTML = "";
+    if (!pins.length) {
+      const empty = document.createElement("div");
+      empty.className = "sp-pins-empty";
+      empty.textContent = "No shortcuts";
+      list.appendChild(empty);
+      return;
+    }
+    for (const pin of pins) {
+      const row = document.createElement("div");
+      row.className = "sp-pin";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sp-pin-btn";
+      btn.title = pin.label;
+      btn.innerHTML = `<i class="${escapeHtml(pin.icon || "fa-solid fa-bolt")}" style="color:${escapeHtml(pin.color || "#94a3b8")}"></i><span>${escapeHtml(pin.label)}</span>`;
+      btn.addEventListener("click", () => runPinnedCommand(clientId, pin));
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "sp-pin-remove";
+      rm.title = "Remove shortcut";
+      rm.innerHTML = `<i class="fa-solid fa-xmark"></i>`;
+      rm.addEventListener("click", (e) => {
+        e.stopPropagation();
+        savePins(loadPins().filter((p) => p.id !== pin.id));
+        renderPins();
+      });
+      row.appendChild(btn);
+      row.appendChild(rm);
+      list.appendChild(row);
+    }
+  }
+
+  createBtn.addEventListener("click", () => {
+    const existing = new Set(loadPins().map((p) => p.id));
+    const choices = listPinnableCommands().filter((c) => !existing.has(c.id));
+    if (!choices.length) {
+      showToast("All commands already pinned", "info");
+      return;
+    }
+    openPinPicker(choices, (picked) => {
+      const pins = loadPins();
+      if (pins.some((p) => p.id === picked.id)) return;
+      pins.push({
+        id: picked.id,
+        label: picked.label,
+        icon: picked.icon,
+        color: picked.color,
+        open: picked.open,
+        action: picked.action,
+      });
+      savePins(pins);
+      renderPins();
+      showToast(`Shortcut: ${picked.label}`, "success");
+    });
+  });
+
+  renderPins();
+  return footer;
+}
+
+function openPinPicker(choices, onPick) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "sp-pin-modal-backdrop";
+  const modal = document.createElement("div");
+  modal.className = "sp-pin-modal";
+  modal.innerHTML = `
+    <div class="sp-pin-modal-head">
+      <strong>Create Shortcut</strong>
+      <button type="button" class="sp-pin-modal-close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <p class="sp-pin-modal-hint">Choose a sidebar command to pin at the bottom.</p>
+    <div class="sp-pin-modal-list"></div>
+  `;
+  const list = modal.querySelector(".sp-pin-modal-list");
+  for (const c of choices) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sp-pin-modal-item";
+    btn.innerHTML = `<i class="${escapeHtml(c.icon)}" style="color:${escapeHtml(c.color || "#94a3b8")}"></i>
+      <span class="sp-pin-modal-label">${escapeHtml(c.label)}</span>
+      <span class="sp-pin-modal-group">${escapeHtml(c.group || "")}</span>`;
+    btn.addEventListener("click", () => {
+      cleanup();
+      onPick(c);
+    });
+    list.appendChild(btn);
+  }
+  function cleanup() {
+    backdrop.remove();
+    window.removeEventListener("keydown", onKey);
+  }
+  function onKey(e) {
+    if (e.key === "Escape") cleanup();
+  }
+  modal.querySelector(".sp-pin-modal-close")?.addEventListener("click", cleanup);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) cleanup();
+  });
+  window.addEventListener("keydown", onKey);
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
 }
 
 function escapeHtml(str) {
@@ -1142,3 +1343,6 @@ export function initSidePanel(clientId, containerEl) {
   if (!clientId || !containerEl) return;
   containerEl.appendChild(buildPanel(clientId));
 }
+
+/* Shared with dashboard2-icons.js (desktop shortcut icons) */
+export { SIDE_PINS_KEY, loadPins, runPinnedCommand };

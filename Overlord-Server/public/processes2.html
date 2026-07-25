@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Process Manager 2.0 - Overlord</title>
+    <link rel="stylesheet" href="/vendor/inter/400.css" />
+    <link rel="stylesheet" href="/vendor/inter/600.css" />
+    <link rel="stylesheet" href="/vendor/inter/700.css" />
+    <link rel="stylesheet" href="/assets/tailwind.css" />
+    <link rel="stylesheet" href="/assets/main.css" />
+    <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+    <link rel="stylesheet" href="/assets/custom.css" />
+    <script defer src="/vendor/msgpackr/msgpackr.js"></script>
+    <style>
+      /* Process Manager 2.0 — compact-by-design (no embedded overrides needed) */
+      html, body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #070a12;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        font-family: Inter, system-ui, sans-serif;
+        color: #cbd5e1;
+        font-size: 11.5px;
+      }
+      /* ── toolbar ─────────────────────────────── */
+      .proc2-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        background: #0a0e1a;
+        border-bottom: 1px solid #1c2440;
+        flex-shrink: 0;
+        min-height: 30px;
+      }
+      .proc2-status {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        font-size: 8px;
+        flex-shrink: 0;
+        cursor: default;
+      }
+      .proc2-status.is-connecting { color: #e6b828; }
+      .proc2-status.is-ok { color: #2ee66b; }
+      .proc2-status.is-err { color: #ef4444; }
+      .proc2-status.is-off { color: #475569; }
+      .proc2-search {
+        position: relative;
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+      }
+      .proc2-search > i {
+        position: absolute;
+        left: 7px;
+        font-size: 9px;
+        color: #475569;
+        pointer-events: none;
+      }
+      .proc2-search input {
+        width: 100%;
+        padding: 3px 8px 3px 20px;
+        font-size: 11px;
+        font-family: inherit;
+        color: #e2e8f0;
+        background: #070a12;
+        border: 1px solid #1c2440;
+        border-radius: 4px;
+        outline: none;
+      }
+      .proc2-search input::placeholder { color: #3f4a63; }
+      .proc2-search input:focus { border-color: rgba(56, 189, 248, 0.5); }
+      .proc2-count {
+        font-size: 10px;
+        color: #6b7598;
+        white-space: nowrap;
+        flex-shrink: 0;
+        cursor: default;
+      }
+      .proc2-ver {
+        font-size: 9px;
+        color: #3f4a63;
+        white-space: nowrap;
+        flex-shrink: 0;
+        cursor: default;
+        user-select: none;
+      }
+      .proc2-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 22px;
+        font-size: 10px;
+        color: #94a3b8;
+        background: #111827;
+        border: 1px solid #27304f;
+        border-radius: 4px;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: color 120ms ease, background 120ms ease;
+      }
+      .proc2-btn:hover:not(:disabled) { color: #e2e8f0; background: #1c2440; }
+      .proc2-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+      .proc2-btn-danger { color: #f87171; border-color: rgba(239, 68, 68, 0.35); }
+      .proc2-btn-danger:hover:not(:disabled) { color: #fff; background: rgba(239, 68, 68, 0.75); }
+      /* ── column header ───────────────────────── */
+      .proc2-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 52px 64px;
+        gap: 4px;
+        padding: 3px 8px;
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #5b6584;
+        background: rgba(7, 10, 18, 0.85);
+        border-bottom: 1px solid #141a2e;
+        flex-shrink: 0;
+        user-select: none;
+      }
+      .proc2-col { cursor: pointer; white-space: nowrap; }
+      .proc2-col:hover { color: #cbd5e1; }
+      .proc2-col i { font-size: 8px; margin-left: 2px; }
+      .proc2-col-num { text-align: right; }
+      /* ── list ────────────────────────────────── */
+      .proc2-list {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      .proc2-list::-webkit-scrollbar { width: 8px; }
+      .proc2-list::-webkit-scrollbar-track { background: transparent; }
+      .proc2-list::-webkit-scrollbar-thumb {
+        background: #2a3350;
+        border-radius: 999px;
+        border: 2px solid #070a12;
+      }
+      .proc2-list::-webkit-scrollbar-thumb:hover { background: #3b476b; }
+      .proc2-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 52px 64px;
+        gap: 4px;
+        align-items: center;
+        height: 22px;
+        padding: 0 8px;
+        cursor: pointer;
+        border-left: 2px solid transparent;
+        transition: background-color 100ms ease;
+      }
+      .proc2-row:hover { background: rgba(30, 41, 59, 0.5); }
+      .proc2-row.selected {
+        background: rgba(14, 165, 233, 0.13);
+        border-left-color: #38bdf8;
+      }
+      .proc2-row.self-process {
+        background: rgba(230, 184, 40, 0.1);
+        border-left-color: #e6b828;
+      }
+      .proc2-row.self-process.selected { background: rgba(230, 184, 40, 0.22); }
+      .proc2-cell {
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .proc2-cell-num { text-align: right; font-variant-numeric: tabular-nums; }
+      .proc2-name-cell {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+      }
+      .proc2-nm { overflow: hidden; text-overflow: ellipsis; }
+      .proc2-pid {
+        font-size: 9px;
+        color: #3f4a63;
+        flex-shrink: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      /* tree guides */
+      .proc2-guide {
+        display: inline-block;
+        position: relative;
+        width: 10px;
+        align-self: stretch;
+        flex-shrink: 0;
+      }
+      .proc2-guide::before {
+        content: "";
+        position: absolute;
+        left: 4px;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: rgba(100, 116, 139, 0.22);
+      }
+      .proc2-tw {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 12px;
+        height: 12px;
+        color: #5b6584;
+        cursor: pointer;
+        user-select: none;
+        border-radius: 3px;
+        flex-shrink: 0;
+        transition: transform 140ms ease, color 120ms ease;
+      }
+      .proc2-tw:hover { color: #93c5fd; }
+      .proc2-tw.collapsed { transform: rotate(-90deg); }
+      .proc2-tw-spacer { width: 12px; flex-shrink: 0; }
+      .proc2-ico {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 12px;
+        height: 12px;
+        font-size: 10px;
+        flex-shrink: 0;
+      }
+      .proc2-ico img { width: 12px; height: 12px; object-fit: contain; }
+      /* type colors */
+      .proc2-t-system { color: #c084fc; }
+      .proc2-t-service { color: #22d3ee; }
+      .proc2-t-own { color: #86efac; }
+      .proc2-t-other { color: #e2e8f0; }
+      .proc2-t-agent { color: #e6b828; font-weight: 600; }
+      /* cpu / mem heat */
+      .proc2-h-4 { color: #f87171; font-weight: 600; }
+      .proc2-h-3 { color: #fb923c; }
+      .proc2-h-2 { color: #facc15; }
+      .proc2-h-1 { color: #cbd5e1; }
+      .proc2-h-0 { color: #475569; }
+      .proc2-agent-badge {
+        font-size: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0 3px;
+        border-radius: 3px;
+        background: rgba(230, 184, 40, 0.18);
+        color: #e6b828;
+        border: 1px solid rgba(230, 184, 40, 0.35);
+        flex-shrink: 0;
+      }
+      .proc2-placeholder {
+        padding: 18px 10px;
+        text-align: center;
+        font-size: 11px;
+        color: #5b6584;
+      }
+      .proc2-placeholder.err { color: #f87171; }
+      /* ── context menu ────────────────────────── */
+      #proc2-ctx {
+        position: fixed;
+        z-index: 50;
+        min-width: 148px;
+        padding: 3px;
+        background: #10152a;
+        border: 1px solid #27304f;
+        border-radius: 6px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+        font-size: 11px;
+      }
+      #proc2-ctx.hidden { display: none; }
+      #proc2-ctx .proc2-ctx-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        padding: 4px 8px;
+        color: #cbd5e1;
+        background: none;
+        border: 0;
+        border-radius: 4px;
+        cursor: pointer;
+        text-align: left;
+        font-size: 11px;
+        font-family: inherit;
+      }
+      #proc2-ctx .proc2-ctx-item:hover { background: #1c2440; }
+      #proc2-ctx .proc2-ctx-item i { width: 12px; text-align: center; font-size: 10px; }
+      #proc2-ctx .proc2-ctx-sep { height: 1px; margin: 3px 4px; background: #1c2440; }
+    </style>
+  </head>
+  <body>
+    <div class="proc2-toolbar">
+      <span id="proc2-status" class="proc2-status is-connecting" title="Connecting...">
+        <i class="fa-solid fa-circle-notch fa-spin"></i>
+      </span>
+      <div class="proc2-search">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input id="proc2-search-input" type="search" placeholder="Filter processes..." autocomplete="off" spellcheck="false" />
+      </div>
+      <span id="proc2-count" class="proc2-count" title="0 processes">0</span>
+      <span id="proc2-ver" class="proc2-ver" title="Process Manager 2.0">v1.0.0</span>
+      <button id="proc2-refresh" class="proc2-btn" title="Refresh" disabled>
+        <i class="fa-solid fa-rotate"></i>
+      </button>
+      <button id="proc2-kill" class="proc2-btn proc2-btn-danger" title="Kill selected" disabled>
+        <i class="fa-solid fa-skull-crossbones"></i>
+      </button>
+    </div>
+
+    <div class="proc2-head">
+      <div class="proc2-col" id="proc2-sort-name">Name <i class="fa-solid fa-sort"></i></div>
+      <div class="proc2-col proc2-col-num" id="proc2-sort-cpu">CPU% <i class="fa-solid fa-sort"></i></div>
+      <div class="proc2-col proc2-col-num" id="proc2-sort-memory">Mem <i class="fa-solid fa-sort"></i></div>
+    </div>
+
+    <div id="proc2-list" class="proc2-list">
+      <div class="proc2-placeholder"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting...</div>
+    </div>
+
+    <script type="module" src="/assets/processes2-bootstrap.js"></script>
+  </body>
+</html>

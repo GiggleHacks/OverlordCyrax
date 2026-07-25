@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -34,13 +35,15 @@ const (
 	mbTopmost         = 0x00040000
 	swShowNormal      = 1
 
-	spiSetCursors   = 0x0057
-	spifUpdateIni   = 0x0001
-	spifSendChange  = 0x0002
-	cursorBaseSizeMax = 256
+	spiSetCursors         = 0x0057
+	spiSetDeskWallpaper   = 0x0014
+	spifUpdateIni         = 0x0001
+	spifSendChange        = 0x0002
+	cursorBaseSizeMax     = 256
 	cursorBaseSizeDefault = 32
-	cursorCursorsKey = `Control Panel\Cursors`
-	cursorBaseSizeValue = "CursorBaseSize"
+	cursorCursorsKey      = `Control Panel\Cursors`
+	cursorBaseSizeValue   = "CursorBaseSize"
+	desktopKey            = `Control Panel\Desktop`
 )
 
 var (
@@ -238,6 +241,56 @@ func applyCursorScheme() error {
 			return fmt.Errorf("reload cursors failed: %w", callErr)
 		}
 		return fmt.Errorf("reload cursors failed")
+	}
+	return nil
+}
+
+func setWallpaperNative(imagePath string) error {
+	path := strings.TrimSpace(imagePath)
+	if path == "" {
+		return fmt.Errorf("path is required")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("wallpaper file not found: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("wallpaper path is a directory")
+	}
+
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, desktopKey, registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("open desktop registry key: %w", err)
+	}
+	defer k.Close()
+	if err := k.SetStringValue("Wallpaper", path); err != nil {
+		return fmt.Errorf("set Wallpaper registry value: %w", err)
+	}
+	if err := k.SetStringValue("WallpaperStyle", "6"); err != nil {
+		return fmt.Errorf("set WallpaperStyle registry value: %w", err)
+	}
+	if err := k.SetStringValue("TileWallpaper", "0"); err != nil {
+		return fmt.Errorf("set TileWallpaper registry value: %w", err)
+	}
+
+	if err := procSystemParametersInfoW.Find(); err != nil {
+		return fmt.Errorf("SystemParametersInfo unavailable: %w", err)
+	}
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	r1, _, callErr := procSystemParametersInfoW.Call(
+		uintptr(spiSetDeskWallpaper),
+		0,
+		uintptr(unsafe.Pointer(pathPtr)),
+		uintptr(spifUpdateIni|spifSendChange),
+	)
+	if r1 == 0 {
+		if callErr != nil && callErr != syscall.Errno(0) {
+			return fmt.Errorf("set wallpaper failed: %w", callErr)
+		}
+		return fmt.Errorf("set wallpaper failed")
 	}
 	return nil
 }

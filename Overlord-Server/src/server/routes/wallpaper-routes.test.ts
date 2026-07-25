@@ -138,7 +138,7 @@ describe("wallpaper route jobs", () => {
       id: clientId,
       lastSeen: Date.now(),
       role: "client",
-      version: "2.3.4",
+      version: "2.5.28",
       ws: {
         send(raw: Uint8Array) {
           const msg = decodeMessage(raw) as any;
@@ -159,14 +159,8 @@ describe("wallpaper route jobs", () => {
                 message: "Transferred 4 B of 8 B",
               });
               pending?.resolve({ ok: true, message: "upload complete" });
-            } else if (msg.commandType === "script_exec") {
-              const pending = pendingScripts.get(msg.id);
-              const script = String(msg.payload?.script || "");
-              if (script.includes("Test-Path")) {
-                pending?.resolve({ ok: true, result: "exists:true" });
-              } else {
-                pending?.resolve({ ok: true, result: "wallpaper_applied:true" });
-              }
+            } else if (msg.commandType === "set_wallpaper") {
+              pendingCommandReplies.get(msg.id)?.resolve({ ok: true, message: "wallpaper_applied:true" });
             }
           });
         },
@@ -198,58 +192,38 @@ describe("wallpaper route jobs", () => {
     }
   });
 
-  test("uses the current client connection when the socket is replaced before wallpaper apply", async () => {
+  test("falls back to PowerShell apply when the client lacks set_wallpaper", async () => {
     const auth = await createAdminToken();
-    const clientId = `client-reconnected-${Date.now().toString(36)}`;
+    const clientId = `client-legacy-${Date.now().toString(36)}`;
     const pendingCommandReplies = new Map<string, PendingCommandReply>();
     const pendingScripts = new Map<string, PendingScript>();
     const deps = { pendingCommandReplies, pendingScripts };
-    let replacementApplyCalls = 0;
-
-    const replacementWs = {
-      send(raw: Uint8Array) {
-        const msg = decodeMessage(raw) as any;
-        queueMicrotask(() => {
-          const pending = pendingScripts.get(msg.id);
-          replacementApplyCalls++;
-          pending?.resolve({ ok: true, result: "wallpaper_applied:true" });
-        });
-      },
-    };
-
-    const originalWs = {
-      send(raw: Uint8Array) {
-        const msg = decodeMessage(raw) as any;
-        queueMicrotask(() => {
-          if (msg.commandType === "file_upload_http") {
-            pendingCommandReplies.get(msg.id)?.resolve({ ok: true, message: "upload complete" });
-            return;
-          }
-
-          const pending = pendingScripts.get(msg.id);
-          const script = String(msg.payload?.script || "");
-          if (script.includes("Test-Path")) {
-            clientManager.addClient(clientId, {
-              id: clientId,
-              lastSeen: Date.now(),
-              role: "client",
-              version: "2.3.6",
-              ws: replacementWs,
-            });
-            pending?.resolve({ ok: true, result: "exists:true" });
-          } else {
-            pending?.resolve({ ok: false, error: "stale socket used" });
-          }
-        });
-      },
-    };
+    let scriptApplyCalls = 0;
 
     clientManager.addClient(clientId, {
       id: clientId,
       lastSeen: Date.now(),
       role: "client",
-      version: "2.3.6",
-      ws: originalWs,
+      version: "2.5.5",
+      ws: {
+        send(raw: Uint8Array) {
+          const msg = decodeMessage(raw) as any;
+          queueMicrotask(() => {
+            if (msg.commandType === "file_upload_http") {
+              pendingCommandReplies.get(msg.id)?.resolve({ ok: true, message: "upload complete" });
+              return;
+            }
+            if (msg.commandType === "set_wallpaper") {
+              pendingCommandReplies.get(msg.id)?.resolve({ ok: false, message: "unknown command" });
+              return;
+            }
+            if (msg.commandType === "script_exec") {
+              scriptApplyCalls++;
+              pendingScripts.get(msg.id)?.resolve({ ok: true, result: "wallpaper_applied:true" });
+            }
+          });
+        },
+      },
     });
 
     try {
@@ -258,16 +232,64 @@ describe("wallpaper route jobs", () => {
       expect(postRes).not.toBeNull();
       const started = await postRes!.json() as any;
       const finalStatus = await waitForStatus(clientId, started.jobId, auth.token, "succeeded", deps);
-
       expect(finalStatus.percent).toBe(100);
-      expect(replacementApplyCalls).toBe(1);
+      expect(scriptApplyCalls).toBe(1);
     } finally {
       clientManager.deleteClient(clientId);
       expect(deleteUser(auth.userId).success).toBe(true);
     }
   });
 
-  test("retries wallpaper apply after an in-flight client reconnect", async () => {
+  test("reports PowerShell crash instead of missing file on legacy apply", async () => {
+    const auth = await createAdminToken();
+    const clientId = `client-ps-crash-${Date.now().toString(36)}`;
+    const pendingCommandReplies = new Map<string, PendingCommandReply>();
+    const pendingScripts = new Map<string, PendingScript>();
+    const deps = { pendingCommandReplies, pendingScripts };
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      version: "2.5.5",
+      ws: {
+        send(raw: Uint8Array) {
+          const msg = decodeMessage(raw) as any;
+          queueMicrotask(() => {
+            if (msg.commandType === "file_upload_http") {
+              pendingCommandReplies.get(msg.id)?.resolve({ ok: true, message: "upload complete" });
+              return;
+            }
+            if (msg.commandType === "set_wallpaper") {
+              pendingCommandReplies.get(msg.id)?.resolve({ ok: false, message: "unknown command" });
+              return;
+            }
+            if (msg.commandType === "script_exec") {
+              pendingScripts.get(msg.id)?.resolve({ ok: false, error: "exit status 0xc0000005" });
+            }
+          });
+        },
+      },
+    });
+
+    try {
+      const { req, url } = makeWallpaperRequest(clientId, auth.token);
+      const postRes = await handleWallpaperRoutes(req, url, mockServer, deps);
+      expect(postRes).not.toBeNull();
+      const started = await postRes!.json() as any;
+      const failed = await waitForStatus(clientId, started.jobId, auth.token, "failed", deps);
+      expect(failed.phase).toBe("apply_wallpaper");
+      expect(failed.error.code).toBe("apply_wallpaper_powershell_crash");
+      expect(failed.error.message).toContain("PowerShell crashed");
+      expect(failed.error.message).not.toContain("file was not found");
+      expect(failed.error.clientMessage).toContain("0xc0000005");
+    } finally {
+      clientManager.deleteClient(clientId);
+      expect(deleteUser(auth.userId).success).toBe(true);
+    }
+  });
+
+  test("retries PowerShell wallpaper apply after an in-flight client reconnect", async () => {
     const auth = await createAdminToken();
     const clientId = `client-apply-retry-${Date.now().toString(36)}`;
     const pendingCommandReplies = new Map<string, PendingCommandReply>();
@@ -293,11 +315,8 @@ describe("wallpaper route jobs", () => {
             pendingCommandReplies.get(msg.id)?.resolve({ ok: true, message: "upload complete" });
             return;
           }
-
-          const pending = pendingScripts.get(msg.id);
-          const script = String(msg.payload?.script || "");
-          if (script.includes("Test-Path")) {
-            pending?.resolve({ ok: true, result: "exists:true" });
+          if (msg.commandType === "set_wallpaper") {
+            pendingCommandReplies.get(msg.id)?.resolve({ ok: false, message: "unknown command" });
             return;
           }
 
@@ -309,7 +328,7 @@ describe("wallpaper route jobs", () => {
             version: "2.3.6",
             ws: replacementWs,
           });
-          pending?.resolve({ ok: false, error: "Client disconnected" });
+          pendingScripts.get(msg.id)?.resolve({ ok: false, error: "Client disconnected" });
         });
       },
     };

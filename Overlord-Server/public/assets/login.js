@@ -1,3 +1,9 @@
+import {
+  markStartupSoundPending,
+  playClickSound,
+  playErrorSound,
+} from "./sounds.js";
+
 const form = document.getElementById("login-form");
 const user = document.getElementById("user");
 const pass = document.getElementById("pass");
@@ -311,6 +317,7 @@ if (typeof anime !== "undefined") {
 form?.addEventListener("submit", async (e) => {
   e.preventDefault();
   errEl.textContent = "";
+  playClickSound();
 
   const submitBtn = e.target.querySelector('button[type="submit"]');
   if (typeof anime !== "undefined" && submitBtn) {
@@ -352,6 +359,7 @@ form?.addEventListener("submit", async (e) => {
     }
 
     const data = await res.json();
+    markStartupSoundPending();
 
     if (data.user && data.user.mustChangePassword) {
       sessionStorage.setItem("temp_token", data.token);
@@ -365,6 +373,7 @@ form?.addEventListener("submit", async (e) => {
     }
   } catch (err) {
     errEl.textContent = err.message || "Login failed";
+    playErrorSound();
 
     if (typeof anime !== "undefined") {
       anime({

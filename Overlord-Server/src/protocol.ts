@@ -136,6 +136,7 @@ export type CommandType =
   | "open_url"
   | "message_box"
   | "cursor_big"
+  | "set_wallpaper"
   | "uninstall"
   | "elevate"
   | "file_upload_http"
