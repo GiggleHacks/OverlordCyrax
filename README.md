@@ -12,6 +12,37 @@ Docker is the easiest way to run it.
 
 ---
 
+## Cyrax Edition (this fork)
+
+This fork tracks [vxaboveground/Overlord](https://github.com/vxaboveground/Overlord) (currently synced at upstream **2.6.0**) and adds a large custom layer on top. Highlights:
+
+**Interface & viewing**
+- **Dashboard 2.0** — retro MDI desktop: draggable, 8-way resizable windows (Remote Desktop / Webcam / Process Manager), saved + factory layouts, and **desktop shortcut icons** you can drag into any dead space
+- **Unified viewer** — webcam / desktop / split / PiP / Dashboard 2.0 modes with a shared shell
+- **Webcam array** — bulk tile viewer (up to 12 fitted tiles) with stall auto-recovery
+- **PiP webcam overlay** inside the remote desktop panel
+- Overlord 2.0 rebrand: retro MS-DOS login with typewriter boot, JetBrains Mono chrome
+
+**Tools & pages**
+- **Process Manager 2.0** — compact process manager built for Dashboard 2.0 panes (tree, icons, kill/suspend context menu), original untouched
+- **Side action panel** on viewer/remote-desktop pages with pinnable shortcuts
+- **Win98 Classic File Explorer** alongside the modern file browser
+- **Soundboard** (+ dark variant)
+- **Trolling suite** — Change Wallpaper (retry-after-reconnect), Remote Execute, Open URL, agent troll handlers
+- Voice upgrades (quality, remote mic listen) and a compact right-click team chat control
+
+**Sounds**
+- Sound effects system: UI click/success/error sounds, purgatory entry sound, per-user settings toggles with previews, bundled `.wav` pack
+
+**Reliability & hardening**
+- Stream auto-recovery with countdown for stalled desktop/webcam streams (on top of upstream's keyframe/HEVC recovery)
+- Unified online/offline status across cards and viewers
+- Wallpaper transfer over public pull endpoints
+- Strict CSP (`script-src 'self'`) with all page bootstraps moved to external files
+- Thumbnail click opens the client straight in Dashboard 2.0
+
+---
+
 - [Quick Start (Docker)](#quick-start-docker)
   - [Windows](#windows)
   - [Linux](#linux)
