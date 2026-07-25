@@ -94,6 +94,8 @@ import { createWebSocketRuntime } from "./server/websocket-runtime";
 import {
   handleConsoleOutput,
   handleDesktopEncoderCapabilities,
+  handleDesktopStreamStats,
+  handleDesktopCursor,
   handleConsoleViewerMessage,
   handleConsoleViewerOpen,
   handlebackstageViewerMessage,
@@ -278,6 +280,7 @@ function parseMaxHttpBodyBytes(): number {
 }
 
 const MAX_HTTP_BODY_BYTES = parseMaxHttpBodyBytes();
+const IS_DEVELOPMENT = String(process.env.NODE_ENV || "").trim().toLowerCase() === "development";
 
 const pluginLoadedByClient = new Map<string, Set<string>>();
 const pendingPluginEvents = new Map<string, Array<{ event: string; payload: any }>>();
@@ -666,6 +669,8 @@ async function startServer() {
     handleNotificationScreenshotResult: notificationPluginHandlers.handleNotificationScreenshotResult,
     handleConsoleOutput: (clientId: string, payload: any) => handleConsoleOutput(clientId, payload),
     handleDesktopEncoderCapabilities: (clientId: string, payload: any) => handleDesktopEncoderCapabilities(clientId, payload),
+    handleDesktopStreamStats: (clientId: string, payload: any) => handleDesktopStreamStats(clientId, payload),
+    handleDesktopCursor: (clientId: string, payload: unknown) => handleDesktopCursor(clientId, payload),
     handleFileBrowserMessage: (clientId: string, payload: any) =>
       forwardFileBrowserMessage(clientId, payload, {
         pendingHttpDownloads,
@@ -716,6 +721,13 @@ async function startServer() {
     port: PORT,
     hostname: HOST,
     ...(tls ? { tls: tls.tlsOptions } : {}),
+    development: IS_DEVELOPMENT
+      ? {
+          hmr: true,
+          console: true,
+          chromeDevToolsAutomaticWorkspaceFolders: true,
+        }
+      : false,
     idleTimeout: 255,
     maxRequestBodySize: MAX_HTTP_BODY_BYTES,
     fetch: createHttpFetchHandler({
@@ -770,6 +782,8 @@ async function startServer() {
       handleWebSocketMessage,
       handleWebSocketClose,
     }),
+    // HTTP/3 mfs (bun barely supports it but we rocking it)
+    ...(tls ? { http3: true, http1: true } : {}),
   });
 
   
@@ -838,6 +852,9 @@ async function startServer() {
 
   if (tls) {
     logServerStartup(server, tls.certPathUsed, tls.source);
+    logger.info(
+      `[HTTP/3] Enabled (QUIC over UDP port ${server.port}; HTTP/1.1 TCP fallback enabled)`,
+    );
     logger.info(`[HTTP] maxRequestBodySize=${MAX_HTTP_BODY_BYTES} bytes`);
   } else {
     const hostname = server.hostname || "0.0.0.0";
@@ -850,6 +867,7 @@ async function startServer() {
     logger.info("");
     logger.info("External access should be HTTPS/WSS via your reverse proxy platform.");
     logger.info("Set this mode only when TLS is terminated by the platform (for example Render). ");
+    logger.info("[HTTP/3] Disabled (in-process TLS is offloaded to the reverse proxy)");
     logger.info(`[HTTP] maxRequestBodySize=${MAX_HTTP_BODY_BYTES} bytes`);
     logger.info("========================================");
   }

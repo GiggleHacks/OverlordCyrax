@@ -207,11 +207,12 @@ describe("unified viewer UI", () => {
   test("uses capability-driven desktop profiles with safe defaults", async () => {
     const html = await publicFile("remotedesktop.html");
     const js = await publicFile("assets/remotedesktop.js");
-    expect(html).toContain('<option value="720:30" selected>30 FPS - 720p</option>');
+    expect(html).toContain('<option value="auto" selected>Auto (best)</option>');
+    expect(html).toContain('<option value="720:30">30 FPS - 720p</option>');
     expect(html).toContain('<option value="1080:60">60 FPS - 1080p</option>');
     expect(html).toContain('id="streamProfileDetail"');
     expect(js).toContain('sendCmd("desktop_encoder_capabilities"');
-    expect(js).toContain('streamProfileSelect?.value || "720:30"');
+    expect(js).toContain('streamProfileSelect?.value || "auto"');
   });
 
   test("uses resolution presets instead of webcam quality percentage", async () => {

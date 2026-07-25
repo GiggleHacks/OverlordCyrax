@@ -9,6 +9,9 @@ import (
 	"log"
 	"sync"
 
+	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/cc"
+	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -71,29 +74,61 @@ func StartP2POffer(ctx context.Context, kind Kind, sessionID string, offerSDP st
 	if hasAudio {
 		if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:  webrtc.MimeTypePCMU,
-				ClockRate: 8000,
-				Channels:  1,
+				MimeType:    webrtc.MimeTypeOpus,
+				ClockRate:   48000,
+				Channels:    2,
+				SDPFmtpLine: "minptime=10;useinbandfec=1",
 			},
-			PayloadType: 0,
+			PayloadType: 111,
 		}, webrtc.RTPCodecTypeAudio); err != nil {
 			return "", fmt.Errorf("register audio codec: %w", err)
 		}
 	}
 
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
-	pc, err := api.NewPeerConnection(webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{URLs: []string{"stun:stun.l.google.com:19302"}},
-		},
-	})
+	interceptorRegistry := &interceptor.Registry{}
+	if hasVideo && opts.OnBandwidthEstimate != nil {
+		congestionController, ccErr := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+			return gcc.NewSendSideBWE(
+				gcc.SendSideBWEInitialBitrate(18_000_000),
+				gcc.SendSideBWEMinBitrate(2_000_000),
+				gcc.SendSideBWEMaxBitrate(50_000_000),
+			)
+		})
+		if ccErr != nil {
+			return "", fmt.Errorf("create congestion controller: %w", ccErr)
+		}
+		congestionController.OnNewPeerConnection(func(_ string, estimator cc.BandwidthEstimator) {
+			estimator.OnTargetBitrateChange(opts.OnBandwidthEstimate)
+		})
+		interceptorRegistry.Add(congestionController)
+		if err := webrtc.ConfigureTWCCHeaderExtensionSender(mediaEngine, interceptorRegistry); err != nil {
+			return "", fmt.Errorf("configure TWCC sender: %w", err)
+		}
+	}
+	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, interceptorRegistry); err != nil {
+		return "", fmt.Errorf("register WebRTC interceptors: %w", err)
+	}
+	api := webrtc.NewAPI(
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(interceptorRegistry),
+	)
+	iceServers := make([]webrtc.ICEServer, 0, len(opts.ICEServers))
+	for _, server := range opts.ICEServers {
+		iceServers = append(iceServers, webrtc.ICEServer{
+			URLs:       server.URLs,
+			Username:   server.Username,
+			Credential: server.Credential,
+		})
+	}
+	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: iceServers})
 	if err != nil {
 		return "", fmt.Errorf("new peer connection: %w", err)
 	}
 
 	var (
-		videoTrack *webrtc.TrackLocalStaticSample
-		audioTrack *webrtc.TrackLocalStaticSample
+		videoTrack  *webrtc.TrackLocalStaticSample
+		audioTrack  *webrtc.TrackLocalStaticSample
+		audioWriter AudioWriter
 	)
 	if hasVideo {
 		videoTrack, err = webrtc.NewTrackLocalStaticSample(
@@ -112,17 +147,22 @@ func StartP2POffer(ctx context.Context, kind Kind, sessionID string, offerSDP st
 			return "", fmt.Errorf("add video transceiver: %w", err)
 		}
 		if sender := tx.Sender(); sender != nil {
-			go drainRTCP(sender)
+			go drainRTCP(sender, kind)
 		}
 	}
 	if hasAudio {
 		audioTrack, err = webrtc.NewTrackLocalStaticSample(
-			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypePCMU, ClockRate: 8000, Channels: 1},
+			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2, SDPFmtpLine: "minptime=10;useinbandfec=1"},
 			"overlord-audio-p2p-"+string(kind), "overlord-"+string(kind),
 		)
 		if err != nil {
 			_ = pc.Close()
 			return "", fmt.Errorf("new audio track: %w", err)
+		}
+		audioWriter, err = newOpusAudioWriter(audioTrack)
+		if err != nil {
+			_ = pc.Close()
+			return "", fmt.Errorf("new opus encoder: %w", err)
 		}
 		tx, err := pc.AddTransceiverFromTrack(audioTrack, webrtc.RTPTransceiverInit{
 			Direction: webrtc.RTPTransceiverDirectionSendonly,
@@ -132,7 +172,7 @@ func StartP2POffer(ctx context.Context, kind Kind, sessionID string, offerSDP st
 			return "", fmt.Errorf("add audio transceiver: %w", err)
 		}
 		if sender := tx.Sender(); sender != nil {
-			go drainRTCP(sender)
+			go drainRTCP(sender, "")
 		}
 	}
 
@@ -201,7 +241,7 @@ func StartP2POffer(ctx context.Context, kind Kind, sessionID string, offerSDP st
 		registerVideoWriter(kind, writerID, &h264TrackWriter{t: videoTrack})
 	}
 	if audioTrack != nil {
-		registerAudioWriter(kind, writerID, newPCMUAudioWriter(audioTrack))
+		registerAudioWriter(kind, writerID, audioWriter)
 	}
 	return answer.SDP, nil
 }

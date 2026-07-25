@@ -2,6 +2,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 import { checkFeatureAccess } from "./feature-gate.js";
 import { WhepClient } from "./whep.js";
 import { P2PClient } from "./webrtc-p2p.js";
+import { AdaptiveDesktopQuality, normalizeAdaptiveProfiles } from "./rd-adaptive-quality.js";
 import { createKeyboardCapture } from "./keyboard-capture.js";
 import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
 import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
@@ -80,12 +81,16 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   const recordFps = document.getElementById("recordFps");
   const fullscreenBtn = document.getElementById("fullscreenBtn");
   const rdMicBtn = document.getElementById("rdMicBtn");
+  const fullscreenExitBtn = document.getElementById("fullscreenExitBtn");
   const mouseCtrl = document.getElementById("mouseCtrl");
   const kbdCtrl = document.getElementById("kbdCtrl");
   const cursorCtrl = document.getElementById("cursorCtrl");
+  const hideLocalCursorCtrl = document.getElementById("hideLocalCursorCtrl");
   const duplicationCtrl = document.getElementById("duplicationCtrl");
   const streamProfileSelect = document.getElementById("streamProfileSelect");
   const streamProfileDetail = document.getElementById("streamProfileDetail");
+  const bitrateSelect = document.getElementById("bitrateSelect");
+  const requestKeyframeBtn = document.getElementById("requestKeyframeBtn");
   const smoothingSlider = document.getElementById("smoothingSlider");
   const smoothingValue = document.getElementById("smoothingValue");
   const qualitySlider = document.getElementById("qualitySlider");
@@ -95,10 +100,39 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   const codecMode = document.getElementById("codecMode");
   const canvas = document.getElementById("frameCanvas");
   const canvasContainer = document.getElementById("canvasContainer");
+  const renderSurface = document.getElementById("renderSurface");
+  const remoteCursor = document.getElementById("remoteCursor");
+  const remoteCursorImage = document.getElementById("remoteCursorImage");
   const ctx = canvas.getContext("2d");
   const agentFps = document.getElementById("agentFps");
   const viewerFps = document.getElementById("viewerFps");
   const inputLatency = document.getElementById("inputLatency");
+  const networkStats = document.getElementById("networkStats");
+  const diagnosticsBtn = document.getElementById("diagnosticsBtn");
+  const diagnosticsHud = document.getElementById("diagnosticsHud");
+  const diagnosticsClose = document.getElementById("diagnosticsClose");
+  const fullscreenHud = document.getElementById("fullscreenHud");
+  const fsHudStateDot = document.getElementById("fsHudStateDot");
+  const fsHudStatus = document.getElementById("fsHudStatus");
+  const fsHudResolution = document.getElementById("fsHudResolution");
+  const fsHudCodec = document.getElementById("fsHudCodec");
+  const fsHudFps = document.getElementById("fsHudFps");
+  const fsHudLatency = document.getElementById("fsHudLatency");
+  const fsHudNetwork = document.getElementById("fsHudNetwork");
+  const fsHudStatsBtn = document.getElementById("fsHudStatsBtn");
+  const fsHudTuckBtn = document.getElementById("fsHudTuckBtn");
+  const fsHudExitBtn = document.getElementById("fsHudExitBtn");
+  const rdStateOverlay = document.getElementById("rdStateOverlay");
+  const rdStateIcon = document.getElementById("rdStateIcon");
+  const rdStateTitle = document.getElementById("rdStateTitle");
+  const rdStateDetail = document.getElementById("rdStateDetail");
+  const rdStateKeyframeBtn = document.getElementById("rdStateKeyframeBtn");
+  const rdStateRestartBtn = document.getElementById("rdStateRestartBtn");
+  const rdStateTransportBtn = document.getElementById("rdStateTransportBtn");
+  const diagnosticEls = Object.fromEntries([
+    "Summary", "Transport", "Codec", "Resolution", "Capture", "Encode", "Send", "AgentTotal",
+    "Bitrate", "Rtt", "LossJitter", "JitterBuffer", "Decode", "Render", "Queue", "Dropped", "Fps", "Input",
+  ].map((name) => [name, document.getElementById(`diag${name}`)]));
   const statusEl = document.getElementById("streamStatus");
   const rdScaleBtn = document.getElementById("rdScaleBtn");
   const clipboardSyncCtrl = document.getElementById("clipboardSyncCtrl");
@@ -109,6 +143,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   let whepClient = null;
   let p2pClient = null;
   let webrtcActive = false;
+  let lastRemoteCursor = null;
+  let remoteCursorShape = null;
+  let remoteCursorImageUrl = "";
+  const CANVAS_TRANSPORT_PREF_VERSION = 1;
   function getWebrtcMode() {
     return webrtcMode ? String(webrtcMode.value || "off") : "off";
   }
@@ -122,6 +160,9 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   let desiredStreaming = true;
   let viewerScale = 65;
   let streamState = "connecting";
+  let streamStatusLabel = "Connecting";
+  let fullscreenHudTimer = null;
+  let fullscreenHudTucked = false;
   let frameWatchTimer = null;
   let offlineTimer = null;
   let stallRestartCount = 0;
@@ -136,12 +177,19 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   let smoothingPct = 20;
   let smoothPoint = null;
   let pendingMove = null;
-  let moveTimer = null;
+  let moveFrame = 0;
   let frameDecodeBusy = false;
   let pendingFrame = null;
   let videoDecoder = null;
+  let videoDecoderConfigKey = "";
+  const disabledDecoderCodecs = new Set();
+  let h264StreamCodec = "";
+  let canvasDecodePressure = false;
+  let h264PendingTimings = [];
   let h264TimestampUs = 0;
   let prefersH264 = typeof VideoDecoder === "function";
+  let negotiatedCodec = prefersH264 ? "h264" : "jpeg";
+  let browserDecoderCodecs = ["jpeg", "raw"];
   let h264LowFpsStreak = 0;
   let h264FirstFrameAt = 0;
   let h264FramesSeen = 0;
@@ -157,9 +205,45 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   const H264_KEYFRAME_ERROR_RESTART_THRESHOLD = 24;
   const H264_MAX_RECOVERY_ATTEMPTS = 1;
   const H264_DECODE_WARN_THROTTLE_MS = 2000;
-  const mouseMoveIntervalMs = 33;
   const inputBackpressureBytes = 256 * 1024;
-  let lastMoveSentAt = 0;
+  const VIEWER_FRAME_GAP_KEYFRAME_MS = 500;
+  const VIEWER_FRAME_GAP_KEYFRAME_THROTTLE_MS = 1000;
+  let lastViewerFrameGapKeyframeAt = 0;
+  const diagnostics = {
+    agent: null,
+    network: null,
+    decodeMs: null,
+    renderMs: null,
+    decodeQueue: 0,
+    coalescedFrames: 0,
+    currentAgentFps: null,
+    currentViewerFps: null,
+    wsBitrateMbps: null,
+    wsBytes: 0,
+    wsWindowStartedAt: performance.now(),
+    codec: "",
+    width: 0,
+    height: 0,
+  };
+  let encoderProfiles = [];
+  let adaptiveProfileRunning = false;
+  const adaptiveQuality = new AdaptiveDesktopQuality((target) => {
+    sendCmd("desktop_set_profile", {
+      maxHeight: target.maxHeight,
+      fps: target.fps,
+      source: "webrtc_auto",
+      reason: target.reason,
+    });
+    sendCmd("desktop_set_bitrate", {
+      bitrateMbps: target.bitrateMbps,
+      adaptive: true,
+      source: "webrtc_auto",
+      reason: target.reason,
+    });
+    if (streamProfileDetail) {
+      streamProfileDetail.textContent = `Auto: ${target.width}×${target.height} @ ${target.fps} FPS, ${target.bitrateMbps} Mbps. ${target.reason}.`;
+    }
+  });
 
   let clipboardSyncTimer = null;
   let lastClipboardText = "";
@@ -180,6 +264,9 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
 
   function resetH264RuntimeState() {
     h264TimestampUs = 0;
+    h264StreamCodec = "";
+    h264PendingTimings = [];
+    diagnostics.decodeQueue = 0;
     h264LowFpsStreak = 0;
     h264FirstFrameAt = 0;
     h264FramesSeen = 0;
@@ -404,7 +491,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   }
 
   let savedDisplay = null;
-  let savedStreamProfile = null;
+  let savedStreamProfile = "auto";
 
   function setSelectValue(select, value) {
     if (!select || value === undefined || value === null) return false;
@@ -428,7 +515,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
         ? `${settings.resolution}:${settings.targetFps}`
         : savedStreamProfile);
     setSelectValue(streamProfileSelect, savedStreamProfile);
-    setSelectValue(webrtcMode, settings.webrtcMode);
+    setSelectValue(bitrateSelect, settings.bitrateMbps);
+    setSelectValue(webrtcMode, settings.transportPreferenceVersion === CANVAS_TRANSPORT_PREF_VERSION ? settings.webrtcMode : "off");
     setSelectValue(audioTransport, settings.audioTransport);
     setSelectValue(recordMode, settings.recordMode);
     setSelectValue(recordFps, settings.recordFps);
@@ -440,6 +528,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     if (mouseCtrl && typeof settings.mouse === "boolean") mouseCtrl.checked = settings.mouse;
     if (kbdCtrl && typeof settings.keyboard === "boolean") kbdCtrl.checked = settings.keyboard;
     if (cursorCtrl && typeof settings.cursor === "boolean") cursorCtrl.checked = settings.cursor;
+    if (hideLocalCursorCtrl && typeof settings.hideLocalCursor === "boolean") hideLocalCursorCtrl.checked = settings.hideLocalCursor;
     if (duplicationCtrl && typeof settings.duplication === "boolean") duplicationCtrl.checked = settings.duplication;
     if (softwareH264Ctrl && typeof settings.softwareH264 === "boolean") softwareH264Ctrl.checked = settings.softwareH264;
     if (clipboardSyncCtrl && typeof settings.clipboardSync === "boolean") clipboardSyncCtrl.checked = settings.clipboardSync;
@@ -457,17 +546,20 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     const profile = selectedStreamProfile();
     return {
       display: Number(displaySelect?.value || 0),
-      streamProfile: streamProfileSelect?.value || "720:30",
+      streamProfile: streamProfileSelect?.value || "auto",
       // Keep the legacy fields so backstage and older remote-desktop builds that
       // share these preferences continue to receive equivalent settings.
       resolution: String(profile.maxHeight),
       targetFps: String(profile.fps),
       quality: Number(qualitySlider?.value || 90),
+      bitrateMbps: Number(bitrateSelect?.value || 0),
       preferH264: !!prefersH264,
       webrtcMode: getWebrtcMode(),
+      transportPreferenceVersion: CANVAS_TRANSPORT_PREF_VERSION,
       mouse: !!mouseCtrl?.checked,
       keyboard: !!kbdCtrl?.checked,
       cursor: !!cursorCtrl?.checked,
+      hideLocalCursor: !!hideLocalCursorCtrl?.checked,
       duplication: !!duplicationCtrl?.checked,
       softwareH264: !!softwareH264Ctrl?.checked,
       clipboardSync: !!clipboardSyncCtrl?.checked,
@@ -505,6 +597,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   function updateFpsDisplay(agentValue) {
     if (agentValue !== undefined && agentValue !== null && agentFps) {
       agentFps.textContent = String(agentValue);
+      diagnostics.currentAgentFps = Number(agentValue) || null;
     }
     const now = performance.now();
     renderCount += 1;
@@ -512,6 +605,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     if (elapsed >= 1000 && viewerFps) {
       const fps = Math.round((renderCount * 1000) / elapsed);
       viewerFps.textContent = String(fps);
+      diagnostics.currentViewerFps = fps;
       renderCount = 0;
       renderWindowStart = now;
     }
@@ -519,6 +613,11 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
 
   function setStreamState(state, text) {
     streamState = state;
+    streamStatusLabel = text || defaultStreamLabel(state);
+    if (state === "offline" || state === "disconnected" || state === "error") {
+      lastRemoteCursor = null;
+    }
+    renderRemoteCursor();
     if (statusEl) {
       const icons = {
         connecting: '<i class="fa-solid fa-circle-notch fa-spin"></i>',
@@ -531,17 +630,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
         disconnected: '<i class="fa-solid fa-link-slash text-slate-400"></i>',
         error: '<i class="fa-solid fa-circle-exclamation text-rose-400"></i>',
       };
-      const label = text ||
-        (state === "streaming" ? "Streaming" :
-          state === "starting" ? "Waiting for first frame" :
-            state === "stopping" ? "Stopping" :
-              state === "offline" ? "Client offline" :
-                state === "disconnected" ? "Disconnected" :
-                  state === "stalled" ? "No frames" :
-                    state === "error" ? "Error" :
-                      state === "idle" ? "Stopped" :
-                        "Connecting");
-
+      const label = streamStatusLabel;
       statusEl.innerHTML = `${icons[state] || icons.idle} <span>${label}</span>`;
       const base = "inline-flex items-center gap-2 px-3 py-2 rounded-full border text-sm";
       const styles = {
@@ -571,6 +660,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
 
     updateControls();
     checkClipboardSync();
+    renderRemoteDesktopOverlays();
   }
 
   function updateControls() {
@@ -588,6 +678,9 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     }
     if (stopBtn) {
       stopBtn.disabled = !wsOpen || (!isStarting && !isStreaming && !isStopping && !isStalled && !recovering);
+    }
+    if (requestKeyframeBtn) {
+      requestKeyframeBtn.disabled = !wsOpen || (!isStreaming && !isStalled);
     }
     if (recordBtn) {
       recordBtn.disabled =
@@ -865,6 +958,306 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     }
   }
 
+  function finite(value) {
+    return Number.isFinite(value) ? Number(value) : null;
+  }
+
+  function smoothed(previous, next, weight = 0.25) {
+    const value = finite(next);
+    if (value == null) return previous;
+    return previous == null ? value : previous * (1 - weight) + value * weight;
+  }
+
+  function msText(value) {
+    const number = finite(value);
+    return number == null ? "-- ms" : `${number < 10 ? number.toFixed(1) : Math.round(number)} ms`;
+  }
+
+  function defaultStreamLabel(state) {
+    return state === "streaming" ? "Streaming" :
+      state === "starting" ? "Starting" :
+        state === "stopping" ? "Stopping" :
+          state === "offline" ? "Client offline" :
+            state === "disconnected" ? "Disconnected" :
+              state === "stalled" ? "No frames" :
+                state === "idle" ? "Stopped" :
+                  "Connecting";
+  }
+
+  function currentDiagnosticSnapshot() {
+    const agent = diagnostics.agent || {};
+    const network = diagnostics.network || {};
+    const media = network.video || network.audio || {};
+    const mode = getWebrtcMode();
+    const transport = mode === "p2p" ? "WebRTC P2P" : mode === "relayed" ? "WebRTC server" : "Canvas WebSocket";
+    const bitrate = finite(media.bitrateMbps) ?? finite(diagnostics.wsBitrateMbps);
+    const fps = finite(agent.fps) ?? diagnostics.currentAgentFps;
+    const viewerRate = finite(media.framesPerSecond) ?? diagnostics.currentViewerFps;
+    const width = finite(media.width) ?? diagnostics.width;
+    const height = finite(media.height) ?? diagnostics.height;
+    return {
+      agent,
+      network,
+      media,
+      transport,
+      bitrate,
+      decodeMs: finite(media.decodeMs) ?? finite(diagnostics.decodeMs),
+      renderMs: finite(media.processingDelayMs) ?? finite(diagnostics.renderMs),
+      dropped: finite(media.framesDropped) ?? 0,
+      queue: mode === "off" ? diagnostics.decodeQueue : null,
+      fps,
+      viewerRate,
+      width,
+      height,
+      codec: String(media.codec || agent.format || diagnostics.codec || "--").toUpperCase(),
+      resolution: width && height ? `${width}×${height}` : "--",
+    };
+  }
+
+  function nextTransportValue() {
+    const mode = getWebrtcMode();
+    return mode === "off" ? "p2p" : mode === "p2p" ? "relayed" : "off";
+  }
+
+  function transportLabel(value) {
+    return value === "p2p" ? "WebRTC P2P" : value === "relayed" ? "WebRTC Relayed" : "Canvas";
+  }
+
+  function setFullscreenHudTucked(tucked, persist = true) {
+    fullscreenHudTucked = !!tucked;
+    fullscreenHud?.classList.toggle("is-tucked", fullscreenHudTucked);
+    fsHudTuckBtn?.setAttribute("aria-pressed", fullscreenHudTucked ? "true" : "false");
+    fsHudTuckBtn?.setAttribute("title", fullscreenHudTucked ? "Show fullscreen stats" : "Tuck away fullscreen stats");
+    const icon = fsHudTuckBtn?.querySelector("i");
+    const label = fsHudTuckBtn?.querySelector("span");
+    if (icon) {
+      icon.classList.toggle("fa-chevron-down", !fullscreenHudTucked);
+      icon.classList.toggle("fa-chevron-up", fullscreenHudTucked);
+    }
+    if (label) label.textContent = fullscreenHudTucked ? "Show" : "Hide";
+    if (persist) {
+      try { localStorage.setItem("overlord.rd.fullscreenHudTucked", fullscreenHudTucked ? "1" : "0"); } catch {}
+    }
+    renderFullscreenHud();
+  }
+
+  function showFullscreenHud(pinned = false) {
+    if (!fullscreenHud) return;
+    const active = isCanvasFullscreen();
+    fullscreenHud.setAttribute("aria-hidden", active ? "false" : "true");
+    fullscreenHud.classList.toggle("is-visible", active);
+    if (fullscreenHudTimer) {
+      clearTimeout(fullscreenHudTimer);
+      fullscreenHudTimer = null;
+    }
+    if (active && !fullscreenHudTucked && !pinned && streamState === "streaming" && diagnosticsHud?.classList.contains("hidden")) {
+      fullscreenHudTimer = setTimeout(() => {
+        fullscreenHud.classList.remove("is-visible");
+      }, 2400);
+    }
+  }
+
+  function renderFullscreenHud() {
+    if (!fullscreenHud) return;
+    const snapshot = currentDiagnosticSnapshot();
+    if (fsHudStateDot) fsHudStateDot.dataset.state = streamState;
+    if (fsHudStatus) fsHudStatus.textContent = streamStatusLabel;
+    if (fsHudResolution) fsHudResolution.textContent = snapshot.resolution;
+    if (fsHudCodec) fsHudCodec.textContent = snapshot.codec;
+    if (fsHudFps) {
+      fsHudFps.textContent = `${snapshot.fps == null ? "--" : Math.round(snapshot.fps)} → ${snapshot.viewerRate == null ? "--" : Math.round(snapshot.viewerRate)} FPS`;
+    }
+    if (fsHudLatency) fsHudLatency.textContent = `${msText(latencyAvg)} input`;
+    if (fsHudNetwork) {
+      const networkParts = [];
+      if (snapshot.bitrate != null) networkParts.push(`${snapshot.bitrate.toFixed(1)} Mbps`);
+      if (Number.isFinite(snapshot.network.rttMs)) networkParts.push(`${Math.round(snapshot.network.rttMs)} ms`);
+      if (Number.isFinite(snapshot.media.lossPercent)) networkParts.push(`${snapshot.media.lossPercent.toFixed(1)}% loss`);
+      fsHudNetwork.textContent = networkParts.join(" · ") || snapshot.transport;
+    }
+    if (isCanvasFullscreen()) {
+      fullscreenHud.setAttribute("aria-hidden", "false");
+      if (fullscreenHudTucked || streamState !== "streaming" || !diagnosticsHud?.classList.contains("hidden")) {
+        showFullscreenHud(true);
+      }
+    } else {
+      fullscreenHud.classList.remove("is-visible");
+      fullscreenHud.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  function renderStateOverlay() {
+    if (!rdStateOverlay) return;
+    const show = streamState !== "streaming" && streamState !== "idle";
+    rdStateOverlay.hidden = !show;
+    if (!show) return;
+
+    const iconClasses = {
+      connecting: "fa-solid fa-circle-notch fa-spin",
+      starting: "fa-solid fa-circle-notch fa-spin",
+      stopping: "fa-solid fa-circle-notch fa-spin",
+      stalled: "fa-solid fa-triangle-exclamation",
+      offline: "fa-solid fa-plug-circle-xmark",
+      disconnected: "fa-solid fa-link-slash",
+      error: "fa-solid fa-circle-exclamation",
+    };
+    const details = {
+      connecting: "Waiting for the control connection to recover.",
+      starting: "Starting capture and waiting for the first frame.",
+      stopping: "Stopping the remote desktop stream.",
+      stalled: "The viewer has not received a frame recently. Request a keyframe or restart the stream.",
+      offline: "The client is not currently reachable.",
+      disconnected: "The viewer WebSocket is disconnected.",
+      error: "The remote desktop stream hit an error.",
+    };
+    if (rdStateIcon) rdStateIcon.className = iconClasses[streamState] || iconClasses.connecting;
+    if (rdStateTitle) rdStateTitle.textContent = streamStatusLabel;
+    if (rdStateDetail) rdStateDetail.textContent = details[streamState] || details.connecting;
+
+    const canKeyframe = streamState === "stalled";
+    const wsOpen = ws && ws.readyState === WebSocket.OPEN;
+    if (rdStateKeyframeBtn) rdStateKeyframeBtn.hidden = !canKeyframe;
+    if (rdStateRestartBtn) {
+      rdStateRestartBtn.hidden = !wsOpen || streamState === "offline" || streamState === "disconnected";
+      rdStateRestartBtn.textContent = "Restart stream";
+    }
+    if (rdStateTransportBtn) {
+      rdStateTransportBtn.hidden = !wsOpen || streamState !== "stalled";
+      rdStateTransportBtn.textContent = `Switch to ${transportLabel(nextTransportValue())}`;
+    }
+  }
+
+  function renderRemoteDesktopOverlays() {
+    renderFullscreenHud();
+    renderStateOverlay();
+  }
+
+  function setDiagnosticsVisible(visible) {
+    if (!diagnosticsHud) return;
+    diagnosticsHud.classList.toggle("hidden", !visible);
+    diagnosticsBtn?.setAttribute("aria-pressed", visible ? "true" : "false");
+    try { localStorage.setItem("overlord.rd.statsHud", visible ? "1" : "0"); } catch {}
+    renderFullscreenHud();
+  }
+
+  function renderDiagnostics() {
+    if (!diagnosticsHud) return;
+    const agent = diagnostics.agent || {};
+    const network = diagnostics.network || {};
+    const media = network.video || network.audio || {};
+    const mode = getWebrtcMode();
+    const transport = mode === "p2p" ? "WebRTC P2P" : mode === "relayed" ? "WebRTC server" : "Canvas WebSocket";
+    const bitrate = finite(media.bitrateMbps) ?? finite(diagnostics.wsBitrateMbps);
+    const decodeMs = finite(media.decodeMs) ?? finite(diagnostics.decodeMs);
+    const renderMs = finite(media.processingDelayMs) ?? finite(diagnostics.renderMs);
+    const dropped = finite(media.framesDropped) ?? 0;
+    const queue = mode === "off" ? diagnostics.decodeQueue : null;
+    const fps = finite(agent.fps) ?? diagnostics.currentAgentFps;
+    const viewerRate = finite(media.framesPerSecond) ?? diagnostics.currentViewerFps;
+    const frameBudget = 1000 / Math.max(1, fps || viewerRate || 30);
+
+    let summary = "Pipeline healthy";
+    let severity = "ok";
+    if (streamState !== "streaming" && streamState !== "stalled") {
+      summary = "Stream is not active";
+      severity = "warn";
+    } else if (finite(agent.captureMs) > frameBudget * 0.75) {
+      summary = "Capture is limiting frame rate";
+      severity = "bad";
+    } else if (finite(agent.encodeMs) > frameBudget * 0.75) {
+      summary = "Encoder is limiting frame rate";
+      severity = "bad";
+    } else if (decodeMs != null && decodeMs > frameBudget * 0.75) {
+      const viewerKeepingUp = fps != null && viewerRate != null && viewerRate >= fps * 0.9;
+      summary = viewerKeepingUp
+        ? `Decoder buffering adds ${Math.round(decodeMs)} ms`
+        : "Viewer decoder throughput is limiting FPS";
+      severity = viewerKeepingUp ? "warn" : "bad";
+    } else if ((finite(media.lossPercent) ?? 0) > 3 || (finite(network.rttMs) ?? 0) > 150 || (finite(media.jitterMs) ?? 0) > 35) {
+      summary = "Network conditions are causing delay";
+      severity = "bad";
+    } else if ((queue ?? 0) > 2 || (renderMs != null && renderMs > frameBudget)) {
+      summary = "Viewer render queue is backing up";
+      severity = "warn";
+    } else if (!diagnostics.agent && !diagnostics.network) {
+      summary = "Waiting for stream telemetry";
+      severity = "warn";
+    }
+
+    diagnosticEls.Summary.textContent = summary;
+    diagnosticEls.Summary.dataset.severity = severity;
+    diagnosticEls.Transport.textContent = transport;
+    diagnosticEls.Codec.textContent = String(media.codec || agent.format || diagnostics.codec || "--").toUpperCase();
+    const width = finite(media.width) ?? diagnostics.width;
+    const height = finite(media.height) ?? diagnostics.height;
+    diagnosticEls.Resolution.textContent = width && height ? `${width}×${height}` : "--";
+    diagnosticEls.Capture.textContent = msText(agent.captureMs);
+    diagnosticEls.Encode.textContent = msText(agent.encodeMs);
+    diagnosticEls.Send.textContent = msText(agent.sendMs);
+    diagnosticEls.AgentTotal.textContent = msText(agent.totalMs);
+    diagnosticEls.Bitrate.textContent = bitrate == null ? "-- Mbps" : `${bitrate.toFixed(2)} Mbps`;
+    diagnosticEls.Rtt.textContent = msText(network.rttMs);
+    diagnosticEls.LossJitter.textContent = `${finite(media.lossPercent)?.toFixed(1) ?? "--"}% / ${msText(media.jitterMs)}`;
+    diagnosticEls.JitterBuffer.textContent = msText(media.jitterBufferMs);
+    diagnosticEls.Decode.textContent = msText(decodeMs);
+    diagnosticEls.Render.textContent = msText(renderMs);
+    diagnosticEls.Queue.textContent = queue == null ? "managed by browser" : String(queue);
+    diagnosticEls.Dropped.textContent = `${Math.round(dropped)} / ${diagnostics.coalescedFrames}`;
+    diagnosticEls.Fps.textContent = `${fps == null ? "--" : Math.round(fps)} → ${viewerRate == null ? "--" : Math.round(viewerRate)}`;
+    diagnosticEls.Input.textContent = msText(latencyAvg);
+    renderFullscreenHud();
+  }
+
+  diagnosticsBtn?.addEventListener("click", () => setDiagnosticsVisible(diagnosticsHud?.classList.contains("hidden")));
+  diagnosticsClose?.addEventListener("click", () => setDiagnosticsVisible(false));
+  networkStats?.addEventListener("click", () => setDiagnosticsVisible(true));
+  try { setDiagnosticsVisible(localStorage.getItem("overlord.rd.statsHud") === "1"); } catch {}
+  setInterval(renderDiagnostics, 250);
+
+  function updateNetworkStats(stats) {
+    if (!networkStats || !stats) return;
+    diagnostics.network = stats;
+    const media = stats.video || stats.audio;
+    const parts = [];
+    if (Number.isFinite(media?.bitrateMbps)) parts.push(`${media.bitrateMbps.toFixed(1)} Mbps`);
+    if (Number.isFinite(stats.rttMs)) parts.push(`${Math.round(stats.rttMs)} ms`);
+    if (Number.isFinite(media?.lossPercent)) parts.push(`${media.lossPercent.toFixed(1)}% loss`);
+    const route = [stats.protocol, stats.route].filter(Boolean).join("/");
+    if (route) parts.push(route);
+    networkStats.textContent = parts.join(" · ") || "Connected";
+    const details = [];
+    if (media?.codec) details.push(`Codec: ${media.codec}`);
+    if (media?.width && media?.height) details.push(`Video: ${media.width}×${media.height}${media.framesPerSecond ? ` @ ${Math.round(media.framesPerSecond)} FPS` : ""}`);
+    if (Number.isFinite(media?.jitterMs)) details.push(`Jitter: ${media.jitterMs.toFixed(1)} ms`);
+    if (Number.isFinite(media?.jitterBufferMs)) details.push(`Jitter buffer: ${media.jitterBufferMs.toFixed(1)} ms`);
+    if (Number.isFinite(media?.framesDropped)) details.push(`Frames dropped: ${media.framesDropped}`);
+    if (Number.isFinite(stats.availableIncomingMbps)) details.push(`Available: ${stats.availableIncomingMbps.toFixed(1)} Mbps`);
+    networkStats.title = details.join("\n");
+    if (adaptiveProfileRunning) {
+      adaptiveQuality.sample(stats, diagnostics.agent, Date.now());
+    }
+    renderDiagnostics();
+  }
+
+  function handleDesktopStreamStats(stats) {
+    const previous = diagnostics.agent || {};
+    diagnostics.agent = {
+      ...stats,
+      captureMs: smoothed(finite(previous.captureMs), stats.captureMs),
+      encodeMs: smoothed(finite(previous.encodeMs), stats.encodeMs),
+      sendMs: smoothed(finite(previous.sendMs), stats.sendMs),
+      totalMs: smoothed(finite(previous.totalMs), stats.totalMs),
+    };
+    diagnostics.currentAgentFps = finite(stats.fps);
+    diagnostics.codec = String(stats.format || diagnostics.codec || "");
+    diagnostics.width = finite(stats.width) || diagnostics.width;
+    diagnostics.height = finite(stats.height) || diagnostics.height;
+    if (agentFps && diagnostics.currentAgentFps != null) {
+      agentFps.textContent = String(Math.round(diagnostics.currentAgentFps));
+    }
+    renderDiagnostics();
+  }
+
   function clearOfflineTimer() {
     if (offlineTimer) {
       clearTimeout(offlineTimer);
@@ -909,42 +1302,6 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     stopAllWebrtc();
     if (userInitiated) {
       setStreamState("idle", "Stopped");
-    }
-  }
-
-  function startDesktopStream({ resetFrameClock = true } = {}) {
-    const mode = getWebrtcMode();
-    if (displaySelect && displaySelect.value !== undefined) {
-      sendCmd("desktop_select_display", {
-        display: parseInt(displaySelect.value, 10) || 0,
-      });
-    }
-    if (qualitySlider) {
-      pushQuality(qualitySlider.value);
-    }
-    if (prefersH264 && !useSoftwareH264()) {
-      ensureDuplicationForH264();
-    }
-    pushStreamProfile();
-    pushInputToggles();
-    pushCaptureToggles();
-    desiredStreaming = true;
-    if (resetFrameClock) {
-      lastFrameAt = 0;
-      firstFrameLogged = false;
-      resetH264SessionState();
-    }
-    setStreamState("starting", "Opening display · waiting for first frame");
-    if (mode === "relayed") {
-      sendCmd("desktop_start", { webrtc: true });
-    } else if (mode === "p2p") {
-      sendCmd("desktop_start", {});
-      startP2P();
-    } else {
-      sendCmd("desktop_start", {});
-    }
-    if (audioCtrl && audioCtrl.checked) {
-      connectAudio();
     }
   }
 
@@ -1034,6 +1391,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     }
     if (msg.status === "online") {
       clearOfflineTimer();
+      const mode = getWebrtcMode();
       if (elevationPending) {
         elevationPending = false;
         desiredStreaming = true;
@@ -1042,7 +1400,25 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
         const shouldRequestStart = !["starting", "streaming", "stalled"].includes(streamState) && !stallRecoveryInProgress;
         if (shouldRequestStart) {
           setStreamState("starting", "Reconnecting");
-          startDesktopStream({ resetFrameClock: true });
+        }
+        if (displaySelect && displaySelect.value !== undefined) {
+          sendCmd("desktop_select_display", {
+            display: parseInt(displaySelect.value, 10) || 0,
+          });
+        }
+        pushInputToggles();
+        pushCaptureToggles();
+        if (qualitySlider) pushQuality(qualitySlider.value);
+        pushStreamProfile();
+        if (shouldRequestStart) {
+          if (mode === "relayed") {
+            sendCmd("desktop_start", { webrtc: true });
+          } else if (mode === "p2p") {
+            sendCmd("desktop_start", { canvasFlowControl: false });
+            startP2P();
+          } else {
+            sendCmd("desktop_start", { canvasFlowControl: true });
+          }
         }
       } else {
         setStreamState("idle", "Stopped");
@@ -1162,17 +1538,19 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       return;
     }
     const msg = { type, ...payload };
-    rdDebug("send", {
-      msg,
-      readyState: ws.readyState,
-      streamState,
-      desiredStreaming,
-      display: displaySelect?.value ?? "",
-      quality: qualitySlider?.value ?? "",
-      streamProfile: streamProfileSelect?.value ?? "",
-      transport: getWebrtcMode(),
-      lastFrameAgeMs: lastFrameAt ? Math.round(performance.now() - lastFrameAt) : null,
-    });
+    if (type !== "desktop_decode_pressure") {
+      rdDebug("send", {
+        msg,
+        readyState: ws.readyState,
+        streamState,
+        desiredStreaming,
+        display: displaySelect?.value ?? "",
+        quality: qualitySlider?.value ?? "",
+        streamProfile: streamProfileSelect?.value ?? "",
+        transport: getWebrtcMode(),
+        lastFrameAgeMs: lastFrameAt ? Math.round(performance.now() - lastFrameAt) : null,
+      });
+    }
     ws.send(encodeMsgpack(msg));
   }
 
@@ -1180,6 +1558,12 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     webrtcActive = !!active;
     if (canvas) canvas.style.display = active ? "none" : "block";
     if (webrtcVideo) webrtcVideo.style.display = active ? "block" : "none";
+    renderRemoteCursor();
+    if (!active && networkStats) {
+      networkStats.textContent = "--";
+      networkStats.title = "";
+      diagnostics.network = null;
+    }
   }
 
   function onWebrtcState(label, s) {
@@ -1203,15 +1587,22 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     stopWebrtcFrameTicker();
     webrtcFpsCount = 0;
     webrtcFpsWindowStart = performance.now();
-    const tick = (now) => {
+    const tick = (now, metadata = {}) => {
       markFrameReceived();
+      if (Number.isFinite(metadata.processingDuration)) {
+        diagnostics.decodeMs = smoothed(diagnostics.decodeMs, metadata.processingDuration * 1000);
+      }
+      if (Number.isFinite(metadata.receiveTime) && Number.isFinite(metadata.expectedDisplayTime)) {
+        diagnostics.renderMs = smoothed(diagnostics.renderMs, Math.max(0, metadata.expectedDisplayTime - metadata.receiveTime));
+      }
+      diagnostics.width = webrtcVideo.videoWidth || diagnostics.width;
+      diagnostics.height = webrtcVideo.videoHeight || diagnostics.height;
       webrtcFpsCount += 1;
       const elapsed = now - webrtcFpsWindowStart;
       if (elapsed >= 1000) {
         const fps = Math.round((webrtcFpsCount * 1000) / elapsed);
-        // Agent and viewer FPS are effectively equal in WebRTC mode — the
-        // browser renders every frame the agent sends, no decode skipping.
-        updateFpsDisplay(fps);
+        diagnostics.currentViewerFps = fps;
+        updateFpsDisplay();
         webrtcFpsCount = 0;
         webrtcFpsWindowStart = now;
       } else {
@@ -1235,6 +1626,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       whepPath,
       videoEl: webrtcVideo,
       onState: (s) => onWebrtcState("WebRTC Relayed", s),
+      onStats: (stats) => updateNetworkStats({ ...stats, route: "Server" }),
     });
     try {
       await whepClient.start();
@@ -1258,6 +1650,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
         }
       },
       onState: (s) => onWebrtcState("WebRTC P2P", s),
+      onStats: updateNetworkStats,
     });
     try {
       await p2pClient.start();
@@ -1357,7 +1750,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
 
   function pushQuality(val) {
     const q = Number(val) || 90;
-    const codec = q >= 100 ? "raw" : (prefersH264 ? "h264" : "jpeg");
+    const codec = q >= 100 ? "raw" : (negotiatedCodec || (prefersH264 ? "h264" : "jpeg"));
     const softwareH264 = codec === "h264" && useSoftwareH264();
     console.debug("rd: pushQuality val=", val, "q=", q, "codec=", codec, "softwareH264=", softwareH264);
     setCodecModeLabel(codec, "requested");
@@ -1383,6 +1776,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     codecH264.addEventListener("change", function () {
       resetH264SessionState();
       prefersH264 = !!codecH264.checked && typeof VideoDecoder === "function";
+      negotiatedCodec = prefersH264 ? "h264" : "jpeg";
       if (softwareH264Ctrl) {
         softwareH264Ctrl.disabled = !prefersH264;
       }
@@ -1396,6 +1790,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       if (qualitySlider) {
         pushQuality(qualitySlider.value);
       }
+      requestEncoderCapabilities();
       sharedSettingsSaver.scheduleSave();
     });
   }
@@ -1410,7 +1805,11 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   }
 
   function selectedStreamProfile() {
-    const [heightValue, fpsValue] = String(streamProfileSelect?.value || "720:30").split(":");
+    if (streamProfileSelect?.value === "auto") {
+      const best = encoderProfiles[0];
+      return best ? { maxHeight: best.maxHeight, fps: best.fps } : { maxHeight: -1, fps: 120 };
+    }
+    const [heightValue, fpsValue] = String(streamProfileSelect?.value || "auto").split(":");
     const maxHeight = Number.parseInt(heightValue, 10);
     const fps = Number.parseInt(fpsValue, 10);
     return {
@@ -1420,25 +1819,133 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   }
 
   function pushStreamProfile() {
+    if (streamProfileSelect?.value === "auto") {
+      const adaptiveWebrtc = getWebrtcMode() !== "off" && Number(bitrateSelect?.value || 0) === 0;
+      if (adaptiveWebrtc && encoderProfiles.length) {
+        adaptiveQuality.setProfiles(encoderProfiles);
+        adaptiveProfileRunning = true;
+        adaptiveQuality.start(Date.now());
+        return;
+      }
+      adaptiveProfileRunning = false;
+      adaptiveQuality.stop();
+      const best = selectedStreamProfile();
+      console.debug("rd: pushStreamProfile auto best", best);
+      sendCmd("desktop_set_profile", { ...best, source: "auto_best" });
+      if (streamProfileDetail) {
+        const profile = encoderProfiles[0];
+        streamProfileDetail.textContent = profile
+          ? `Auto selected ${profile.width}×${profile.height} @ ${profile.fps} FPS (best available).`
+          : "Auto selected native resolution while capabilities are loading.";
+      }
+      return;
+    }
+    adaptiveProfileRunning = false;
+    adaptiveQuality.stop();
     const profile = selectedStreamProfile();
     console.debug("rd: pushStreamProfile", profile);
     sendCmd("desktop_set_profile", profile);
   }
 
-  function requestEncoderCapabilities() {
+  function pushBitrate() {
+    const bitrateMbps = Math.max(0, Math.min(50, Number.parseInt(bitrateSelect?.value || "0", 10) || 0));
+    if (adaptiveProfileRunning && bitrateMbps === 0) return;
+    sendCmd("desktop_set_bitrate", { bitrateMbps, adaptive: false });
+  }
+
+  if (bitrateSelect) {
+    bitrateSelect.addEventListener("change", function () {
+      pushStreamProfile();
+      pushBitrate();
+      sharedSettingsSaver.scheduleSave();
+    });
+  }
+
+  async function probeBrowserDecoderCodecs(transport) {
+    const supported = ["jpeg", "raw"];
+    if (transport === "webrtc") {
+      try {
+        const codecs = typeof RTCRtpReceiver !== "undefined" && typeof RTCRtpReceiver.getCapabilities === "function"
+          ? (RTCRtpReceiver.getCapabilities("video")?.codecs || [])
+          : [];
+        for (const capability of codecs) {
+          const mime = String(capability?.mimeType || "").toLowerCase();
+          if (mime === "video/h264") supported.push("h264");
+          if (mime === "video/h265" || mime === "video/hevc") supported.push("hevc");
+        }
+      } catch (err) {
+        console.debug("rd: WebRTC codec capability probe failed", err);
+      }
+      return [...new Set(supported)];
+    }
+
+    if (typeof VideoDecoder !== "function") return supported;
+    if (typeof VideoDecoder.isConfigSupported !== "function") {
+      supported.push("h264");
+      return supported;
+    }
+    const probes = [
+      ["h264", "avc1.42E01E"],
+      ["hevc", "hev1.1.6.L156.B0"],
+    ];
+    await Promise.all(probes.map(async ([name, codec]) => {
+      try {
+        const result = await VideoDecoder.isConfigSupported({ codec, optimizeForLatency: true });
+        if (result?.supported) supported.push(name);
+      } catch (err) {
+        console.debug(`rd: ${name} decoder capability probe failed`, err);
+      }
+    }));
+    return [...new Set(supported)].filter((codec) => !disabledDecoderCodecs.has(codec));
+  }
+
+  async function requestEncoderCapabilities() {
     if (streamProfileDetail) streamProfileDetail.textContent = "Checking hardware encoder profiles…";
+    const mode = getWebrtcMode();
+    const transport = mode === "off" ? "websocket" : "webrtc";
+    const decoderCodecs = await probeBrowserDecoderCodecs(transport);
+    browserDecoderCodecs = decoderCodecs;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     sendCmd("desktop_encoder_capabilities", {
       display: Number.parseInt(displaySelect?.value || "0", 10) || 0,
+      decoderCodecs,
+      preferredCodecs: prefersH264 ? ["hevc", "h264", "jpeg", "raw"] : ["jpeg", "raw"],
+      transport,
     });
   }
 
   function applyEncoderCapabilities(msg) {
-    if (!msg || !Array.isArray(msg.profiles) || !streamProfileSelect) return;
+    if (!msg) return;
+    const selectedCodec = String(msg.selectedCodec || msg.negotiation?.selectedCodec || "").toLowerCase();
+    if (selectedCodec) {
+      negotiatedCodec = selectedCodec;
+      const fallbacks = Array.isArray(msg.fallbackCodecs) ? msg.fallbackCodecs.join(" → ") : selectedCodec;
+      setCodecModeLabel(selectedCodec, `negotiated; fallback ${fallbacks}`);
+      if (codecH264) {
+        const agentHasH264 = Array.isArray(msg.codecs) && msg.codecs.some((entry) => String(entry?.codec || "").toLowerCase() === "h264");
+        codecH264.disabled = !browserDecoderCodecs.includes("h264") || !agentHasH264;
+      }
+      if (desiredStreaming && qualitySlider) pushQuality(qualitySlider.value);
+    } else if (msg.transport === "webrtc") {
+      console.warn("rd: no mutually supported WebRTC video codec; falling back to WebSocket canvas");
+      if (webrtcMode) webrtcMode.value = "off";
+      negotiatedCodec = browserDecoderCodecs.includes("h264") ? "h264" : "jpeg";
+      setCodecModeLabel(negotiatedCodec, "WebRTC unavailable; WebSocket fallback");
+      stopAllWebrtc();
+      requestEncoderCapabilities();
+    }
+    if (!Array.isArray(msg.profiles) || !streamProfileSelect) return;
     const selectedDisplay = Number.parseInt(displaySelect?.value || "0", 10) || 0;
     if (Number.isFinite(Number(msg.display)) && Number(msg.display) !== selectedDisplay) return;
     const previous = streamProfileSelect.value;
+    encoderProfiles = normalizeAdaptiveProfiles(msg.profiles);
     streamProfileSelect.innerHTML = "";
-    for (const profile of msg.profiles) {
+    const autoOption = document.createElement("option");
+    autoOption.value = "auto";
+    autoOption.textContent = "Auto (best)";
+    autoOption.title = "Starts at the best supported profile and adapts to WebRTC congestion";
+    streamProfileSelect.appendChild(autoOption);
+    for (const profile of encoderProfiles) {
       const maxHeight = Number(profile.maxHeight);
       const fps = Number(profile.fps);
       if (!Number.isFinite(maxHeight) || !Number.isFinite(fps)) continue;
@@ -1452,22 +1959,35 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       }
       streamProfileSelect.appendChild(option);
     }
-    if (!streamProfileSelect.options.length) {
+    const manualHighResolutionProfiles = [
+      { maxHeight: 1440, fps: 30, label: "30 FPS - 1440p" },
+      { maxHeight: 1440, fps: 60, label: "60 FPS - 1440p" },
+      { maxHeight: 2160, fps: 30, label: "30 FPS - 2160p (4K)" },
+      { maxHeight: 2160, fps: 60, label: "60 FPS - 2160p (4K)" },
+    ];
+    const existingProfiles = new Set(Array.from(streamProfileSelect.options, (option) => option.value));
+    for (const profile of manualHighResolutionProfiles) {
+      const value = `${profile.maxHeight}:${profile.fps}`;
+      if (existingProfiles.has(value)) continue;
       const option = document.createElement("option");
-      option.value = "720:30";
-      option.textContent = "30 FPS - 720p";
+      option.value = value;
+      option.textContent = profile.label;
+      option.title = "Manual high-resolution profile";
       streamProfileSelect.appendChild(option);
     }
-    if (!setSelectValue(streamProfileSelect, savedStreamProfile) &&
+    if (!setSelectValue(streamProfileSelect, savedStreamProfile || "auto") &&
         !setSelectValue(streamProfileSelect, previous) &&
-        !setSelectValue(streamProfileSelect, "720:30")) {
-      streamProfileSelect.selectedIndex = 0;
+        !setSelectValue(streamProfileSelect, "auto")) {
+      streamProfileSelect.value = "auto";
     }
     savedStreamProfile = streamProfileSelect.value;
     if (streamProfileDetail) {
       const providers = streamProfileSelect.selectedOptions[0]?.dataset?.providers || "";
-      streamProfileDetail.textContent = providers ? `Available through ${providers}.` :
-        (msg.detail || (msg.probed ? "Profiles tested on this display adapter." : "Safe fallback profiles shown."));
+      const best = encoderProfiles[0];
+      streamProfileDetail.textContent = streamProfileSelect.value === "auto" && best
+        ? `Auto starts at ${best.width}×${best.height} @ ${best.fps} FPS and adapts on WebRTC.`
+        : (providers ? `Available through ${providers}.` :
+          (msg.detail || (msg.probed ? "Profiles tested on this display adapter." : "Safe fallback profiles shown.")));
     }
     if (desiredStreaming) pushStreamProfile();
   }
@@ -1478,6 +1998,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       const providers = streamProfileSelect.selectedOptions[0]?.dataset?.providers || "";
       if (streamProfileDetail && providers) streamProfileDetail.textContent = `Available through ${providers}.`;
       pushStreamProfile();
+      pushBitrate();
       sharedSettingsSaver.scheduleSave();
     });
   }
@@ -1494,9 +2015,17 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   if (webrtcMode) {
     webrtcMode.addEventListener("change", function () {
       updateControls();
+      requestEncoderCapabilities();
       sharedSettingsSaver.scheduleSave();
     });
   }
+  function requestManualKeyframe() {
+    if (streamState !== "streaming" && streamState !== "stalled") return;
+    sendCmd("desktop_request_keyframe", { reason: "manual_viewer" });
+    showFullscreenHud(true);
+  }
+  requestKeyframeBtn?.addEventListener("click", requestManualKeyframe);
+
 
   function needsWebrtcFirewallWarning(mode) {
     if (firewallWarningAcked) return false;
@@ -1505,7 +2034,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     return isWindows && !clientIsAdmin;
   }
 
-  startBtn.addEventListener("click", function () {
+  function startDesktopStream() {
     const mode = getWebrtcMode();
     rdDebug("start click", {
       mode,
@@ -1526,14 +2055,98 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       }
       firewallWarningAcked = true;
     }
+    if (displaySelect && displaySelect.value !== undefined) {
+      sendCmd("desktop_select_display", {
+        display: parseInt(displaySelect.value, 10) || 0,
+      });
+    }
+    if (qualitySlider) {
+      pushQuality(qualitySlider.value);
+    }
+    if (prefersH264 && !useSoftwareH264()) {
+      ensureDuplicationForH264();
+    }
+    pushStreamProfile();
+    pushBitrate();
+    desiredStreaming = true;
+    lastFrameAt = 0;
+    lastViewerFrameGapKeyframeAt = 0;
+    firstFrameLogged = false;
+    resetH264SessionState();
+    setStreamState("starting", "Starting stream");
+    if (mode === "relayed") {
+      // Server replies with `webrtc_ready { whepPath }`; startWhep happens then.
+      sendCmd("desktop_start", { webrtc: true });
+    } else if (mode === "p2p") {
+      // Kick off the P2P offer asynchronously; capture starts in parallel.
+      sendCmd("desktop_start", { canvasFlowControl: false });
+      startP2P();
+    } else {
+      sendCmd("desktop_start", { canvasFlowControl: true });
+    }
+    if (audioCtrl && audioCtrl.checked) {
+      connectAudio();
+    }
+  }
+
+  function stopDesktopStream({ userInitiated = true } = {}) {
+    if (isRecording()) stopRecording();
+    if (userInitiated) desiredStreaming = false;
+    adaptiveProfileRunning = false;
+    adaptiveQuality.stop();
+    lastFrameAt = 0;
+    setStreamState("stopping", "Stopping stream");
+    disablePrivacyIfActive();
+    sendCmd("desktop_stop", {});
+    disconnectAudio();
+    stopAllWebrtc();
+    if (userInitiated) setStreamState("idle", "Stopped");
+  }
+
+  function restartDesktopStream() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (streamState === "idle") {
+      startDesktopStream();
+      return;
+    }
+    if (isRecording()) stopRecording();
+    desiredStreaming = false;
+    adaptiveProfileRunning = false;
+    adaptiveQuality.stop();
+    lastFrameAt = 0;
+    setStreamState("starting", "Restarting stream");
+    disablePrivacyIfActive();
+    sendCmd("desktop_stop", {});
+    disconnectAudio();
+    stopAllWebrtc();
+    setTimeout(startDesktopStream, 150);
+  }
+
+  function switchFullscreenTransport() {
+    if (!webrtcMode) return;
+    webrtcMode.value = nextTransportValue();
+    webrtcMode.dispatchEvent(new Event("change"));
+    if (streamState === "streaming" || streamState === "stalled") {
+      restartDesktopStream();
+    } else {
+      renderRemoteDesktopOverlays();
+    }
+  }
+
+  startBtn.addEventListener("click", () => {
     clearStallRecovery();
     stallRestartCount = 0;
-    startDesktopStream({ resetFrameClock: true });
+    startDesktopStream();
   });
-  stopBtn.addEventListener("click", function () {
-    setStreamState("stopping", "Stopping stream");
-    stopDesktopStream({ userInitiated: true });
-  });
+  stopBtn.addEventListener("click", () => stopDesktopStream({ userInitiated: true }));
+  rdStateKeyframeBtn?.addEventListener("click", requestManualKeyframe);
+  rdStateRestartBtn?.addEventListener("click", restartDesktopStream);
+  rdStateTransportBtn?.addEventListener("click", switchFullscreenTransport);
+  fsHudStatsBtn?.addEventListener("click", () => setDiagnosticsVisible(true));
+  fsHudTuckBtn?.addEventListener("click", () => setFullscreenHudTucked(!fullscreenHudTucked));
+  try { setFullscreenHudTucked(localStorage.getItem("overlord.rd.fullscreenHudTucked") === "1", false); }
+  catch { setFullscreenHudTucked(false, false); }
+  fsHudExitBtn?.addEventListener("click", exitCanvasFullscreen);
   if (recordBtn) {
     recordBtn.addEventListener("click", function () {
       if (isRecording()) stopRecording();
@@ -1550,15 +2163,78 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       sharedSettingsSaver.scheduleSave();
     });
   }
-  fullscreenBtn.addEventListener("click", function () {
-    if (canvasContainer.requestFullscreen) {
-      canvasContainer.requestFullscreen();
-    } else if (canvasContainer.webkitRequestFullscreen) {
-      canvasContainer.webkitRequestFullscreen();
-    } else if (canvasContainer.mozRequestFullScreen) {
-      canvasContainer.mozRequestFullScreen();
+  function isCanvasFullscreen() {
+    return document.fullscreenElement === canvasContainer ||
+      document.webkitFullscreenElement === canvasContainer ||
+      document.mozFullScreenElement === canvasContainer;
+  }
+
+  function updateFullscreenButton() {
+    const active = isCanvasFullscreen();
+    fullscreenBtn.setAttribute("aria-pressed", active ? "true" : "false");
+    fullscreenBtn.title = active ? "Exit fullscreen" : "Enter fullscreen";
+    const icon = fullscreenBtn.querySelector("i");
+    const label = fullscreenBtn.querySelector("span");
+    if (icon) {
+      icon.classList.toggle("fa-expand", !active);
+      icon.classList.toggle("fa-compress", active);
     }
+    if (label) label.textContent = active ? "Exit Fullscreen" : "Fullscreen";
+    if (fullscreenExitBtn) fullscreenExitBtn.setAttribute("aria-hidden", active ? "false" : "true");
+  }
+
+  function applyCanvasFullscreenState() {
+    if (isCanvasFullscreen()) {
+      canvasContainer.focus({ preventScroll: true });
+      if (kbdCtrl && !kbdCtrl.checked) {
+        kbdCtrl.checked = true;
+        kbdCtrl.dispatchEvent(new Event("change"));
+      }
+    }
+    updateFullscreenButton();
+    renderRemoteCursor();
+    renderRemoteDesktopOverlays();
+    if (isCanvasFullscreen()) {
+      showFullscreenHud(fullscreenHudTucked || streamState !== "streaming" || !diagnosticsHud?.classList.contains("hidden"));
+    }
+  }
+
+  function requestCanvasFullscreen() {
+    const request = canvasContainer.requestFullscreen ||
+      canvasContainer.webkitRequestFullscreen ||
+      canvasContainer.mozRequestFullScreen;
+    if (!request) return;
+    const result = request.call(canvasContainer);
+    if (result && typeof result.then === "function") {
+      result.then(applyCanvasFullscreenState).catch((err) => console.warn("rd: fullscreen request failed", err));
+    } else {
+      applyCanvasFullscreenState();
+    }
+  }
+
+  function exitCanvasFullscreen() {
+    const exit = document.exitFullscreen ||
+      document.webkitExitFullscreen ||
+      document.mozCancelFullScreen;
+    if (!exit) return;
+    const result = exit.call(document);
+    if (result && typeof result.then === "function") {
+      result.then(applyCanvasFullscreenState).catch((err) => console.warn("rd: fullscreen exit failed", err));
+    } else {
+      applyCanvasFullscreenState();
+    }
+  }
+
+  fullscreenBtn.addEventListener("click", function () {
+    if (isCanvasFullscreen()) exitCanvasFullscreen();
+    else requestCanvasFullscreen();
   });
+  if (fullscreenExitBtn) {
+    fullscreenExitBtn.addEventListener("click", exitCanvasFullscreen);
+  }
+  renderSurface?.addEventListener("mousemove", () => showFullscreenHud());
+  fullscreenHud?.addEventListener("mouseenter", () => showFullscreenHud(true));
+  fullscreenHud?.addEventListener("focusin", () => showFullscreenHud(true));
   function pushInputToggles() {
     if (mouseCtrl) {
       sendCmd("desktop_enable_mouse", { enabled: !!mouseCtrl.checked });
@@ -1568,13 +2244,79 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     }
   }
 
+
+  function cursorImageBytes(image) {
+    if (image instanceof Uint8Array) return image;
+    if (image instanceof ArrayBuffer) return new Uint8Array(image);
+    if (ArrayBuffer.isView(image)) {
+      return new Uint8Array(image.buffer, image.byteOffset, image.byteLength);
+    }
+    return null;
+  }
+
+  function renderRemoteCursor(message = lastRemoteCursor) {
+    lastRemoteCursor = message;
+    const imageBytes = cursorImageBytes(message?.image);
+    if (message && Number(message.cursorWidth) > 0 && Number(message.cursorHeight) > 0) {
+      remoteCursorShape = {
+        width: Math.max(1, Number(message.cursorWidth) || 1),
+        height: Math.max(1, Number(message.cursorHeight) || 1),
+        hotspotX: Math.max(0, Number(message.hotspotX) || 0),
+        hotspotY: Math.max(0, Number(message.hotspotY) || 0),
+      };
+    }
+    if (remoteCursorImage && imageBytes && imageBytes.byteLength > 0) {
+      if (remoteCursorImageUrl) URL.revokeObjectURL(remoteCursorImageUrl);
+      remoteCursorImageUrl = URL.createObjectURL(new Blob([imageBytes], { type: "image/png" }));
+      remoteCursorImage.src = remoteCursorImageUrl;
+    }
+    const hideLocalCursor = !!hideLocalCursorCtrl?.checked;
+    const showRemoteCursor = !!cursorCtrl?.checked && !!message?.visible && !!remoteCursorShape &&
+      (!mouseCtrl?.checked || hideLocalCursor);
+    const localCursor = hideLocalCursor ? "none" : "default";
+    canvas.style.cursor = localCursor;
+    if (webrtcVideo) webrtcVideo.style.cursor = localCursor;
+    if (!remoteCursor || !renderSurface || !showRemoteCursor) {
+      if (remoteCursor) remoteCursor.hidden = true;
+      return;
+    }
+    const surface = (webrtcActive || (webrtcVideo && getComputedStyle(webrtcVideo).display !== "none")) ? webrtcVideo : canvas;
+    const sourceWidth = Number(message.width) || (surface === webrtcVideo ? webrtcVideo.videoWidth : canvas.width);
+    const sourceHeight = Number(message.height) || (surface === webrtcVideo ? webrtcVideo.videoHeight : canvas.height);
+    if (!sourceWidth || !sourceHeight) {
+      remoteCursor.hidden = true;
+      return;
+    }
+    const surfaceRect = surface.getBoundingClientRect();
+    const containerRect = renderSurface.getBoundingClientRect();
+    const scaleX = surfaceRect.width / sourceWidth;
+    const scaleY = surfaceRect.height / sourceHeight;
+    const x = surfaceRect.left - containerRect.left + (Number(message.x) || 0) * scaleX -
+      remoteCursorShape.hotspotX * scaleX;
+    const y = surfaceRect.top - containerRect.top + (Number(message.y) || 0) * scaleY -
+      remoteCursorShape.hotspotY * scaleY;
+    remoteCursor.style.width = `${remoteCursorShape.width * scaleX}px`;
+    remoteCursor.style.height = `${remoteCursorShape.height * scaleY}px`;
+    remoteCursor.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    remoteCursor.hidden = false;
+  }
+
+  function updateCursorPresentation() {
+    renderRemoteCursor();
+  }
+
   function pushCaptureToggles() {
     if (cursorCtrl) {
-      sendCmd("desktop_enable_cursor", { enabled: cursorCtrl.checked });
+      updateCursorPresentation();
+      sendCmd("desktop_enable_cursor", { enabled: !!cursorCtrl.checked });
     }
     if (duplicationCtrl && !duplicationCtrl.disabled) {
       sendCmd("desktop_set_duplication", { enabled: !!duplicationCtrl.checked });
     }
+  }
+  updateCursorPresentation();
+  if (renderSurface && typeof ResizeObserver === "function") {
+    new ResizeObserver(() => renderRemoteCursor()).observe(renderSurface);
   }
 
   function pushPrivacyToggle() {
@@ -1589,15 +2331,27 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     }
   }
 
+  function isInputActive() {
+    return desiredStreaming;
+  }
+
   mouseCtrl.addEventListener("change", function () {
     pushInputToggles();
+    updateCursorPresentation();
     sharedSettingsSaver.scheduleSave();
   });
+  canvasContainer.setAttribute("tabindex", "0");
   const kbdCapture = createKeyboardCapture({
-    container: canvas,
-    sendKeyDown: (e) => sendCmd("key_down", { key: e.key, code: e.code }),
-    sendKeyUp: (e) => sendCmd("key_up", { key: e.key, code: e.code }),
-    onTextInput: (e) => sendCmd("text_input", { text: e.key }),
+    container: canvasContainer,
+    sendKeyDown: (e) => {
+      if (isInputActive()) sendCmd("key_down", { key: e.key, code: e.code });
+    },
+    sendKeyUp: (e) => {
+      if (isInputActive()) sendCmd("key_up", { key: e.key, code: e.code });
+    },
+    onTextInput: (e) => {
+      if (isInputActive()) sendCmd("text_input", { text: e.key });
+    },
   });
   kbdCtrl.addEventListener("change", function () {
     if (kbdCtrl.checked) kbdCapture.enable();
@@ -1606,16 +2360,20 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     sharedSettingsSaver.scheduleSave();
   });
   if (kbdCtrl.checked) kbdCapture.enable();
-  document.addEventListener("fullscreenchange", function () {
-    if (document.fullscreenElement === canvasContainer && kbdCtrl && !kbdCtrl.checked) {
-      kbdCtrl.checked = true;
-      kbdCtrl.dispatchEvent(new Event("change"));
-    }
-  });
+  document.addEventListener("fullscreenchange", applyCanvasFullscreenState);
+  document.addEventListener("webkitfullscreenchange", applyCanvasFullscreenState);
+  document.addEventListener("mozfullscreenchange", applyCanvasFullscreenState);
+  updateFullscreenButton();
   cursorCtrl.addEventListener("change", function () {
     pushCaptureToggles();
     sharedSettingsSaver.scheduleSave();
   });
+  if (hideLocalCursorCtrl) {
+    hideLocalCursorCtrl.addEventListener("change", function () {
+      updateCursorPresentation();
+      sharedSettingsSaver.scheduleSave();
+    });
+  }
   if (duplicationCtrl) {
     duplicationCtrl.addEventListener("change", function () {
       pushCaptureToggles();
@@ -1666,11 +2424,22 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     return buf.length >= 8 && buf[0] === 0x46 && buf[1] === 0x52 && buf[2] === 0x4d;
   }
 
+
   function markFrameReceived() {
-    lastFrameAt = performance.now();
+    const now = performance.now();
+    const frameGapMs = lastFrameAt ? now - lastFrameAt : 0;
+    lastFrameAt = now;
     clearOfflineTimer();
     clearStallRecovery();
     stallRestartCount = 0;
+    if (
+      desiredStreaming &&
+      frameGapMs >= VIEWER_FRAME_GAP_KEYFRAME_MS &&
+      (!lastViewerFrameGapKeyframeAt || now - lastViewerFrameGapKeyframeAt >= VIEWER_FRAME_GAP_KEYFRAME_THROTTLE_MS)
+    ) {
+      lastViewerFrameGapKeyframeAt = now;
+      sendCmd("desktop_request_keyframe", { reason: "viewer_frame_gap" });
+    }
     if (!firstFrameLogged) {
       firstFrameLogged = true;
       rdDebug("first frame received", {
@@ -1731,13 +2500,16 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
   }
 
   function destroyVideoDecoder() {
-    if (!videoDecoder) return;
-    try {
-      videoDecoder.close();
-    } catch {
-      // Ignore close errors when decoder is already shutting down.
+    updateCanvasDecodePressure(true);
+    if (videoDecoder) {
+      try {
+        videoDecoder.close();
+      } catch {
+        // Ignore close errors when decoder is already shutting down.
+      }
     }
     videoDecoder = null;
+    videoDecoderConfigKey = "";
     resetH264RuntimeState();
   }
 
@@ -1765,6 +2537,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     if (!prefersH264) return;
     const reasonText = normalizeFallbackReason(reason);
     prefersH264 = false;
+    negotiatedCodec = "jpeg";
     destroyVideoDecoder();
     if (codecH264) codecH264.checked = false;
     if (softwareH264Ctrl) softwareH264Ctrl.disabled = true;
@@ -1811,6 +2584,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       sendCmd("desktop_start", {
         source: "rd_viewer",
         reason: "h264_recovery_restart",
+        canvasFlowControl: getWebrtcMode() === "off",
       });
       const q = Number(qualitySlider?.value) || 90;
       sendCmd("desktop_set_quality", {
@@ -1856,16 +2630,61 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     return false;
   }
 
-  function ensureVideoDecoder() {
-    if (videoDecoder) {
+  function isHEVCKeyFrame(data) {
+    for (let i = 0; i + 5 < data.length; i++) {
+      let startCodeLen = 0;
+      if (data[i] === 0x00 && data[i + 1] === 0x00 && data[i + 2] === 0x01) {
+        startCodeLen = 3;
+      } else if (
+        data[i] === 0x00 && data[i + 1] === 0x00 && data[i + 2] === 0x00 && data[i + 3] === 0x01
+      ) {
+        startCodeLen = 4;
+      }
+      if (!startCodeLen) continue;
+      const nalIndex = i + startCodeLen;
+      if (nalIndex >= data.length) break;
+      const nalType = (data[nalIndex] >> 1) & 0x3f;
+      if (nalType >= 16 && nalType <= 21) return true;
+      i = nalIndex;
+    }
+    return false;
+  }
+
+  function h264CodecFromAnnexB(data) {
+    for (let i = 0; i + 7 < data.length; i++) {
+      let startCodeLength = 0;
+      if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) startCodeLength = 3;
+      else if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 0 && data[i + 3] === 1) startCodeLength = 4;
+      if (!startCodeLength) continue;
+      const nal = i + startCodeLength;
+      if ((data[nal] & 0x1f) !== 7 || nal + 3 >= data.length) continue;
+      return `avc1.${[data[nal + 1], data[nal + 2], data[nal + 3]]
+        .map((value) => value.toString(16).padStart(2, "0"))
+        .join("")}`;
+    }
+    return "";
+  }
+
+  function ensureVideoDecoder(videoBytes, width, height, codecName) {
+    const detectedCodec = codecName === "h264" ? h264CodecFromAnnexB(videoBytes) : "";
+    const codec = codecName === "hevc"
+      ? "hev1.1.6.L156.B0"
+      : (detectedCodec || h264StreamCodec || "avc1.4d0034");
+    const codedWidth = Math.max(0, Number(width) || 0);
+    const codedHeight = Math.max(0, Number(height) || 0);
+    const configKey = `${codec}:${codedWidth}x${codedHeight}`;
+    if (videoDecoder && videoDecoderConfigKey === configKey) {
       return true;
     }
     if (typeof VideoDecoder !== "function") {
       return false;
     }
     try {
+      if (videoDecoder) destroyVideoDecoder();
       videoDecoder = new VideoDecoder({
         output: (frame) => {
+          const outputStartedAt = performance.now();
+          const timing = h264PendingTimings.shift();
           const width = frame.displayWidth || frame.codedWidth || frameWidth;
           const height = frame.displayHeight || frame.codedHeight || frameHeight;
           if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
@@ -1879,37 +2698,136 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
           } finally {
             frame.close();
           }
+          const renderedAt = performance.now();
+          if (timing) {
+            diagnostics.decodeMs = smoothed(diagnostics.decodeMs, Math.max(0, outputStartedAt - timing.decodeStartedAt));
+            diagnostics.renderMs = smoothed(diagnostics.renderMs, Math.max(0, renderedAt - timing.receivedAt));
+          }
+          diagnostics.decodeQueue = videoDecoder?.decodeQueueSize || h264PendingTimings.length;
+          diagnostics.width = width;
+          diagnostics.height = height;
+          updateFpsDisplay();
+          updateCanvasDecodePressure();
         },
         error: (err) => {
-          console.warn("rd: h264 decoder error", err);
+          console.warn(`rd: ${codecName} decoder error`, err);
+          updateCanvasDecodePressure(true);
+          setTimeout(() => fallbackFromVideoCodec(codecName, err), 0);
         },
       });
-      videoDecoder.configure({ codec: "avc1.42E01E", optimizeForLatency: true });
+      videoDecoder.addEventListener("dequeue", () => {
+        diagnostics.decodeQueue = videoDecoder?.decodeQueueSize || 0;
+        updateCanvasDecodePressure();
+      });
+      const config = { codec, optimizeForLatency: true };
+      if (codedWidth > 0 && codedHeight > 0) {
+        config.codedWidth = codedWidth;
+        config.codedHeight = codedHeight;
+      }
+      videoDecoder.configure(config);
+      videoDecoderConfigKey = configKey;
+      if (codecName === "h264") h264StreamCodec = codec;
       return true;
     } catch (err) {
-      console.warn("rd: h264 decoder unavailable", err);
-      fallbackToJpegCodec(err);
+      console.warn(`rd: ${codecName} decoder unavailable`, err);
+      fallbackFromVideoCodec(codecName, err);
       destroyVideoDecoder();
       return false;
     }
   }
 
-  async function processFrameBuffer(buf) {
+  function recordWsFrameBytes(byteLength) {
+    diagnostics.wsBytes += Math.max(0, Number(byteLength) || 0);
+    const now = performance.now();
+    const elapsed = now - diagnostics.wsWindowStartedAt;
+    if (elapsed >= 1000) {
+      const rate = (diagnostics.wsBytes * 8) / (elapsed * 1000);
+      diagnostics.wsBitrateMbps = smoothed(diagnostics.wsBitrateMbps, rate, 0.4);
+      diagnostics.wsBytes = 0;
+      diagnostics.wsWindowStartedAt = now;
+    }
+  }
+
+  function fallbackFromVideoCodec(codec, reason) {
+    if (codec === "hevc" && disabledDecoderCodecs.has("hevc")) return;
+    const reasonText = normalizeFallbackReason(reason);
+    if (codec === "hevc" && browserDecoderCodecs.includes("h264")) {
+      disabledDecoderCodecs.add("hevc");
+      browserDecoderCodecs = browserDecoderCodecs.filter((name) => name !== "hevc");
+      negotiatedCodec = "h264";
+      destroyVideoDecoder();
+      console.warn("rd: falling back from hevc to h264", reasonText);
+      setCodecModeLabel("h264", "HEVC fallback");
+      if (ws.readyState === WebSocket.OPEN) {
+        const q = Number(qualitySlider?.value) || 90;
+        sendCmd("desktop_set_quality", {
+          quality: q,
+          codec: "h264",
+          softwareH264: useSoftwareH264(),
+          source: "viewer_fallback",
+          reason: reasonText,
+        });
+        requestEncoderCapabilities();
+      }
+      return;
+    }
+    fallbackToJpegCodec(reasonText);
+  }
+
+  function recordCanvasFrameTiming(receivedAt, decodeStartedAt) {
+    const renderedAt = performance.now();
+    diagnostics.decodeMs = smoothed(diagnostics.decodeMs, Math.max(0, renderedAt - decodeStartedAt));
+    diagnostics.renderMs = smoothed(diagnostics.renderMs, Math.max(0, renderedAt - receivedAt));
+    diagnostics.decodeQueue = videoDecoder?.decodeQueueSize || (pendingFrame ? 1 : 0);
+    diagnostics.width = frameWidth || canvas.width || diagnostics.width;
+    diagnostics.height = frameHeight || canvas.height || diagnostics.height;
+  }
+
+  function updateCanvasDecodePressure(forceRelease = false) {
+    const queueSize = videoDecoder?.decodeQueueSize || 0;
+    const shouldApply = !forceRelease && getWebrtcMode() === "off" && queueSize > 3;
+    const shouldRelease = forceRelease || getWebrtcMode() !== "off" || queueSize <= 1;
+    let next = canvasDecodePressure;
+    if (!canvasDecodePressure && shouldApply) next = true;
+    else if (canvasDecodePressure && shouldRelease) next = false;
+    if (next === canvasDecodePressure) return;
+    canvasDecodePressure = next;
+    sendCmd("desktop_decode_pressure", { active: next, queueSize });
+  }
+
+  async function processFrameBuffer(buf, receivedAt = performance.now()) {
+    const decodeStartedAt = performance.now();
     const fps = buf[5];
     const format = buf[6];
+    const headerLength = buf[3] >= 2 && buf.length >= 12 ? 12 : 8;
+    const encodedWidth = headerLength === 12 ? buf[8] | (buf[9] << 8) : 0;
+    const encodedHeight = headerLength === 12 ? buf[10] | (buf[11] << 8) : 0;
+    if (encodedWidth > 0 && encodedHeight > 0) {
+      frameWidth = encodedWidth;
+      frameHeight = encodedHeight;
+      diagnostics.width = encodedWidth;
+      diagnostics.height = encodedHeight;
+    }
 
     if (format === 1) {
-      const jpegBytes = buf.slice(8);
+      const jpegBytes = buf.slice(headerLength);
       setCodecModeLabel("jpeg", "active");
+      diagnostics.codec = "jpeg";
       await drawJpegSlice(jpegBytes, null);
+      recordCanvasFrameTiming(receivedAt, decodeStartedAt);
       updateFpsDisplay(fps);
+      updateCanvasDecodePressure(true);
       return;
     }
 
     if (format === 2 || format === 3) {
       setCodecModeLabel(format === 3 ? "raw" : "jpeg", format === 3 ? "blocks" : "blocks");
-      if (buf.length < 16) return;
-      const dv = new DataView(buf.buffer, 8);
+      diagnostics.codec = format === 3 ? "raw blocks" : "jpeg blocks";
+      if (buf.length < headerLength + 8) {
+        updateCanvasDecodePressure(true);
+        return;
+      }
+      const dv = new DataView(buf.buffer, buf.byteOffset + headerLength, buf.byteLength - headerLength);
       let pos = 0;
       const width = dv.getUint16(pos, true);
       pos += 2;
@@ -1944,7 +2862,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
         pos += 2;
         const len = dv.getUint32(pos, true);
         pos += 4;
-        const start = 8 + pos;
+        const start = headerLength + pos;
         const end = start + len;
         if (end > buf.length) break;
         const slice = buf.subarray(start, end);
@@ -1959,15 +2877,22 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       }
 
       updateFpsDisplay(fps);
+      recordCanvasFrameTiming(receivedAt, decodeStartedAt);
+      updateCanvasDecodePressure(true);
       return;
     }
 
-    if (format === 4) {
-      setCodecModeLabel("h264", "active");
-      const h264Bytes = buf.slice(8);
-      if (!h264Bytes.length) return;
-      if (!ensureVideoDecoder()) {
-        fallbackToJpegCodec("WebCodecs decoder unavailable");
+    if (format === 4 || format === 5) {
+      const codecName = format === 5 ? "hevc" : "h264";
+      setCodecModeLabel(codecName, "active");
+      diagnostics.codec = codecName;
+      const videoBytes = buf.slice(headerLength);
+      if (!videoBytes.length) {
+        updateCanvasDecodePressure(true);
+        return;
+      }
+      if (!ensureVideoDecoder(videoBytes, encodedWidth || frameWidth, encodedHeight || frameHeight, codecName)) {
+        updateCanvasDecodePressure(true);
         return;
       }
 
@@ -1976,7 +2901,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       }
       h264FramesSeen += 1;
 
-      const isKey = isH264KeyFrame(h264Bytes);
+      const isKey = codecName === "hevc" ? isHEVCKeyFrame(videoBytes) : isH264KeyFrame(videoBytes);
 
       if (h264AwaitingKeyframe && !isKey) {
         const now = Date.now();
@@ -2008,17 +2933,19 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       // If software H264 encode on the agent cannot keep up, automatically
       // fall back to JPEG blocks for a smoother interactive stream.
       const h264ElapsedMs = performance.now() - h264FirstFrameAt;
-      if ((fps || 0) <= H264_LOW_FPS_THRESHOLD) {
+      if (codecName === "h264" && (fps || 0) <= H264_LOW_FPS_THRESHOLD) {
         h264LowFpsStreak += 1;
       } else {
         h264LowFpsStreak = 0;
       }
       if (
+        codecName === "h264" &&
         h264ElapsedMs >= H264_FALLBACK_WARMUP_MS &&
         h264FramesSeen >= H264_MIN_FRAMES_BEFORE_FALLBACK &&
         h264LowFpsStreak >= H264_LOW_FPS_STREAK_LIMIT
       ) {
         fallbackToJpegCodec(`low h264 fps (${fps})`);
+        updateCanvasDecodePressure(true);
         return;
       }
 
@@ -2026,36 +2953,46 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       const chunk = new EncodedVideoChunk({
         type: isKey ? "key" : "delta",
         timestamp: h264TimestampUs,
-        data: h264Bytes,
+        data: videoBytes,
       });
       h264TimestampUs += frameIntervalUs;
       try {
+        h264PendingTimings.push({ receivedAt, decodeStartedAt: performance.now() });
         videoDecoder.decode(chunk);
+        diagnostics.decodeQueue = videoDecoder.decodeQueueSize;
+        updateCanvasDecodePressure();
         h264KeyframeErrorStreak = 0;
-        updateFpsDisplay(fps);
       } catch (err) {
+        h264PendingTimings.pop();
         if (isKeyframeRequiredError(err)) {
           h264KeyframeErrorStreak += 1;
           const now = Date.now();
           if (now - h264LastDecodeWarnAt >= H264_DECODE_WARN_THROTTLE_MS) {
             h264LastDecodeWarnAt = now;
-            console.warn("rd: h264 decode waiting for keyframe", {
+            console.warn(`rd: ${codecName} decode waiting for keyframe`, {
               streak: h264KeyframeErrorStreak,
               recoveries: h264RecoveryAttempts,
             });
           }
-          if (h264KeyframeErrorStreak >= H264_KEYFRAME_ERROR_RESTART_THRESHOLD) {
+          if (
+            codecName === "h264" &&
+            h264KeyframeErrorStreak >= H264_KEYFRAME_ERROR_RESTART_THRESHOLD
+          ) {
             const restarted = tryRecoverH264Stream("h264_keyframe_required");
             if (!restarted) {
               fallbackToJpegCodec("h264_keyframe_required_loop");
             }
           }
+          updateCanvasDecodePressure(true);
           return;
         }
-        console.warn("rd: h264 decode failed", err);
-        fallbackToJpegCodec(err);
+        console.warn(`rd: ${codecName} decode failed`, err);
+        fallbackFromVideoCodec(codecName, err);
+        updateCanvasDecodePressure(true);
       }
+      return;
     }
+    updateCanvasDecodePressure(true);
   }
 
   function flushPendingFrame() {
@@ -2065,7 +3002,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     const next = pendingFrame;
     pendingFrame = null;
     frameDecodeBusy = true;
-    processFrameBuffer(next).finally(() => {
+    processFrameBuffer(next.buf, next.receivedAt).finally(() => {
       frameDecodeBusy = false;
       if (pendingFrame) {
         flushPendingFrame();
@@ -2078,15 +3015,25 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       const buf = new Uint8Array(ev.data);
       if (isFramePacket(buf)) {
         markFrameReceived();
+        recordWsFrameBytes(buf.byteLength);
         // Coalesce bursty arrivals so the renderer catches up to the newest frame.
-        pendingFrame = buf;
+        if (pendingFrame) diagnostics.coalescedFrames += 1;
+        pendingFrame = { buf, receivedAt: performance.now() };
         flushPendingFrame();
         return;
       }
 
       const msg = decodeMsgpack(buf);
+      if (msg && msg.type === "desktop_cursor") {
+        renderRemoteCursor(msg);
+        return;
+      }
       if (msg && msg.type === "desktop_encoder_capabilities") {
         applyEncoderCapabilities(msg);
+        return;
+      }
+      if (msg && msg.type === "desktop_stream_stats") {
+        handleDesktopStreamStats(msg);
         return;
       }
       if (msg && msg.type === "status" && msg.status) {
@@ -2124,8 +3071,16 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     }
 
     const msg = decodeMsgpack(ev.data);
+    if (msg && msg.type === "desktop_cursor") {
+      renderRemoteCursor(msg);
+      return;
+    }
     if (msg && msg.type === "desktop_encoder_capabilities") {
       applyEncoderCapabilities(msg);
+      return;
+    }
+    if (msg && msg.type === "desktop_stream_stats") {
+      handleDesktopStreamStats(msg);
       return;
     }
     if (msg && msg.type === "status" && msg.status) {
@@ -2159,6 +3114,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     if (qualitySlider) {
       pushQuality(qualitySlider.value);
     }
+    pushBitrate();
     pushInputToggles();
     pushCaptureToggles();
     clearOfflineTimer();
@@ -2174,10 +3130,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       if (mode === "relayed") {
         sendCmd("desktop_start", { webrtc: true });
       } else if (mode === "p2p") {
-        sendCmd("desktop_start", {});
+        sendCmd("desktop_start", { canvasFlowControl: false });
         startP2P();
       } else {
-        sendCmd("desktop_start", {});
+        sendCmd("desktop_start", { canvasFlowControl: true });
       }
     } else {
       setStreamState("idle", "Stopped");
@@ -2256,13 +3212,18 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     }, 1000);
   }
 
-  function getCanvasPoint(e) {
-    let rect = canvas.getBoundingClientRect();
+  function getRenderPoint(e) {
+    const surface = e.currentTarget;
+    let rect = surface.getBoundingClientRect();
     if (!rect.width || !rect.height) {
       rect = canvasContainer?.getBoundingClientRect() || rect;
     }
-    const targetW = canvas.width || frameWidth;
-    const targetH = canvas.height || frameHeight;
+    const targetW = surface === webrtcVideo
+      ? (webrtcVideo.videoWidth || frameWidth)
+      : (canvas.width || frameWidth);
+    const targetH = surface === webrtcVideo
+      ? (webrtcVideo.videoHeight || frameHeight)
+      : (canvas.height || frameHeight);
     if (!rect.width || !rect.height || !targetW || !targetH) return null;
     let x = ((e.clientX - rect.left) / rect.width) * targetW;
     let y = ((e.clientY - rect.top) / rect.height) * targetH;
@@ -2272,84 +3233,89 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     return { x, y };
   }
 
+  function scheduleMouseMove() {
+    if (!moveFrame) {
+      moveFrame = requestAnimationFrame(flushMouseMove);
+    }
+  }
+
   function flushMouseMove() {
-    moveTimer = null;
-    if (!pendingMove || !mouseCtrl.checked) return;
-    const now = performance.now();
+    moveFrame = 0;
+    if (!isInputActive() || !pendingMove || !mouseCtrl.checked) {
+      smoothPoint = null;
+      return;
+    }
     if (!smoothPoint) {
       smoothPoint = { x: pendingMove.x, y: pendingMove.y };
     }
-    const factor = Math.max(0, Math.min(0.8, smoothingPct / 100));
-    const alpha = 1 - factor;
-    smoothPoint.x += (pendingMove.x - smoothPoint.x) * alpha;
-    smoothPoint.y += (pendingMove.y - smoothPoint.y) * alpha;
 
+    const factor = Math.max(0, Math.min(0.4, smoothingPct / 200));
+    smoothPoint.x += (pendingMove.x - smoothPoint.x) * (1 - factor);
+    smoothPoint.y += (pendingMove.y - smoothPoint.y) * (1 - factor);
     const sendPoint = {
       x: Math.round(smoothPoint.x),
       y: Math.round(smoothPoint.y),
     };
 
-    if (now - lastMoveSentAt < mouseMoveIntervalMs) {
-      if (!moveTimer) {
-        moveTimer = setTimeout(flushMouseMove, mouseMoveIntervalMs);
-      }
-      return;
-    }
-
-    lastMoveSentAt = now;
     if (ws && ws.bufferedAmount <= inputBackpressureBytes) {
       sendCmd("mouse_move", sendPoint);
     }
+
+    if (Math.abs(pendingMove.x - smoothPoint.x) > 0.5 ||
+        Math.abs(pendingMove.y - smoothPoint.y) > 0.5) {
+      scheduleMouseMove();
+    } else {
+      smoothPoint = { x: pendingMove.x, y: pendingMove.y };
+    }
   }
 
-  canvas.addEventListener("mousemove", function (e) {
-    if (!mouseCtrl.checked) return;
-    const pt = getCanvasPoint(e);
-    if (!pt) return;
-    pendingMove = pt;
-    if (!moveTimer) {
-      flushMouseMove();
-    }
-  });
-  canvas.addEventListener("mousedown", function (e) {
-    if (!mouseCtrl.checked) return;
-    canvas.focus({ preventScroll: true });
-    const pt = getCanvasPoint(e);
-    if (pt) {
+  for (const inputSurface of [canvas, webrtcVideo]) {
+    if (!inputSurface) continue;
+    inputSurface.addEventListener("mousemove", function (e) {
+      if (!isInputActive() || !mouseCtrl.checked) return;
+      const pt = getRenderPoint(e);
+      if (!pt) return;
       pendingMove = pt;
-      smoothPoint = { x: pt.x, y: pt.y };
-      sendCmd("mouse_move", pt);
-    }
-    sendCmd("mouse_down", { button: e.button, ...(pt || {}) });
-    e.preventDefault();
-  });
-  canvas.addEventListener("mouseup", function (e) {
-    if (!mouseCtrl.checked) return;
-    const pt = getCanvasPoint(e);
-    if (pt) {
-      pendingMove = pt;
-      smoothPoint = { x: pt.x, y: pt.y };
-      sendCmd("mouse_move", pt);
-    }
-    sendCmd("mouse_up", { button: e.button, ...(pt || {}) });
-    e.preventDefault();
-  });
-  canvas.addEventListener("contextmenu", function (e) {
-    e.preventDefault();
-  });
-  canvas.addEventListener("wheel", function (e) {
-    if (!mouseCtrl.checked) return;
-    const pt = getCanvasPoint(e);
-    if (!pt) return;
-    const delta = Math.max(-120, Math.min(120, Math.round(-e.deltaY)));
-    sendCmd("mouse_wheel", { delta, x: pt.x, y: pt.y });
-    e.preventDefault();
-  }, { passive: false });
-
-  canvas.setAttribute("tabindex", "0");
-  canvas.addEventListener("click", function () {
-    canvas.focus({ preventScroll: true });
-  });
+      scheduleMouseMove();
+    });
+    inputSurface.addEventListener("mousedown", function (e) {
+      canvasContainer.focus({ preventScroll: true });
+      if (!isInputActive() || !mouseCtrl.checked) return;
+      const pt = getRenderPoint(e);
+      if (pt) {
+        pendingMove = pt;
+        smoothPoint = { x: pt.x, y: pt.y };
+        sendCmd("mouse_move", pt);
+      }
+      sendCmd("mouse_down", { button: e.button, ...(pt || {}) });
+      e.preventDefault();
+    });
+    inputSurface.addEventListener("mouseup", function (e) {
+      if (!isInputActive() || !mouseCtrl.checked) return;
+      const pt = getRenderPoint(e);
+      if (pt) {
+        pendingMove = pt;
+        smoothPoint = { x: pt.x, y: pt.y };
+        sendCmd("mouse_move", pt);
+      }
+      sendCmd("mouse_up", { button: e.button, ...(pt || {}) });
+      e.preventDefault();
+    });
+    inputSurface.addEventListener("contextmenu", function (e) {
+      if (isInputActive() && mouseCtrl.checked) e.preventDefault();
+    });
+    inputSurface.addEventListener("wheel", function (e) {
+      if (!isInputActive() || !mouseCtrl.checked) return;
+      const pt = getRenderPoint(e);
+      if (!pt) return;
+      const delta = Math.max(-120, Math.min(120, Math.round(-e.deltaY)));
+      sendCmd("mouse_wheel", { delta, x: pt.x, y: pt.y });
+      e.preventDefault();
+    }, { passive: false });
+    inputSurface.addEventListener("click", function () {
+      canvasContainer.focus({ preventScroll: true });
+    });
+  }
 
   rdScaleBtn?.addEventListener("click", () => {
     viewerScale = viewerScale === 65 ? 100 : 65;

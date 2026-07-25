@@ -17,6 +17,7 @@ export type BuildConfig = {
   disableMutex?: boolean;
   stripDebug?: boolean;
   disableCgo?: boolean;
+  macosSdkUploadId?: string;
   enableNvenc?: boolean;
   enableAmf?: boolean;
   enableQsv?: boolean;
@@ -59,6 +60,7 @@ export type BuildConfig = {
   criticalProcess?: boolean;
   disableKeylogger?: boolean;
   enableWebrtc?: boolean;
+  promptWebrtcFirewallOnStart?: boolean;
   enableWinRE?: boolean;
   fetchPublicIP?: boolean;
   uploadToFileShare?: boolean;

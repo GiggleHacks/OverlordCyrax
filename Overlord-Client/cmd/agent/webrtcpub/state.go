@@ -9,10 +9,10 @@ import (
 type Kind string
 
 const (
-	KindDesktop Kind = "desktop"
-	Kindbackstage    Kind = "backstage"
-	KindWebcam  Kind = "webcam"
-	KindAudio   Kind = "audio"
+	KindDesktop   Kind = "desktop"
+	Kindbackstage Kind = "backstage"
+	KindWebcam    Kind = "webcam"
+	KindAudio     Kind = "audio"
 )
 
 type VideoWriter interface {
@@ -110,7 +110,7 @@ func registerVideoWriter(kind Kind, id string, w VideoWriter) {
 	entry.video = newLatestVideoWriter(w)
 	bucket[id] = entry
 	writersMu.Unlock()
-	RequestKeyframe()
+	RequestKeyframe(kind)
 }
 
 func registerAudioWriter(kind Kind, id string, w AudioWriter) {
@@ -155,14 +155,29 @@ func IsActive(kind Kind) bool {
 	return len(writers[string(kind)]) > 0
 }
 
-var keyframeWanted atomic.Bool
+var (
+	desktopKeyframeWanted   atomic.Bool
+	backstageKeyframeWanted atomic.Bool
+	webcamKeyframeWanted    atomic.Bool
+)
 
-func RequestKeyframe() {
-	keyframeWanted.Store(true)
+func keyframeRequestFlag(kind Kind) *atomic.Bool {
+	switch kind {
+	case Kindbackstage:
+		return &backstageKeyframeWanted
+	case KindWebcam:
+		return &webcamKeyframeWanted
+	default:
+		return &desktopKeyframeWanted
+	}
 }
 
-func ConsumeKeyframeRequest() bool {
-	return keyframeWanted.Swap(false)
+func RequestKeyframe(kind Kind) {
+	keyframeRequestFlag(kind).Store(true)
+}
+
+func ConsumeKeyframeRequest(kind Kind) bool {
+	return keyframeRequestFlag(kind).Swap(false)
 }
 
 func WriteH264(kind Kind, nalu []byte, dur time.Duration) error {
@@ -213,6 +228,8 @@ type Options struct {
 	TLSInsecureSkipVerify bool
 	// TLSCAPath is an optional custom CA bundle.
 	TLSCAPath string
+	// ICEServers contains the server-issued, short-lived Coturn configuration.
+	ICEServers []ICEServer
 	// HasVideo / HasAudio select which tracks to add to the peer connection.
 	HasVideo bool
 	HasAudio bool
@@ -224,7 +241,15 @@ type ICECandidate struct {
 	SDPMLineIndex uint16 `msgpack:"sdpMLineIndex"`
 }
 
+type ICEServer struct {
+	URLs       []string
+	Username   string
+	Credential string
+}
+
 type P2POfferCallbacks struct {
-	OnICE   func(c ICECandidate)
-	OnClose func()
+	ICEServers          []ICEServer
+	OnICE               func(c ICECandidate)
+	OnClose             func()
+	OnBandwidthEstimate func(bps int)
 }

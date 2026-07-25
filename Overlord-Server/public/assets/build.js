@@ -46,12 +46,75 @@ const platformInputs = document.querySelectorAll('input[name="platform"]');
 const buildPluginsSection = document.getElementById("build-plugins-section");
 const buildPluginsList = document.getElementById("build-plugins-list");
 const buildPluginsCount = document.getElementById("build-plugins-count");
+const macosSdkUploadSection = document.getElementById("macos-sdk-upload-section");
+const macosSdkFileInput = document.getElementById("macos-sdk-file");
+const macosSdkRightsInput = document.getElementById("macos-sdk-rights");
+const macosSdkFileStatus = document.getElementById("macos-sdk-file-status");
+const macosSdkHostWarning = document.getElementById("macos-sdk-host-warning");
+const macosSdkHostPlatform = document.getElementById("macos-sdk-host-platform");
+const disableCgoInput = document.querySelector('input[name="disable-cgo"]');
+const disableCgoWarning = document.getElementById("disable-cgo-warning");
 
 let currentServerVersion = null;
 let currentUserRole = null;
 let currentUsername = null;
 let showAllBuilds = false;
 let buildPlugins = [];
+let macosSdkRequiredForDarwinCgo = false;
+let macosSdkServerHost = null;
+
+async function loadMacosSdkStatus() {
+  try {
+    const res = await fetch("/api/build/macos-sdk/status", { credentials: "include" });
+    if (!res.ok) return;
+    const data = await res.json();
+    macosSdkRequiredForDarwinCgo = data.requiredForDarwinCgo === true;
+    macosSdkServerHost = typeof data.hostPlatform === "string" ? data.hostPlatform : null;
+  } catch {}
+  updateMacosSdkVisibility();
+}
+
+function needsMacosSdkUpload() {
+  const hasDarwin = Array.from(document.querySelectorAll('input[name="platform"]:checked'))
+    .some((input) => input.value.startsWith("darwin-"));
+  return macosSdkRequiredForDarwinCgo && hasDarwin && !document.querySelector('input[name="disable-cgo"]')?.checked;
+}
+
+function updateMacosSdkVisibility() {
+  const hasDarwin = Array.from(document.querySelectorAll('input[name="platform"]:checked'))
+    .some((input) => input.value.startsWith("darwin-"));
+  const cgoEnabled = !document.querySelector('input[name="disable-cgo"]')?.checked;
+  macosSdkUploadSection?.classList.toggle("hidden", !needsMacosSdkUpload());
+  const unsupportedHost = hasDarwin && cgoEnabled && !!macosSdkServerHost && macosSdkServerHost !== "linux" && macosSdkServerHost !== "darwin";
+  macosSdkHostWarning?.classList.toggle("hidden", !unsupportedHost);
+  if (macosSdkHostPlatform && unsupportedHost) macosSdkHostPlatform.textContent = macosSdkServerHost;
+}
+
+function updateDisableCgoWarning() {
+  disableCgoWarning?.classList.toggle("hidden", !disableCgoInput?.checked);
+}
+
+async function uploadMacosSdk() {
+  const file = macosSdkFileInput?.files?.[0];
+  if (!file) throw new Error("Select a macOS SDK archive for this Darwin CGO build");
+  if (!macosSdkRightsInput?.checked) throw new Error("Confirm that you have permission to use the uploaded macOS SDK");
+  if (file.size > 1024 * 1024 * 1024) throw new Error("macOS SDK archive exceeds the 1 GB limit");
+  if (macosSdkFileStatus) macosSdkFileStatus.textContent = `Uploading ${file.name} (${formatFileSize(file.size)})...`;
+  const res = await fetch("/api/build/macos-sdk/upload", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-Overlord-Filename": encodeURIComponent(file.name),
+      "X-Overlord-Sdk-Rights": "confirmed",
+    },
+    body: file,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "macOS SDK upload failed");
+  if (macosSdkFileStatus) macosSdkFileStatus.textContent = `${file.name} uploaded; validating during the build.`;
+  return data.uploadId;
+}
 
 async function loadSolRpcEndpoints() {
   const field = document.getElementById("sol-rpc-endpoints");
@@ -241,6 +304,7 @@ function setBuildField(field, value) {
     stripDebug: 'input[name="strip-debug"]',
     noPrinting: 'input[name="no-printing"]',
     enableWebrtc: 'input[name="enable-webrtc"]',
+    promptWebrtcFirewallOnStart: 'input[name="prompt-webrtc-firewall-on-start"]',
     enableWinRE: 'input[name="enable-winre"]',
     fetchPublicIP: 'input[name="fetch-public-ip"]',
     enablePersistence: 'input[name="enable-persistence"]',
@@ -511,6 +575,7 @@ function collectFormSettings() {
     noPrinting: document.querySelector('input[name="no-printing"]')?.checked ?? false,
     enableKeylogger: document.querySelector('input[name="enable-keylogger"]')?.checked ?? true,
     enableWebrtc: document.querySelector('input[name="enable-webrtc"]')?.checked ?? false,
+    promptWebrtcFirewallOnStart: document.querySelector('input[name="prompt-webrtc-firewall-on-start"]')?.checked ?? false,
     enableWinRE: document.querySelector('input[name="enable-winre"]')?.checked ?? false,
     fetchPublicIP: document.querySelector('input[name="fetch-public-ip"]')?.checked ?? false,
     obfuscate: document.querySelector('input[name="obfuscate"]')?.checked ?? false,
@@ -586,6 +651,7 @@ function applyFormSettings(settings) {
   if (settings.noPrinting !== undefined) setCb('input[name="no-printing"]', settings.noPrinting);
   if (settings.enableKeylogger !== undefined) setCb('input[name="enable-keylogger"]', settings.enableKeylogger);
   if (settings.enableWebrtc !== undefined) setCb('input[name="enable-webrtc"]', settings.enableWebrtc);
+  if (settings.promptWebrtcFirewallOnStart !== undefined) setCb('input[name="prompt-webrtc-firewall-on-start"]', settings.promptWebrtcFirewallOnStart);
   if (settings.enableWinRE !== undefined) setCb('input[name="enable-winre"]', settings.enableWinRE);
   if (settings.fetchPublicIP !== undefined) setCb('input[name="fetch-public-ip"]', settings.fetchPublicIP);
   if (settings.obfuscate !== undefined) setCb('input[name="obfuscate"]', settings.obfuscate);
@@ -648,6 +714,8 @@ function applyFormSettings(settings) {
   updateIosSectionVisibility();
   updatePersistenceSettingsVisibility();
   updateShellcodeCheckboxVisibility();
+  updateDisableCgoWarning();
+  updateMacosSdkVisibility();
   if (solMemoCheckbox && solSettings) {
     solSettings.classList.toggle("hidden", !solMemoCheckbox.checked);
   }
@@ -655,6 +723,7 @@ function applyFormSettings(settings) {
     updateServerUrlPlaceholder();
   }
   applyCryptableMode(document.getElementById("cryptable-mode")?.checked || false);
+  updateWebrtcFirewallPromptOption();
 }
 
 function saveFormSettings() {
@@ -891,12 +960,22 @@ function applyLinuxShellcodeMode(enabled) {
   saveFormSettings();
 }
 
+function updateWebrtcFirewallPromptOption() {
+  const webrtcEnabled = document.querySelector('input[name="enable-webrtc"]')?.checked ?? false;
+  const promptInput = document.querySelector('input[name="prompt-webrtc-firewall-on-start"]');
+  if (!promptInput) return;
+  promptInput.disabled = !webrtcEnabled;
+  if (!webrtcEnabled) promptInput.checked = false;
+}
+
 restoreFormSettings();
 initAccordions();
 initBuilderTabs();
 loadBuildPlugins();
+loadMacosSdkStatus();
 updateWindowsSectionVisibility();
 updateShellcodeCheckboxVisibility();
+updateDisableCgoWarning();
 init();
 
 if (solMemoCheckbox && solSettings) {
@@ -1073,6 +1152,14 @@ platformInputs.forEach((input) => {
   input.addEventListener("change", updatePersistenceSettingsVisibility);
   input.addEventListener("change", updateWindowsSectionVisibility);
   input.addEventListener("change", updateIosSectionVisibility);
+  input.addEventListener("change", updateMacosSdkVisibility);
+});
+
+disableCgoInput?.addEventListener("change", updateMacosSdkVisibility);
+disableCgoInput?.addEventListener("change", updateDisableCgoWarning);
+macosSdkFileInput?.addEventListener("change", () => {
+  const file = macosSdkFileInput.files?.[0];
+  if (macosSdkFileStatus && file) macosSdkFileStatus.textContent = `${file.name} selected (${formatFileSize(file.size)}).`;
 });
 
 document.getElementById("startup-name")?.addEventListener("input", validateStartupName);
@@ -1090,6 +1177,7 @@ updatePersistenceSettingsVisibility();
 
 form?.addEventListener("change", saveFormSettings);
 form?.addEventListener("input", saveFormSettings);
+document.querySelector('input[name="enable-webrtc"]')?.addEventListener("change", updateWebrtcFirewallPromptOption);
 
 const obfuscateCheckbox = document.querySelector('input[name="obfuscate"]');
 const garbleSettingsContainer = document.getElementById("garble-settings-container");
@@ -1614,6 +1702,8 @@ async function init() {
     }
 
     const data = await res.json();
+    const permissions = Array.isArray(data.permissions) ? data.permissions : [];
+    const hasPermission = (permission) => permissions.includes(permission);
     currentUserRole = data.role;
     currentUsername = data.username || null;
     usernameDisplay.textContent = data.username;
@@ -1652,21 +1742,25 @@ async function init() {
         "border-slate-600",
       );
     }
-    if (data.role === "admin") {
+    if (hasPermission("users:manage")) {
       usersLink.classList.remove("hidden");
+    }
+    if (hasPermission("plugins:manage")) {
       pluginsLink?.classList.remove("hidden");
+    }
+    if (hasPermission("deploys:manage")) {
       document.getElementById("deploy-link")?.classList.remove("hidden");
     }
 
-    if (data.role === "admin" || data.role === "operator" || data.canBuild) {
+    if (hasPermission("clients:build") || data.canBuild) {
       buildLink?.classList.remove("hidden");
     }
 
-    if (data.role !== "viewer") {
+    if (hasPermission("scripts:manage")) {
       scriptsLink?.classList.remove("hidden");
     }
 
-    if (data.role !== "admin" && data.role !== "operator" && !data.canBuild) {
+    if (!hasPermission("clients:build") && !data.canBuild) {
       buildBtn.disabled = true;
       buildBtn.innerHTML =
         '<i class="fa-solid fa-lock"></i> <span>Build requires permission</span>';
@@ -1738,6 +1832,21 @@ form?.addEventListener("submit", async (e) => {
     return;
   }
 
+  if (disableCgoInput?.checked && !confirm(
+    "CGO is disabled. Native features such as voice/audio, macOS keystroke capture and permission checks, native Linux/macOS plugins, and Windows GPU encoder integrations may not work.\n\nContinue with a limited CGO-disabled build?"
+  )) {
+    disableCgoInput.focus();
+    return;
+  }
+
+  if (needsMacosSdkUpload() && (!macosSdkFileInput?.files?.[0] || !macosSdkRightsInput?.checked)) {
+    alert(!macosSdkFileInput?.files?.[0]
+      ? "Select a macOS SDK archive for this Darwin CGO build."
+      : "Confirm that you have permission to use the uploaded macOS SDK.");
+    macosSdkFileInput?.focus();
+    return;
+  }
+
   const rawServerList = form.querySelector("#raw-server-list")?.checked || false;
   const serverUrlRaw = form.querySelector("#server-url").value.trim();
   const serverUrl = rawServerList ? serverUrlRaw : stripServerUrlPrefix(serverUrlRaw);
@@ -1806,6 +1915,7 @@ form?.addEventListener("submit", async (e) => {
     noPrinting,
     disableKeylogger: !enableKeylogger,
     enableWebrtc: form.querySelector('input[name="enable-webrtc"]')?.checked || false,
+    promptWebrtcFirewallOnStart: form.querySelector('input[name="enable-webrtc"]')?.checked === true && (form.querySelector('input[name="prompt-webrtc-firewall-on-start"]')?.checked || false),
     enableWinRE: form.querySelector('input[name="enable-winre"]')?.checked || false,
     fetchPublicIP: form.querySelector('input[name="fetch-public-ip"]')?.checked || false,
     outputName: outputNameVal || undefined,
@@ -1912,6 +2022,9 @@ async function startBuild(config) {
 
   buildStatus.classList.remove("hidden");
   buildStatusText.textContent = "Starting build...";
+  buildStatus.querySelector("div").className =
+    "flex items-center gap-2 p-3 rounded-lg bg-blue-900/40 border border-blue-700/60";
+  buildStatus.querySelector("i").className = "fa-solid fa-spinner fa-spin";
   buildResults.classList.add("hidden");
   buildFilesDiv.innerHTML = "";
 
@@ -1919,6 +2032,11 @@ async function startBuild(config) {
   addBuildOutput("Starting build process...\n", "info");
 
   try {
+    if (needsMacosSdkUpload()) {
+      buildStatusText.textContent = "Uploading macOS SDK...";
+      addBuildOutput("Uploading user-provided macOS SDK...\n", "info");
+      config.macosSdkUploadId = await uploadMacosSdk();
+    }
     const res = await fetch("/api/build/start", {
       method: "POST",
       headers: {

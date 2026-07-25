@@ -160,7 +160,10 @@ if (host) {
 
   async function loadCurrentUser() {
     try {
-      const res = await fetch("/api/auth/me", { credentials: "include" });
+      const res = await fetch("/api/auth/me", {
+        credentials: "include",
+        cache: "no-store",
+      });
       if (!res.ok) {
         return;
       }
@@ -188,16 +191,20 @@ if (host) {
       }
 
       applyAdaptiveNavLayout();
+      return user;
     } catch (err) {
       console.error("Failed to load user:", err);
+      return null;
     }
   }
 
+  let currentUserPromise = Promise.resolve(null);
   if (refs.usernameDisplay && refs.roleBadge) {
-    loadCurrentUser();
+    currentUserPromise = loadCurrentUser();
   }
 
-  import("./chat-widget.js").then((chatWidget) => {
+  Promise.all([currentUserPromise, import("./chat-widget.js")]).then(([user, chatWidget]) => {
+    if (!user?.permissions?.includes("chat:write")) return;
     runWithoutPageTracking(() => {
       const addChatRestoreButton = () => {
         if (!refs.navUtility || document.getElementById("chat-restore-btn")) return;

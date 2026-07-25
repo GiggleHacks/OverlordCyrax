@@ -11,6 +11,7 @@ import (
 
 	"overlord-client/cmd/agent/config"
 	rt "overlord-client/cmd/agent/runtime"
+	"overlord-client/cmd/agent/webrtcpub"
 	"overlord-client/cmd/agent/wire"
 
 	"github.com/vmihailenco/msgpack/v5"
@@ -44,6 +45,7 @@ func TestCaptureAndSend_NoDisplays(t *testing.T) {
 }
 
 func TestCaptureAndSend_SendsFrame(t *testing.T) {
+	previousStatsAt := lastDesktopStreamStatsMs.Swap(0)
 	originalCount := activeDisplays
 	originalCapture := captureDisplayFn
 	activeDisplays = func() int { return 1 }
@@ -56,6 +58,7 @@ func TestCaptureAndSend_SendsFrame(t *testing.T) {
 	t.Cleanup(func() {
 		activeDisplays = originalCount
 		captureDisplayFn = originalCapture
+		lastDesktopStreamStatsMs.Store(previousStatsAt)
 	})
 
 	writer := &recordingWriter{}
@@ -63,8 +66,8 @@ func TestCaptureAndSend_SendsFrame(t *testing.T) {
 	if err := CaptureAndSend(context.Background(), env); err != nil {
 		t.Fatalf("CaptureAndSend returned error: %v", err)
 	}
-	if len(writer.msgs) != 1 {
-		t.Fatalf("expected one message written, got %d", len(writer.msgs))
+	if len(writer.msgs) != 2 {
+		t.Fatalf("expected frame and telemetry messages, got %d", len(writer.msgs))
 	}
 
 	var frame wire.Frame
@@ -83,6 +86,17 @@ func TestCaptureAndSend_SendsFrame(t *testing.T) {
 
 	if _, err := jpeg.Decode(bytes.NewReader(frame.Data)); err != nil {
 		t.Fatalf("jpeg payload did not decode: %v", err)
+	}
+
+	var stats wire.DesktopStreamStats
+	if err := msgpack.Unmarshal(writer.msgs[1], &stats); err != nil {
+		t.Fatalf("decode desktop stream stats: %v", err)
+	}
+	if stats.Type != "desktop_stream_stats" || stats.Format != "jpeg" {
+		t.Fatalf("unexpected stream stats: %#v", stats)
+	}
+	if stats.CaptureMs < 0 || stats.EncodeMs < 0 || stats.TotalMs < 0 {
+		t.Fatalf("stream stats contained a negative duration: %#v", stats)
 	}
 }
 
@@ -130,7 +144,7 @@ func TestActualScreenCapture(t *testing.T) {
 		t.Log("WARNING: Captured image appears to be solid color (may indicate capture issue)")
 	}
 
-	quality := jpegQuality()
+	quality := desktopJPEGQuality()
 	frame, encodeDur, err := buildFrame(img, 0, quality)
 	if err != nil {
 		t.Errorf("Failed to build frame from captured image: %v", err)
@@ -256,7 +270,7 @@ func TestFrameFPS(t *testing.T) {
 }
 
 func TestJPEGQuality(t *testing.T) {
-	quality := jpegQuality()
+	quality := desktopJPEGQuality()
 	if quality < 1 || quality > 100 {
 		t.Errorf("JPEG quality out of range: %d (expected 1-100)", quality)
 	}
@@ -306,8 +320,13 @@ func TestCaptureAndSend_DisplayOutOfRange(t *testing.T) {
 				t.Errorf("expected capture from display %d, got %d", tt.expectedDisplay, capturedDisplay)
 			}
 
-			if len(writer.msgs) != 1 {
-				t.Errorf("expected 1 message, got %d", len(writer.msgs))
+			if len(writer.msgs) == 0 {
+				t.Error("expected a frame message")
+			} else {
+				var frame wire.Frame
+				if err := msgpack.Unmarshal(writer.msgs[0], &frame); err != nil || frame.Type != "frame" {
+					t.Errorf("first message was not a valid frame: type=%q err=%v", frame.Type, err)
+				}
 			}
 		})
 	}
@@ -456,5 +475,15 @@ func TestSetFrameFlowTargetFPSEnvOverride(t *testing.T) {
 	SetFrameFlowTargetFPS(240)
 	if got := activeFrameSlotLimit(); got != 12 {
 		t.Fatalf("expected env slot limit 12, got %d", got)
+	}
+}
+
+func TestRequestDesktopFullFrameRequestsWebRTCKeyframe(t *testing.T) {
+	_ = webrtcpub.ConsumeKeyframeRequest(webrtcpub.KindDesktop)
+
+	RequestDesktopFullFrame()
+
+	if !webrtcpub.ConsumeKeyframeRequest(webrtcpub.KindDesktop) {
+		t.Fatal("expected desktop full-frame request to force the next WebRTC video frame to be a keyframe")
 	}
 }

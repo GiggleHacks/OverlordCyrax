@@ -92,13 +92,21 @@ type DesktopEncoderProfile struct {
 	Providers []string `msgpack:"providers"`
 }
 
+type DesktopCodecCapability struct {
+	Codec      string   `msgpack:"codec"`
+	Encoders   []string `msgpack:"encoders,omitempty"`
+	Transports []string `msgpack:"transports"`
+	Hardware   bool     `msgpack:"hardware,omitempty"`
+}
+
 type DesktopEncoderCapabilities struct {
-	Type      string                  `msgpack:"type"`
-	CommandID string                  `msgpack:"commandId,omitempty"`
-	Probed    bool                    `msgpack:"probed"`
-	Display   int                     `msgpack:"display"`
-	Profiles  []DesktopEncoderProfile `msgpack:"profiles"`
-	Detail    string                  `msgpack:"detail,omitempty"`
+	Type      string                   `msgpack:"type"`
+	CommandID string                   `msgpack:"commandId,omitempty"`
+	Probed    bool                     `msgpack:"probed"`
+	Display   int                      `msgpack:"display"`
+	Profiles  []DesktopEncoderProfile  `msgpack:"profiles"`
+	Codecs    []DesktopCodecCapability `msgpack:"codecs"`
+	Detail    string                   `msgpack:"detail,omitempty"`
 }
 
 type ClientLogEntry struct {
@@ -124,6 +132,8 @@ type FrameHeader struct {
 	Monitor   int    `msgpack:"monitor"`
 	FPS       int    `msgpack:"fps"`
 	Format    string `msgpack:"format"`
+	Width     int    `msgpack:"width,omitempty"`
+	Height    int    `msgpack:"height,omitempty"`
 	Backstage bool   `msgpack:"backstage,omitempty"`
 	Webcam    bool   `msgpack:"webcam,omitempty"`
 }
@@ -132,6 +142,34 @@ type Frame struct {
 	Type   string      `msgpack:"type"`
 	Header FrameHeader `msgpack:"header"`
 	Data   []byte      `msgpack:"data"`
+}
+
+type DesktopCursor struct {
+	Type         string `msgpack:"type"`
+	X            int    `msgpack:"x"`
+	Y            int    `msgpack:"y"`
+	Width        int    `msgpack:"width"`
+	Height       int    `msgpack:"height"`
+	Visible      bool   `msgpack:"visible"`
+	CursorWidth  int    `msgpack:"cursorWidth,omitempty"`
+	CursorHeight int    `msgpack:"cursorHeight,omitempty"`
+	HotspotX     int    `msgpack:"hotspotX,omitempty"`
+	HotspotY     int    `msgpack:"hotspotY,omitempty"`
+	Image        []byte `msgpack:"image,omitempty"`
+}
+
+type DesktopStreamStats struct {
+	Type      string  `msgpack:"type"`
+	FPS       int     `msgpack:"fps"`
+	Format    string  `msgpack:"format"`
+	Bytes     int     `msgpack:"bytes"`
+	Width     int     `msgpack:"width"`
+	Height    int     `msgpack:"height"`
+	CaptureMs float64 `msgpack:"captureMs"`
+	EncodeMs  float64 `msgpack:"encodeMs"`
+	SendMs    float64 `msgpack:"sendMs"`
+	TotalMs   float64 `msgpack:"totalMs"`
+	Transport string  `msgpack:"transport"`
 }
 
 type FrameAck struct {

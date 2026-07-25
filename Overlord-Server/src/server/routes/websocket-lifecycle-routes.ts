@@ -17,13 +17,20 @@ import { decodeMessage, encodeMessage, type WireMessage, type Hello, type Ping }
 import * as sessionManager from "../../sessions/sessionManager";
 import type { SocketData } from "../../sessions/types";
 import type { ClientInfo } from "../../types";
-import { clearClientSyncState, handleFrame, handleHello, handlePing, handlePong, handleScreenshotThumbnailResult } from "../../wsHandlers";
+import { clearClientSyncState, handleFrame, handleHello, handlePing, handlePong, handleScreenshotThumbnailResult, shouldRelayFrameToViewers } from "../../wsHandlers";
 import { queueClientDbUpdate, scheduleQueuedClientDbFlush } from "../../client-db-sync";
 import { getMaxPayloadLimit, getMessageByteLength, isAllowedClientMessageType } from "../../wsValidation";
 import { stopAllProxiesForClient } from "../socks5-proxy-manager";
 import { verifyBuildToken, isBuildBanned } from "../build-signing";
 import { clearThumbnail } from "../../thumbnails";
 import { stopRemoteDesktopRecording } from "../rd-recording";
+import { requestRemoteDesktopKeyframeAfterScreenshot } from "../ws-console-rd-backstage";
+import {
+  isAuthenticatedViewerRole,
+  registerViewerSocket,
+  unregisterViewerSocket,
+  validateViewerAuthorization,
+} from "../viewer-authorization";
 
 const OFFLINE_GRACE_MS = (() => {
   const raw = process.env.OVERLORD_OFFLINE_GRACE_MS;
@@ -223,6 +230,8 @@ type WsLifecycleDeps = {
   handleNotificationScreenshotResult: (clientId: string, payload: any) => void;
   handleConsoleOutput: (clientId: string, payload: any) => void;
   handleDesktopEncoderCapabilities: (clientId: string, payload: any) => void;
+  handleDesktopStreamStats: (clientId: string, payload: any) => void;
+  handleDesktopCursor: (clientId: string, payload: unknown) => void;
   handleFileBrowserMessage: (clientId: string, payload: any) => void;
   handleProxyTunnelData: (clientId: string, connectionId: string, data: Uint8Array) => void;
   handleProxyTunnelClose: (clientId: string, connectionId: string) => void;
@@ -324,6 +333,7 @@ export function handleWebSocketOpen(ws: ServerWebSocket<SocketData>, deps: WsLif
   const role = ws.data.role as string;
   const clientId = ws.data.clientId;
   const ip = ws.data.ip;
+  if (isAuthenticatedViewerRole(ws.data.role) && !registerViewerSocket(ws)) return;
   if (role === "dashboard_viewer") return deps.handleDashboardViewerOpen(ws);
   if (role === "console_viewer") return deps.handleConsoleViewerOpen(ws);
   if (role === "rd_viewer") return deps.handleRemoteDesktopViewerOpen(ws);
@@ -375,6 +385,7 @@ export async function handleWebSocketMessage(
   }
 
   const socketRole = ws.data.role as string;
+  if (isAuthenticatedViewerRole(ws.data.role) && !validateViewerAuthorization(ws)) return;
   if (socketRole === "console_viewer") return deps.handleConsoleViewerMessage(ws, message);
   if (socketRole === "rd_viewer") return deps.handleRemoteDesktopViewerMessage(ws, message);
   if (socketRole === "webcam_viewer") return deps.handleWebcamViewerMessage(ws, message);
@@ -791,19 +802,26 @@ export async function handleWebSocketMessage(
             }
           }
         }
-        if (handleFrame(client, payload)) {
+        if (handleFrame(client, payload, shouldRelayFrameToViewers(payload))) {
           try { ws.send(encodeMessage({ type: "frame_ack" })); } catch {}
         }
         break;
       case "screenshot_result":
         handleScreenshotThumbnailResult(client, payload);
         deps.handleNotificationScreenshotResult(client.id, payload);
+        requestRemoteDesktopKeyframeAfterScreenshot(client.id);
         break;
       case "console_output":
         deps.handleConsoleOutput(client.id, payload);
         break;
       case "desktop_encoder_capabilities":
         deps.handleDesktopEncoderCapabilities(client.id, payload);
+        break;
+      case "desktop_cursor":
+        deps.handleDesktopCursor(client.id, payload);
+        break;
+      case "desktop_stream_stats":
+        deps.handleDesktopStreamStats(client.id, payload);
         break;
       case "file_list_result":
       case "file_download":
@@ -979,6 +997,7 @@ export function handleWebSocketClose(
   reason: unknown,
   deps: WsLifecycleDeps,
 ): void {
+  unregisterViewerSocket(ws);
   const clientId = ws.data.clientId;
   const role = ws.data.role as string;
   const sessionId = ws.data.sessionId;

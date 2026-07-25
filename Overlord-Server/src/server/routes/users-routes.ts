@@ -1,7 +1,7 @@
 import { generateToken, authenticateRequest, getSessionTtlSeconds } from "../../auth";
 import { AuditAction, logAudit } from "../../auditLog";
 import { logger } from "../../logger";
-import { requirePermission } from "../../rbac";
+import { getUserEffectivePermissionDetails, requirePermission } from "../../rbac";
 import {
   listUserSessions,
   persistRevokedTokenHash,
@@ -58,10 +58,33 @@ export async function handleUsersRoutes(
       return Response.json({ users });
     }
 
+    if (req.method === "GET" && url.pathname.match(/^\/api\/users\/\d+\/effective-permissions$/)) {
+      requirePermission(user, "users:manage");
+      const userId = parseInt(url.pathname.split("/")[3]);
+      const targetUser = getUserById(userId);
+      if (!targetUser) {
+        return Response.json({ error: "User not found" }, { status: 404 });
+      }
+
+      return Response.json({
+        success: true,
+        permissions: getUserEffectivePermissionDetails(targetUser.id, targetUser.role),
+        clientAccess: {
+          scope: getUserClientAccessScope(targetUser.id),
+          rules: listUserClientAccessRules(targetUser.id),
+        },
+        pluginAccess: {
+          scope: getUserPluginAccessScope(targetUser.id),
+          rules: listUserPluginAccessRules(targetUser.id),
+        },
+        featurePermissions: getUserFeaturePermissions(targetUser.id),
+      });
+    }
+
     if (req.method === "POST" && url.pathname === "/api/users") {
       const authedUser = requirePermission(user, "users:manage");
       const body = await req.json();
-      const { username, password, role } = body;
+      const { username, password, role, mustChangePassword } = body;
 
       if (!username || !password || !role) {
         return Response.json({ error: "Missing required fields" }, { status: 400 });
@@ -71,7 +94,13 @@ export async function handleUsersRoutes(
         return Response.json({ error: "Invalid role" }, { status: 400 });
       }
 
-      const result = await createUser(username, password, role, authedUser.username);
+      const result = await createUser(
+        username,
+        password,
+        role,
+        authedUser.username,
+        mustChangePassword !== false,
+      );
 
       if (result.success) {
         const ip = server.requestIP(req)?.address || "unknown";

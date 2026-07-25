@@ -1,3 +1,5 @@
+import { WebRTCStatsSampler } from "./webrtc-stats.js";
+
 // Tiny WHEP (WebRTC-HTTP Egress Protocol) client.
 //
 // Wires a <video> element to a server-proxied WHEP endpoint:
@@ -16,21 +18,26 @@ export class WhepClient {
    * @param {HTMLAudioElement} [opts.audioEl]  Attach the audio track here.
    *                                            Default: hidden <audio> appended to <body>.
    * @param {(state: string) => void} [opts.onState]
+   * @param {(stats: object) => void} [opts.onStats]
    */
   constructor(opts) {
     this.whepPath = opts.whepPath;
     this.videoEl = opts.videoEl || null;
     this.audioEl = opts.audioEl || null;
     this.onState = opts.onState || (() => {});
+    this.onStats = opts.onStats || (() => {});
     this.pc = null;
     this.resourceURL = "";
+    this.statsSampler = null;
   }
 
   async start() {
     if (this.pc) await this.stop();
 
-    const pc = new RTCPeerConnection({});
+    const iceServers = await this.resolveIceServers();
+    const pc = new RTCPeerConnection({ iceServers });
     this.pc = pc;
+    this.statsSampler = new WebRTCStatsSampler(pc, this.onStats);
     if (this.videoEl) pc.addTransceiver("video", { direction: "recvonly" });
     if (this.audioEl) pc.addTransceiver("audio", { direction: "recvonly" });
 
@@ -46,6 +53,8 @@ export class WhepClient {
     };
     pc.onconnectionstatechange = () => {
       this.onState(pc.connectionState);
+      if (pc.connectionState === "connected") this.statsSampler?.start();
+      if (["failed", "closed", "disconnected"].includes(pc.connectionState)) this.statsSampler?.stop();
     };
 
     const offer = await pc.createOffer();
@@ -72,10 +81,29 @@ export class WhepClient {
     await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
   }
 
+  async resolveIceServers() {
+    const clientId = new URLSearchParams(window.location.search).get("clientId");
+    if (!clientId) return [];
+    try {
+      const response = await fetch(`/api/webrtc/ice-config?clientId=${encodeURIComponent(clientId)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = await response.json();
+      return Array.isArray(body?.iceServers) ? body.iceServers : [];
+    } catch (error) {
+      console.warn("whep: failed to load self-hosted ICE configuration; using host candidates only", error);
+      return [];
+    }
+  }
+
   async stop() {
     const pc = this.pc;
     const url = this.resourceURL;
     this.pc = null;
+    this.statsSampler?.stop();
+    this.statsSampler = null;
     this.resourceURL = "";
     if (url) {
       try {

@@ -23,6 +23,43 @@ func pcm16BytesToInt16(chunk []byte) []int16 {
 	return out
 }
 
+// WebRTC desktop audio is captured at 48 kHz stereo. Keep the established raw
+// WebSocket fallback wire format at 16 kHz mono by averaging each stereo frame
+// and decimating groups of three frames. pending preserves sample groups when
+// an audio callback ends between frames or decimation windows.
+type desktopAudioLegacyConverter struct {
+	pending []byte
+}
+
+func (c *desktopAudioLegacyConverter) Convert(chunk []byte) []byte {
+	if len(chunk) == 0 {
+		return nil
+	}
+	data := make([]byte, 0, len(c.pending)+len(chunk))
+	data = append(data, c.pending...)
+	data = append(data, chunk...)
+	const windowBytes = 3 * 2 * 2 // three stereo PCM16 frames
+	windows := len(data) / windowBytes
+	if windows == 0 {
+		c.pending = append(c.pending[:0], data...)
+		return nil
+	}
+	out := make([]byte, 0, windows*2)
+	for window := 0; window < windows; window++ {
+		var sum int64
+		for frame := 0; frame < 3; frame++ {
+			offset := window*windowBytes + frame*4
+			left := int32(int16(binary.LittleEndian.Uint16(data[offset:])))
+			right := int32(int16(binary.LittleEndian.Uint16(data[offset+2:])))
+			sum += int64(left+right) / 2
+		}
+		sample := int16(sum / 3)
+		out = binary.LittleEndian.AppendUint16(out, uint16(sample))
+	}
+	c.pending = append(c.pending[:0], data[windows*windowBytes:]...)
+	return out
+}
+
 func kindFromPayload(payload map[string]interface{}) webrtcpub.Kind {
 	switch s, _ := payload["kind"].(string); s {
 	case "backstage":
@@ -66,6 +103,7 @@ func handleWebrtcPublish(ctx context.Context, env *runtime.Env, cmdID string, pa
 		PublishToken:          token,
 		TLSInsecureSkipVerify: env.Cfg.TLSInsecureSkipVerify,
 		TLSCAPath:             env.Cfg.TLSCAPath,
+		ICEServers:            parseICEServers(payload["iceServers"]),
 		HasVideo:              hasVideo,
 		HasAudio:              hasAudio,
 	}
@@ -118,6 +156,7 @@ func handleWebrtcP2POffer(ctx context.Context, env *runtime.Env, cmdID string, p
 	kindStr := string(kind)
 
 	callbacks := webrtcpub.P2POfferCallbacks{
+		ICEServers: parseICEServers(payload["iceServers"]),
 		OnICE: func(c webrtcpub.ICECandidate) {
 			if c.Candidate == "" {
 				return
@@ -133,6 +172,14 @@ func handleWebrtcP2POffer(ctx context.Context, env *runtime.Env, cmdID string, p
 		},
 		OnClose: func() {
 			log.Printf("webrtc: P2P[%s/%s] session closed", kind, sessionID)
+		},
+		OnBandwidthEstimate: func(bps int) {
+			if kind != webrtcpub.KindDesktop {
+				return
+			}
+			if applied := capture.ApplyWebRTCBandwidthEstimate(bps); applied > 0 {
+				log.Printf("webrtc: P2P congestion target=%d Mbps applied=%d Mbps", bps/1_000_000, applied/1_000_000)
+			}
 		},
 	}
 
@@ -156,6 +203,64 @@ func handleWebrtcP2POffer(ctx context.Context, env *runtime.Env, cmdID string, p
 	})
 	sendCommandResultSafe(env, cmdID, true, "")
 	return nil
+}
+
+func parseICEServers(value interface{}) []webrtcpub.ICEServer {
+	items, ok := value.([]interface{})
+	if !ok {
+		return nil
+	}
+	servers := make([]webrtcpub.ICEServer, 0, len(items))
+	for _, item := range items {
+		if len(servers) >= 8 {
+			break
+		}
+		entry, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		var urls []string
+		switch raw := entry["urls"].(type) {
+		case string:
+			urls = appendICEURL(urls, raw)
+		case []interface{}:
+			for _, value := range raw {
+				if url, ok := value.(string); ok && len(urls) < 8 {
+					urls = appendICEURL(urls, url)
+				}
+			}
+		case []string:
+			for _, url := range raw {
+				if len(urls) < 8 {
+					urls = appendICEURL(urls, url)
+				}
+			}
+		}
+		if len(urls) == 0 {
+			continue
+		}
+		username, _ := entry["username"].(string)
+		credential, _ := entry["credential"].(string)
+		servers = append(servers, webrtcpub.ICEServer{URLs: urls, Username: username, Credential: credential})
+	}
+	return servers
+}
+
+func appendICEURL(urls []string, value string) []string {
+	if len(value) == 0 || len(value) > 512 {
+		return urls
+	}
+	valid := false
+	for _, prefix := range []string{"stun:", "stuns:", "turn:", "turns:"} {
+		if len(value) >= len(prefix) && value[:len(prefix)] == prefix {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return urls
+	}
+	return append(urls, value)
 }
 
 func handleWebrtcP2PIce(_ context.Context, env *runtime.Env, cmdID string, payload map[string]interface{}) error {

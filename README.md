@@ -347,7 +347,7 @@ Output: `release/prod-package/`
 The remote desktop viewer has a **Transport** dropdown with three modes:
 
 - **Canvas** (default): H.264 / JPEG / block frames over the existing WebSocket, decoded into a `<canvas>`. Highest latency, works anywhere the WS does.
-- **WebRTC P2P**: browser ↔ agent direct. The server only relays SDP and ICE candidates over the existing WS — MediaMTX is not involved. Lowest latency. Fails when both sides are behind aggressive symmetric NAT.
+- **WebRTC P2P**: browser ↔ agent direct when possible, with the bundled Coturn server as a fallback for restrictive or symmetric NAT. MediaMTX is not involved. Lowest latency on a direct route.
 - **WebRTC Relayed**: agent publishes to a MediaMTX sidecar via WHIP, browser plays via WHEP. The server proxies signaling so the existing JWT auth + per-client RBAC still apply. Lowest-effort fallback when P2P can't punch through.
 
 ### Building agents with WebRTC
@@ -360,6 +360,26 @@ The build tag (`overlord_webrtc`) is also available if you build agents outside 
 go build -tags overlord_webrtc ./cmd/agent
 ```
 
+### Coturn STUN / TURN
+
+Compose starts `overlord-coturn` for ICE traversal in both P2P and MediaMTX Relayed modes. A one-time init service generates a random master secret in the private `overlord-turn-secret` Docker volume. Overlord uses that secret to issue one-hour Coturn REST credentials independently to the authenticated P2P viewer and agent. MediaMTX reads the secret inside Docker and also generates expiring credentials for its WHIP/WHEP clients. No Google STUN server is used, and the master secret is never sent directly to a peer.
+
+The defaults work for same-machine testing. For LAN or internet access, set the address that both the browser and agent can reach in a `.env` file next to the compose file:
+
+```env
+OVERLORD_TURN_HOST=turn.example.com
+OVERLORD_TURN_EXTERNAL_IP=203.0.113.10
+```
+
+`OVERLORD_TURN_HOST` is placed in the ICE URLs and may be a public DNS name or IP. `OVERLORD_TURN_EXTERNAL_IP` tells Coturn which public address to advertise when the Docker host is behind NAT; omit it when Coturn binds the public interface directly. Do not use the Docker service name because peers outside the Compose network cannot resolve or reach it.
+
+Allow and forward these inbound ports to the Coturn host:
+
+- `3478/udp` and `3478/tcp` for STUN and TURN client connections.
+- `49160-49200/udp` for TURN relay allocations.
+
+The bundled setup supports ordinary TURN over UDP and TCP. It intentionally does not enable `turns:` until a trusted Coturn TLS certificate and public hostname are configured.
+
 ### MediaMTX sidecar
 
 Compose starts an `overlord-mediamtx` service for Relayed mode. It needs:
@@ -367,7 +387,7 @@ Compose starts an `overlord-mediamtx` service for Relayed mode. It needs:
 - Port `8189/udp` and `8189/tcp` reachable from operators (WebRTC ICE traffic). The Windows / macOS compose publishes these; Linux uses host networking and shares the host's interfaces directly.
 - No auth config — the Overlord server proxies every WHIP/WHEP request through `/api/webrtc/...` and enforces the existing operator JWT + RBAC there.
 
-If you only ever want P2P, you can comment out the `mediamtx:` service in your compose file — only Relayed mode depends on it.
+If you only ever want P2P, you can comment out the `mediamtx:` service in your compose file — only Relayed mode depends on it. MediaMTX is configured to use the same Coturn service as a client-only ICE fallback, but it is not itself a STUN/TURN server; Coturn handles all relay allocations.
 
 ### LAN / public access
 
@@ -406,6 +426,25 @@ docker compose -f docker-compose.windows.yml up -d --force-recreate mediamtx
 To verify the selected route, open `chrome://webrtc-internals` during a relayed stream and confirm that the chosen remote candidate points to the expected server address and preferably uses UDP.
 
 Automatic public-IP discovery is possible with STUN, but it is not a complete replacement for this setting: it can require random UDP ports, does not discover your intended domain, and can fail behind restrictive or symmetric NAT. For predictable production deployments, explicitly setting the reachable IP/domain and forwarding fixed UDP port `8189` is recommended.
+
+### Remote desktop network impairment tests
+
+On a Linux test host, `scripts/rd-network-impairment.sh` applies repeatable bandwidth, latency, jitter, and packet-loss profiles with `tc netem`. Give it the exact interface carrying the WebRTC traffic:
+
+```bash
+# Inspect interfaces first; do not guess the target.
+ip link show
+
+sudo bash scripts/rd-network-impairment.sh apply eth0 wan
+bash scripts/rd-network-impairment.sh status eth0
+
+# Always restore the interface after the test.
+sudo bash scripts/rd-network-impairment.sh clear eth0
+```
+
+Available profiles are `wan` (20 Mbps), `constrained` (8 Mbps), and `harsh` (3 Mbps), with progressively higher delay, jitter, and loss. The rule affects all egress traffic on the selected interface, not only Overlord. The script refuses to touch loopback unless `OVERLORD_NETEM_ALLOW_LOOPBACK=1` is explicitly set.
+
+For each profile, start Remote Desktop with both **Profile: Auto (best)** and **Bitrate: Auto**, then watch the Stats HUD. Verify that bitrate falls before the profile steps down, decode/processing queues remain bounded, and the profile slowly recovers after clearing the impairment.
 
 ### Advanced MediaMTX customization
 
@@ -497,6 +536,12 @@ The compose setup uses a persistent volume for runtime client builds:
 - Mount: `/app/client-build-cache`
 - Env: `OVERLORD_CLIENT_BUILD_CACHE_DIR` (default `/app/client-build-cache`)
 
+### macOS CGO builds on Linux/Docker
+
+When a macOS target is selected with CGO enabled, the builder asks for a user-provided macOS SDK archive. Package the complete `MacOSX*.sdk` directory as `.tar.xz`, `.tar.gz`, `.tgz`, or `.tar` and upload it from the Build page. The archive must contain the SDK's `System/Library/Frameworks` and `usr` directories.
+
+The upload is limited to 1 GB, belongs to the authenticated user, can be used for only one build, and is deleted after the build. Unused uploads expire after one hour. The Docker image supplies Clang and LLD; Apple SDK files are never bundled or downloaded by Overlord.
+
 ### Certbot TLS
 
 To use Let's Encrypt certificates in production Docker:
@@ -522,20 +567,67 @@ Override with:
 
 ### Reverse proxy TLS offload
 
-If your platform terminates TLS before traffic reaches Overlord (Render, Caddy, nginx, etc.), set:
+Overlord can serve HTTP only on loopback while nginx, Caddy, Traefik, IIS, or
+another trusted reverse proxy owns the public HTTPS certificate. Browsers and
+agents must still use the public `https://` / `wss://` address.
 
+HTTP/3 is enabled automatically when Overlord terminates TLS itself. QUIC uses
+UDP on the same port as HTTPS (5173 by default), so direct deployments must
+allow both TCP and UDP on that port. HTTP/1.1 remains enabled for initial
+`Alt-Svc` discovery, health checks, clients without HTTP/3, and WebSocket
+upgrades. When `OVERLORD_TLS_OFFLOAD=true`, the reverse proxy owns public
+HTTP/3 support because Bun's internal listener has no TLS.
+
+To verify both advertisement and an actual QUIC transfer with an HTTP/3-capable
+curl build:
+
+```powershell
+.\scripts\test-http3.ps1 https://YOUR_OVERLORD_HOST:5173/health
 ```
+
+For a self-signed certificate, add `-AllowUntrustedCertificate`.
+
+To compare cold HTTP/1.1 and HTTP/3 request timings:
+
+```powershell
+.\scripts\benchmark-http3.ps1 https://YOUR_OVERLORD_HOST:5173/health -Requests 30
+```
+
+The benchmark selects an HTTP/3-capable curl automatically, validates the
+protocol used by every sample, prints average/p50/p95 timing, and saves the raw
+measurements as CSV.
+
+For a native install or Linux Docker with host networking, add this to `.env`:
+
+```env
+HOST=127.0.0.1
 OVERLORD_TLS_OFFLOAD=true
-OVERLORD_HEALTHCHECK_URL=http://localhost:5173/health
-OVERLORD_PUBLISH_HOST=127.0.0.1
+OVERLORD_HEALTHCHECK_URL=http://127.0.0.1:5173/health
 ```
+
+For Docker Desktop (`docker-compose.windows.yml`), the container must listen on
+all of its own interfaces while Docker publishes the port on host loopback:
+
+```env
+HOST=0.0.0.0
+OVERLORD_PUBLISH_HOST=127.0.0.1
+OVERLORD_TLS_OFFLOAD=true
+OVERLORD_HEALTHCHECK_URL=http://127.0.0.1:5173/health
+```
+
+Restart Overlord after changing `.env`. The reverse proxy upstream is then
+`http://127.0.0.1:5173`. It must preserve `Host`, set
+`X-Forwarded-Proto: https` and `X-Forwarded-For`, support WebSocket upgrades,
+and use timeouts/body limits suitable for long sessions and file uploads.
+
+Ready-to-copy Caddy and nginx configurations are in `deploy/reverse-proxy/`.
 
 When enabled:
 
-- Container serves internal HTTP on `0.0.0.0:$PORT`
-- External URL stays `https://...` through your platform proxy
-- Health checks should use `http://localhost:$PORT/health` inside the container
-- Don't expose the internal container HTTP port directly to the internet
+- Overlord skips certificate generation and serves internal HTTP.
+- Authentication cookies remain `Secure` because public TLS terminates at the proxy.
+- Proxy source-IP headers are trusted for auditing, bans, and rate limiting.
+- The internal HTTP listener must never be exposed directly to the internet.
 
 ### Source IP behind a domain / reverse proxy
 

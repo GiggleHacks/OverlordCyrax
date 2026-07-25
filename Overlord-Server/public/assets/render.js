@@ -516,15 +516,17 @@ export function createRenderer({
         return;
       }
 
-      const thumbHost = e.target.closest(".cv-thumb-host, .thumb-img");
+      const thumbHost = e.target.closest("[data-thumb-host]");
       if (thumbHost) {
+        e.preventDefault();
         e.stopPropagation();
         if (card.dataset.online === "true") {
           if (pingClient) pingClient(clientId);
           window.open(`/viewer?clientId=${encodeURIComponent(clientId)}&mode=dashboard2`, "_blank", "noopener");
         } else {
-          const thumbImg = card.querySelector(".thumb-img");
-          if (thumbImg?.src) openModal(thumbImg.src);
+          const thumbImg = thumbHost.querySelector("img[data-thumb-img]");
+          const src = thumbImg?.currentSrc || thumbImg?.src || "";
+          if (src) openModal(src);
         }
         return;
       }
@@ -1191,6 +1193,8 @@ export function createRenderer({
     `;
     return article;
   }
+  setupGridDelegation();
+
 
   return { renderMerge, setLayout };
 }

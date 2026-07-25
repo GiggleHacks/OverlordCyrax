@@ -19,12 +19,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
 
-func drainRTCP(sender *webrtc.RTPSender) {
+func drainRTCP(sender *webrtc.RTPSender, kind Kind) {
 	buf := make([]byte, 1500)
 	for {
 		n, _, err := sender.Read(buf)
@@ -38,7 +39,9 @@ func drainRTCP(sender *webrtc.RTPSender) {
 		for _, p := range packets {
 			switch p.(type) {
 			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
-				handleRTCPKeyframeFeedback()
+				if kind != "" {
+					handleRTCPKeyframeFeedback(kind)
+				}
 			}
 		}
 	}
@@ -47,11 +50,15 @@ func drainRTCP(sender *webrtc.RTPSender) {
 const h264SDPFmtpLine = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640034"
 
 var rtcpKeyframeLogOnce sync.Once
-var lastRTCPKeyframeRequest atomic.Int64
+var (
+	lastDesktopRTCPKeyframeRequest   atomic.Int64
+	lastBackstageRTCPKeyframeRequest atomic.Int64
+	lastWebcamRTCPKeyframeRequest    atomic.Int64
+)
 
 const rtcpKeyframeMinInterval = 750 * time.Millisecond
 
-func handleRTCPKeyframeFeedback() {
+func handleRTCPKeyframeFeedback(kind Kind) {
 	if !honorRTCPKeyframes() {
 		rtcpKeyframeLogOnce.Do(func() {
 			log.Printf("webrtcpub: RTCP video keyframe recovery disabled by OVERLORD_WEBRTC_RTCP_KEYFRAMES")
@@ -60,15 +67,26 @@ func handleRTCPKeyframeFeedback() {
 	}
 	now := time.Now().UnixNano()
 	for {
-		last := lastRTCPKeyframeRequest.Load()
+		last := rtcpKeyframeTimestamp(kind).Load()
 		if last > 0 && time.Duration(now-last) < rtcpKeyframeMinInterval {
 			return
 		}
-		if lastRTCPKeyframeRequest.CompareAndSwap(last, now) {
+		if rtcpKeyframeTimestamp(kind).CompareAndSwap(last, now) {
 			break
 		}
 	}
-	RequestKeyframe()
+	RequestKeyframe(kind)
+}
+
+func rtcpKeyframeTimestamp(kind Kind) *atomic.Int64 {
+	switch kind {
+	case Kindbackstage:
+		return &lastBackstageRTCPKeyframeRequest
+	case KindWebcam:
+		return &lastWebcamRTCPKeyframeRequest
+	default:
+		return &lastDesktopRTCPKeyframeRequest
+	}
 }
 
 func honorRTCPKeyframes() bool {
@@ -133,25 +151,42 @@ func Start(ctx context.Context, kind Kind, opts Options) (*Publisher, error) {
 	if opts.HasAudio {
 		if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:  webrtc.MimeTypePCMU,
-				ClockRate: 8000,
-				Channels:  1,
+				MimeType:    webrtc.MimeTypeOpus,
+				ClockRate:   48000,
+				Channels:    2,
+				SDPFmtpLine: "minptime=10;useinbandfec=1",
 			},
-			PayloadType: 0,
+			PayloadType: 111,
 		}, webrtc.RTPCodecTypeAudio); err != nil {
 			return nil, fmt.Errorf("register audio codec: %w", err)
 		}
 	}
 
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
-	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	interceptorRegistry := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, interceptorRegistry); err != nil {
+		return nil, fmt.Errorf("register WebRTC interceptors: %w", err)
+	}
+	api := webrtc.NewAPI(
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(interceptorRegistry),
+	)
+	iceServers := make([]webrtc.ICEServer, 0, len(opts.ICEServers))
+	for _, server := range opts.ICEServers {
+		iceServers = append(iceServers, webrtc.ICEServer{
+			URLs:       server.URLs,
+			Username:   server.Username,
+			Credential: server.Credential,
+		})
+	}
+	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: iceServers})
 	if err != nil {
 		return nil, fmt.Errorf("new peer connection: %w", err)
 	}
 
 	var (
-		videoTrack *webrtc.TrackLocalStaticSample
-		audioTrack *webrtc.TrackLocalStaticSample
+		videoTrack  *webrtc.TrackLocalStaticSample
+		audioTrack  *webrtc.TrackLocalStaticSample
+		audioWriter AudioWriter
 	)
 	if opts.HasVideo {
 		videoTrack, err = webrtc.NewTrackLocalStaticSample(
@@ -170,17 +205,22 @@ func Start(ctx context.Context, kind Kind, opts Options) (*Publisher, error) {
 			return nil, fmt.Errorf("add video transceiver: %w", err)
 		}
 		if sender := tx.Sender(); sender != nil {
-			go drainRTCP(sender)
+			go drainRTCP(sender, kind)
 		}
 	}
 	if opts.HasAudio {
 		audioTrack, err = webrtc.NewTrackLocalStaticSample(
-			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypePCMU, ClockRate: 8000, Channels: 1},
+			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2, SDPFmtpLine: "minptime=10;useinbandfec=1"},
 			"overlord-audio-"+string(kind), "overlord-"+string(kind),
 		)
 		if err != nil {
 			_ = pc.Close()
 			return nil, fmt.Errorf("new audio track: %w", err)
+		}
+		audioWriter, err = newOpusAudioWriter(audioTrack)
+		if err != nil {
+			_ = pc.Close()
+			return nil, fmt.Errorf("new opus encoder: %w", err)
 		}
 		tx, err := pc.AddTransceiverFromTrack(audioTrack, webrtc.RTPTransceiverInit{
 			Direction: webrtc.RTPTransceiverDirectionSendonly,
@@ -190,7 +230,7 @@ func Start(ctx context.Context, kind Kind, opts Options) (*Publisher, error) {
 			return nil, fmt.Errorf("add audio transceiver: %w", err)
 		}
 		if sender := tx.Sender(); sender != nil {
-			go drainRTCP(sender)
+			go drainRTCP(sender, "")
 		}
 	}
 
@@ -256,7 +296,7 @@ func Start(ctx context.Context, kind Kind, opts Options) (*Publisher, error) {
 		registerVideoWriter(kind, writerID, &h264TrackWriter{t: videoTrack})
 	}
 	if audioTrack != nil {
-		registerAudioWriter(kind, writerID, newPCMUAudioWriter(audioTrack))
+		registerAudioWriter(kind, writerID, audioWriter)
 	}
 	log.Printf("webrtcpub: WHIP[%s] session established (resource=%s)", kind, resourceURL)
 	return pub, nil

@@ -535,7 +535,7 @@ function applyFeaturePermissionRules() {
 async function loadCurrentUser() {
   loadServerVersion();
   try {
-    const res = await fetch("/api/auth/me");
+    const res = await fetch("/api/auth/me", { credentials: "include" });
     if (res.ok) {
       currentUser = await res.json();
       if (currentUser && currentUser.username && currentUser.role) {
@@ -1738,7 +1738,7 @@ window.setClientGroup = async (clientId, groupId) => {
 
 async function loadGroups() {
   try {
-    const res = await fetch("/api/groups");
+    const res = await fetch("/api/groups", { credentials: "include" });
     if (!res.ok) return [];
     const data = await res.json();
     return data.groups || [];
