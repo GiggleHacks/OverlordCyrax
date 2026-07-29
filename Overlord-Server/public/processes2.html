@@ -111,6 +111,93 @@
       }
       .proc2-btn:hover:not(:disabled) { color: #e2e8f0; background: #1c2440; }
       .proc2-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+      .proc2-btn-toggle.active {
+        color: #38bdf8;
+        background: rgba(56, 189, 248, 0.14);
+        border-color: rgba(56, 189, 248, 0.5);
+      }
+      .proc2-btn-toggle.active:hover:not(:disabled) { color: #7dd3fc; background: rgba(56, 189, 248, 0.22); }
+      /* ── batch kill progress bar (Win98 style) ── */
+      .proc2-killbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        background: #0a0e1a;
+        border-top: 1px solid #1c2440;
+        flex-shrink: 0;
+      }
+      .proc2-killbar[hidden] { display: none; }
+      .proc2-kb-track {
+        position: relative;
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 14px;
+        background: #05070d;
+        border: 1px solid;
+        border-color: #000 #2a3350 #2a3350 #000;
+      }
+      .proc2-kb-blocks {
+        display: flex;
+        gap: 1px;
+        height: 100%;
+        padding: 1px;
+        overflow: hidden;
+      }
+      .kb-b { flex: 1 1 0; min-width: 2px; background: #141a2e; }
+      .kb-b.kb-cur { background: #ffd166; animation: kbPulse 0.5s steps(2, end) infinite; }
+      .kb-b.kb-ok { background: #2ee66b; }
+      .kb-b.kb-fail { background: #f87171; }
+      @keyframes kbPulse { 50% { opacity: 0.35; } }
+      .proc2-kb-pac {
+        position: absolute;
+        top: -1px;
+        left: 0;
+        width: 14px;
+        height: 14px;
+        pointer-events: none;
+        transition: left 200ms ease;
+        z-index: 2;
+      }
+      .proc2-kb-pac i {
+        position: absolute;
+        left: 0;
+        width: 14px;
+        height: 7px;
+        background: #ffd166;
+      }
+      .proc2-kb-pac i:first-child {
+        top: 0;
+        border-radius: 7px 7px 0 0;
+        transform-origin: center bottom;
+        animation: kbPacTop 0.35s linear infinite;
+      }
+      .proc2-kb-pac i:last-child {
+        bottom: 0;
+        border-radius: 0 0 7px 7px;
+        transform-origin: center top;
+        animation: kbPacBot 0.35s linear infinite;
+      }
+      .proc2-kb-pac.kb-pac-idle i { animation: none; }
+      @keyframes kbPacTop { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-32deg); } }
+      @keyframes kbPacBot { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(32deg); } }
+      /* Fixed-width slot: the status text can never resize the track, so the
+         bar, blocks and pac-man stay perfectly stable while text updates.
+         Right-aligned so short text hugs the dismiss button; overflow
+         ellipsizes long "killing name (PID)…" tails. */
+      .proc2-kb-text {
+        flex: 0 0 auto;
+        width: min(320px, 45%);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: right;
+        font-size: 10px;
+        color: #94a3b8;
+        font-variant-numeric: tabular-nums;
+      }
+      .proc2-kb-text .ok { color: #2ee66b; }
+      .proc2-kb-text .bad { color: #f87171; }
       .proc2-btn-danger { color: #f87171; border-color: rgba(239, 68, 68, 0.35); }
       .proc2-btn-danger:hover:not(:disabled) { color: #fff; background: rgba(239, 68, 68, 0.75); }
       /* ── column header ───────────────────────── */
@@ -292,6 +379,61 @@
       #proc2-ctx .proc2-ctx-item:hover { background: #1c2440; }
       #proc2-ctx .proc2-ctx-item i { width: 12px; text-align: center; font-size: 10px; }
       #proc2-ctx .proc2-ctx-sep { height: 1px; margin: 3px 4px; background: #1c2440; }
+      /* ── kill result badges ────────────────── */
+      .proc2-kb {
+        font-size: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0 3px;
+        border-radius: 3px;
+        border: 1px solid transparent;
+        flex-shrink: 0;
+        white-space: nowrap;
+      }
+      .proc2-kb i { font-size: 7px; }
+      .proc2-kb-pending {
+        color: #93c5fd;
+        background: rgba(59, 130, 246, 0.14);
+        border-color: rgba(59, 130, 246, 0.35);
+      }
+      .proc2-kb-killed {
+        color: #2ee66b;
+        background: rgba(46, 230, 107, 0.12);
+        border-color: rgba(46, 230, 107, 0.35);
+      }
+      .proc2-kb-denied {
+        color: #f87171;
+        background: rgba(239, 68, 68, 0.12);
+        border-color: rgba(239, 68, 68, 0.4);
+      }
+      .proc2-kb-notfound {
+        color: #facc15;
+        background: rgba(250, 204, 21, 0.12);
+        border-color: rgba(250, 204, 21, 0.35);
+      }
+      .proc2-kb-failed,
+      .proc2-kb-timeout,
+      .proc2-kb-offline {
+        color: #fb923c;
+        background: rgba(251, 146, 60, 0.12);
+        border-color: rgba(251, 146, 60, 0.35);
+      }
+      /* ── kill batch summary bar ────────────── */
+      .proc2-summary {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        font-size: 10.5px;
+        color: #cbd5e1;
+        background: #0c1120;
+        border-bottom: 1px solid #1c2440;
+        flex-shrink: 0;
+      }
+      .proc2-summary[hidden] { display: none; }
+      .proc2-summary .ok { color: #2ee66b; }
+      .proc2-summary .bad { color: #f87171; }
+      .proc2-summary .warn { color: #facc15; }
     </style>
   </head>
   <body>
@@ -303,8 +445,14 @@
         <i class="fa-solid fa-magnifying-glass"></i>
         <input id="proc2-search-input" type="search" placeholder="Filter processes..." autocomplete="off" spellcheck="false" />
       </div>
+      <button id="proc2-hidesafe" class="proc2-btn proc2-btn-toggle" title="Hide known-safe processes (show only unknown/suspicious; the agent is never shown)">
+        <i class="fa-solid fa-shield-halved"></i>
+      </button>
+      <button id="proc2-selectall" class="proc2-btn" title="Select all visible processes (agent and critical system processes excluded)">
+        <i class="fa-solid fa-check-double"></i>
+      </button>
       <span id="proc2-count" class="proc2-count" title="0 processes">0</span>
-      <span id="proc2-ver" class="proc2-ver" title="Process Manager 2.0">v1.0.0</span>
+      <span id="proc2-ver" class="proc2-ver" title="Process Manager 2.0">v1.3.1</span>
       <button id="proc2-refresh" class="proc2-btn" title="Refresh" disabled>
         <i class="fa-solid fa-rotate"></i>
       </button>
@@ -312,6 +460,8 @@
         <i class="fa-solid fa-skull-crossbones"></i>
       </button>
     </div>
+
+    <div id="proc2-summary" class="proc2-summary" hidden></div>
 
     <div class="proc2-head">
       <div class="proc2-col" id="proc2-sort-name">Name <i class="fa-solid fa-sort"></i></div>
@@ -321,6 +471,17 @@
 
     <div id="proc2-list" class="proc2-list">
       <div class="proc2-placeholder"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting...</div>
+    </div>
+
+    <div id="proc2-killbar" class="proc2-killbar" hidden>
+      <div class="proc2-kb-track">
+        <div id="proc2-kb-blocks" class="proc2-kb-blocks"></div>
+        <div id="proc2-kb-pac" class="proc2-kb-pac"><i></i><i></i></div>
+      </div>
+      <span id="proc2-kb-text" class="proc2-kb-text"></span>
+      <button id="proc2-kb-close" class="proc2-btn" title="Dismiss">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
     </div>
 
     <script type="module" src="/assets/processes2-bootstrap.js"></script>

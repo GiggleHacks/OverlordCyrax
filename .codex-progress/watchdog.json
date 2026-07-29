@@ -1,1 +1,1 @@
-{"version":"1.0.0","status":"healthy","detail":"Last real progress update 169 seconds ago","checkedAt":1784296288927,"lastProgressAt":1784296119072.0076,"staleForMs":169854.99243164062,"staleAfterMs":300000}
+{"version":"1.0.0","status":"stalled","detail":"No real progress update for 1324 seconds","checkedAt":1785333633344,"lastProgressAt":1785332308668.1877,"staleForMs":1324675.8122558594,"staleAfterMs":300000}

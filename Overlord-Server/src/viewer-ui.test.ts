@@ -59,15 +59,17 @@ describe("unified viewer UI", () => {
     expect(viewerJs).toContain("viewerD2Desktop");
     expect(viewerJs).toContain("viewerD2Webcam");
     expect(viewerJs).toContain("viewerD2Processes");
-    expect(viewerJs).toContain("autostart=0");
     expect(viewerJs).toContain("d2=1");
-    expect(viewerJs).toMatch(/webcamUrlD2[\s\S]*autostart=0/);
+    expect(viewerJs).toMatch(/webcamUrlD2[\s\S]*d2=1/);
+    // Dashboard 2.0 webcam auto-starts on entry; autostart=0 must not be set.
+    expect(viewerJs).not.toMatch(/webcamUrlD2[\s\S]*autostart=0/);
     expect(viewerJs).not.toMatch(/webcamUrlD2[\s\S]*controls=1/);
     expect(viewerJs).toContain("data-d2-cam-settings");
     expect(viewerJs).toContain("is-d2-float");
     expect(viewerJs).toContain("setD2NoCamera");
     const viewerHtml = await publicFile("viewer.html");
     expect(viewerHtml).toContain("data-d2-cam-settings");
+    expect(viewerHtml).toContain("data-d2-cam-status");
     expect(viewerHtml).toContain("data-d2-webcam-empty");
     expect(viewerHtml).toContain("No webcam");
     const webcamHtml = await publicFile("webcam.html");
@@ -90,6 +92,7 @@ describe("unified viewer UI", () => {
     expect(css).not.toMatch(/body\.rd-embedded #frameCanvas[\s\S]*?object-fit:\s*fill/);
     expect(css).toContain("body.processes-embedded");
     expect(css).toContain(".sp-pins");
+    expect(css).toContain(".d2-cam-status");
   });
 
   test("supports collapsible rail and desktop-primary split layout", async () => {
@@ -208,11 +211,14 @@ describe("unified viewer UI", () => {
     const html = await publicFile("remotedesktop.html");
     const js = await publicFile("assets/remotedesktop.js");
     expect(html).toContain('<option value="auto" selected>Auto (best)</option>');
+    expect(html).toContain('<option value="480:30">30 FPS - 480p</option>');
     expect(html).toContain('<option value="720:30">30 FPS - 720p</option>');
     expect(html).toContain('<option value="1080:60">60 FPS - 1080p</option>');
     expect(html).toContain('id="streamProfileDetail"');
     expect(js).toContain('sendCmd("desktop_encoder_capabilities"');
     expect(js).toContain('streamProfileSelect?.value || "auto"');
+    expect(js).toContain("manualExtraProfiles");
+    expect(js).toContain("480");
   });
 
   test("uses resolution presets instead of webcam quality percentage", async () => {
@@ -295,11 +301,65 @@ describe("unified viewer UI", () => {
     expect(bootstrap2).toContain("/assets/processes2.js");
     const js = await publicFile("assets/processes2.js");
     expect(js).toContain("PROCESSES2_JS_VERSION");
+    expect(js).toContain('"1.3.1"');
     expect(js).toContain("process_kill");
     expect(js).toContain("process_suspend");
     expect(js).toContain("process_resume");
     expect(js).toContain("process_icon");
     expect(js).toContain('checkFeatureAccess("processes", clientId)');
+    // multi-select (file-manager behavior)
+    expect(js).toContain("selectedPids");
+    expect(js).toContain("anchorPid");
+    expect(js).toContain("visiblePidOrder");
+    expect(js).toContain("shiftKey");
+    expect(js).toContain("ctrlKey");
+    // sequential kill queue with per-process results
+    expect(js).toContain("queueKills");
+    expect(js).toContain("killInFlight");
+    expect(js).toContain("killResults");
+    expect(js).toContain("classifyKillFailure");
+    expect(js).toContain("proc2-summary");
+    expect(js).toContain("Access denied · admin/SYSTEM required");
+    // no confirmation dialogs on kill paths
+    expect(js).not.toContain("confirm(`Kill process");
+    expect(js).not.toContain("and all child processes?");
+    expect(html).toContain("proc2-summary");
+    expect(html).toContain("proc2-kb-killed");
+    expect(html).toContain("proc2-kb-denied");
+    expect(html).toContain("v1.3.1");
+    // killbar status text sits in a fixed-width slot so the bar never jitters
+    expect(html).toContain("width: min(320px, 45%)");
+    // select-all + retro batch kill progress bar
+    expect(html).toContain("proc2-selectall");
+    expect(html).toContain("fa-check-double");
+    expect(html).toContain("proc2-killbar");
+    expect(html).toContain("proc2-kb-blocks");
+    expect(html).toContain("proc2-kb-pac");
+    expect(html).toContain("kbPacTop");
+    expect(js).toContain("selectAllVisible");
+    expect(js).toContain("CRITICAL_NEVER_KILL");
+    expect(js).toContain("KILL_BAR_AUTOHIDE_MS");
+    expect(js).toContain("killBarBegin");
+    expect(js).toContain("killBarMarkCurrent");
+    expect(js).toContain("killBarResolve");
+    expect(js).toContain("killBarFinish");
+    // hide known-safe filter (suspicious-only view)
+    expect(html).toContain("proc2-hidesafe");
+    expect(html).toContain("fa-shield-halved");
+    expect(js).toContain("hideKnownSafe");
+    expect(js).toContain('from "./process-allowlist.js"');
+    expect(js).toContain("isKnownSafeProcess");
+    const allowlist = await publicFile("assets/process-allowlist.js");
+    expect(allowlist).toContain("PROCESS_ALLOWLIST_VERSION");
+    expect(allowlist).toContain("KNOWN_SAFE_PROCESSES");
+    expect(allowlist).toContain('"svchost.exe"');
+    expect(allowlist).toContain('"explorer.exe"');
+    expect(allowlist).toContain('"chrome.exe"');
+    // the agent (proc.self, yellow highlight) is always treated as trusted
+    expect(allowlist).toContain("proc.self");
+    // consoles stay visible as potentially suspicious
+    expect(allowlist).not.toContain('"powershell.exe"');
+    expect(allowlist).not.toContain('"cmd.exe"');
     const viewerJs = await publicFile("assets/viewer.js");
     expect(viewerJs).toContain("/processes2?embedded=1");
     expect(viewerJs).not.toContain("/processes?embedded=1");

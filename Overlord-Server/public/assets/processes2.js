@@ -1,8 +1,9 @@
-/** Process Manager 2.0 — compact process list for Dashboard 2.0 panes. v1.0.0 */
+/** Process Manager 2.0 — compact process list for Dashboard 2.0 panes. v1.3.1 */
 import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 import { checkFeatureAccess } from "./feature-gate.js";
+import { isKnownSafeProcess } from "./process-allowlist.js";
 
-const PROCESSES2_JS_VERSION = "1.0.0";
+const PROCESSES2_JS_VERSION = "1.3.1";
 const clientId = window.location.pathname.split("/")[1];
 
 let ws = null;
@@ -10,11 +11,14 @@ let processes = [];
 let processMap = new Map();
 let processTree = [];
 let collapsedPids = new Set();
-let selectedPid = null;
+let selectedPids = new Set();
+let anchorPid = null;
+let visiblePidOrder = [];
 let rowsByPid = new Map();
 let sortField = "cpu";
 let sortDirection = "desc";
 let searchTerm = "";
+let hideKnownSafe = false;
 
 const procIconCache = new Map();
 const procIconQueue = [];
@@ -28,6 +32,31 @@ const listEl = document.getElementById("proc2-list");
 const refreshBtn = document.getElementById("proc2-refresh");
 const killBtn = document.getElementById("proc2-kill");
 const searchInput = document.getElementById("proc2-search-input");
+const hideSafeBtn = document.getElementById("proc2-hidesafe");
+const selectAllBtn = document.getElementById("proc2-selectall");
+const killBarEl = document.getElementById("proc2-killbar");
+const killBarBlocksEl = document.getElementById("proc2-kb-blocks");
+const killBarPacEl = document.getElementById("proc2-kb-pac");
+const killBarTextEl = document.getElementById("proc2-kb-text");
+const killBarCloseBtn = document.getElementById("proc2-kb-close");
+
+/* Processes that must never be mass-selected: killing any of these can
+   blue-screen or hard-lock the remote machine. Manual single-selection is
+   still possible — this guard only applies to Select All. */
+const CRITICAL_NEVER_KILL = new Set([
+  "system",
+  "registry",
+  "secure system",
+  "memory compression",
+  "idle",
+  "smss.exe",
+  "csrss.exe",
+  "wininit.exe",
+  "winlogon.exe",
+  "services.exe",
+  "lsass.exe",
+  "lsaiso.exe",
+]);
 const verEl = document.getElementById("proc2-ver");
 
 if (verEl) {
@@ -85,7 +114,11 @@ function enableControls(enabled) {
 }
 
 function updateKillButton() {
-  if (killBtn) killBtn.disabled = !selectedPid || !ws || ws.readyState !== WebSocket.OPEN;
+  const n = selectedPids.size;
+  if (killBtn) {
+    killBtn.disabled = n === 0 || !ws || ws.readyState !== WebSocket.OPEN;
+    killBtn.title = n > 0 ? `Kill ${n} selected process${n > 1 ? "es" : ""}` : "Kill selected";
+  }
 }
 
 function send(msg) {
@@ -102,6 +135,7 @@ function handleMessage(msg) {
       if (msg.status === "offline") {
         updateStatus("err", "Client offline");
         enableControls(false);
+        failKillQueue("offline", "Client went offline");
         setPlaceholder('<i class="fa-solid fa-plug-circle-xmark"></i> Client offline', true);
       }
       break;
@@ -211,14 +245,19 @@ function buildProcessTree() {
 }
 
 function renderProcesses() {
+  pruneKillResults();
   const filtered = [];
 
   function collectMatches(proc, depth = 0) {
+    // Known-safe filter: when enabled, trusted executables are hidden and only
+    // unknown/suspicious processes remain. The agent (proc.self) is treated as
+    // trusted by isKnownSafeProcess and can never appear in the filtered view.
     const matches =
-      !searchTerm ||
-      proc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      proc.pid.toString().includes(searchTerm) ||
-      (proc.username && proc.username.toLowerCase().includes(searchTerm.toLowerCase()));
+      (!hideKnownSafe || !isKnownSafeProcess(proc)) &&
+      (!searchTerm ||
+        proc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        proc.pid.toString().includes(searchTerm) ||
+        (proc.username && proc.username.toLowerCase().includes(searchTerm.toLowerCase())));
 
     if (matches) {
       filtered.push({ ...proc, depth });
@@ -230,6 +269,7 @@ function renderProcesses() {
   }
 
   processTree.forEach((proc) => collectMatches(proc, 0));
+  visiblePidOrder = filtered.map((proc) => proc.pid);
 
   if (filtered.length === 0) {
     listEl.innerHTML =
@@ -295,9 +335,27 @@ function formatMem(bytes) {
 
 function rowClassName(proc) {
   let cls = "proc2-row";
-  if (selectedPid === proc.pid) cls += " selected";
+  if (selectedPids.has(proc.pid)) cls += " selected";
   if (proc.self) cls += " self-process";
   return cls;
+}
+
+function killBadgeHtml(pid) {
+  const res = killResults.get(pid);
+  if (!res) return "";
+  if (res.state === "pending") {
+    return '<span class="proc2-kb proc2-kb-pending" title="Kill in progress..."><i class="fa-solid fa-circle-notch fa-spin"></i> killing</span>';
+  }
+  const labels = {
+    killed: "killed",
+    denied: "access denied",
+    notfound: "not found",
+    failed: "failed",
+    timeout: "timeout",
+    offline: "offline",
+  };
+  const cat = res.category || "failed";
+  return `<span class="proc2-kb proc2-kb-${cat}" title="${escapeHtml(res.text || "")}">${labels[cat] || "failed"}</span>`;
 }
 
 function rowInnerHtml(proc, depth) {
@@ -330,11 +388,12 @@ function rowInnerHtml(proc, depth) {
       : `<span class="proc2-ico ${nameClass}"${iconKey ? ` data-proc-icon-key="${escapeHtml(iconKey)}"` : ""}><i class="fa-solid ${fallbackIcon}"></i></span>`;
 
   const badge = proc.self ? '<span class="proc2-agent-badge">agent</span>' : "";
+  const killBadge = killBadgeHtml(proc.pid);
 
   return `
     <div class="proc2-cell proc2-name-cell">
       ${indent}${tw}${ico}
-      <span class="proc2-nm ${nameClass}">${escapeHtml(proc.name)}</span>${badge}
+      <span class="proc2-nm ${nameClass}">${escapeHtml(proc.name)}</span>${badge}${killBadge}
       <span class="proc2-pid">${proc.pid}</span>
     </div>
     <div class="proc2-cell proc2-cell-num ${cpuHeatClass(displayCpu)}">${displayCpu.toFixed(1)}</div>
@@ -363,14 +422,17 @@ function createProcessRow(proc, depth = 0) {
       toggleCollapse(pid);
       return;
     }
-    selectProcess(pid);
+    handleRowSelect(pid, e);
   };
 
   row.oncontextmenu = (e) => {
     e.preventDefault();
     e.stopPropagation();
     const pid = Number(row.dataset.pid);
-    selectProcess(pid);
+    // File-manager behavior: right-clicking inside an existing selection keeps
+    // it; right-clicking outside selects just that row.
+    if (!selectedPids.has(pid)) selectOnly(pid);
+    else anchorPid = pid;
     showContextMenu(e.clientX, e.clientY, pid);
   };
 
@@ -383,33 +445,323 @@ function toggleCollapse(pid) {
   renderProcesses();
 }
 
-function selectProcess(pid) {
-  selectedPid = pid;
+function handleRowSelect(pid, e) {
+  if (
+    e.shiftKey &&
+    anchorPid != null &&
+    visiblePidOrder.includes(anchorPid) &&
+    visiblePidOrder.includes(pid)
+  ) {
+    // Shift+click: select the whole visible range between anchor and click.
+    const a = visiblePidOrder.indexOf(anchorPid);
+    const b = visiblePidOrder.indexOf(pid);
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    selectedPids = new Set(visiblePidOrder.slice(lo, hi + 1));
+  } else if (e.ctrlKey || e.metaKey) {
+    // Ctrl+click: toggle a single row in the selection.
+    if (selectedPids.has(pid)) selectedPids.delete(pid);
+    else selectedPids.add(pid);
+    anchorPid = pid;
+  } else {
+    selectedPids = new Set([pid]);
+    anchorPid = pid;
+  }
   updateKillButton();
   renderProcesses();
 }
 
-function killProcess() {
-  if (!selectedPid) return;
-  const proc = processes.find((p) => p.pid === selectedPid);
-  if (!proc) return;
-  if (!confirm(`Kill process "${proc.name}" (PID: ${proc.pid})?`)) return;
-  const pid = Number(selectedPid);
-  if (!Number.isFinite(pid) || pid <= 0) {
-    alert("Invalid PID selected.");
+function selectOnly(pid) {
+  selectedPids = new Set([pid]);
+  anchorPid = pid;
+  updateKillButton();
+  renderProcesses();
+}
+
+function selectAllVisible() {
+  // Selects every visible row (search/hide-safe filters already applied to
+  // visiblePidOrder) except the agent and BSOD-critical system processes.
+  const pids = [];
+  for (const pid of visiblePidOrder) {
+    const proc = processMap.get(pid);
+    if (!proc || proc.self) continue;
+    const name = typeof proc.name === "string" ? proc.name.toLowerCase() : "";
+    if (CRITICAL_NEVER_KILL.has(name)) continue;
+    pids.push(pid);
+  }
+  selectedPids = new Set(pids);
+  anchorPid = pids.length ? pids[pids.length - 1] : null;
+  updateKillButton();
+  renderProcesses();
+  updateStatus("ok", `Selected ${pids.length} process${pids.length === 1 ? "" : "es"}`);
+}
+
+/* ── sequential kill engine with per-process results ── */
+const KILL_RESULT_TTL_MS = 20000;
+const KILL_STEP_TIMEOUT_MS = 10000;
+const killResults = new Map(); // pid -> { state: "pending"|"done", category, text, expiresAt }
+let killQueue = [];
+let killInFlight = null; // { pid, timeout }
+let killBatchStats = null; // { killed, denied, notfound, failed, timeout, offline }
+let summaryEl = document.getElementById("proc2-summary");
+let summaryTimer = null;
+
+/* ── batch kill progress bar (Win98 segmented blocks + pac-man) ── */
+const KILL_BAR_AUTOHIDE_MS = 20000;
+const killBar = {
+  active: false,
+  total: 0,
+  done: 0,
+  ok: 0,
+  fail: 0,
+  blocks: new Map(), // pid -> block element
+  currentPid: null,
+  hideTimer: null,
+};
+
+function killBarReset() {
+  killBar.total = 0;
+  killBar.done = 0;
+  killBar.ok = 0;
+  killBar.fail = 0;
+  killBar.currentPid = null;
+  killBar.blocks.clear();
+  if (killBarBlocksEl) killBarBlocksEl.innerHTML = "";
+}
+
+function killBarRender(currentProc) {
+  if (!killBar.active || !killBarTextEl || !killBarPacEl) return;
+  const parts = [`${killBar.done}/${killBar.total}`, `<span class="ok">✔ ${killBar.ok}</span>`];
+  if (killBar.fail > 0) parts.push(`<span class="bad">⛔ ${killBar.fail}</span>`);
+  if (currentProc) parts.push(`killing ${escapeHtml(currentProc.name)} (PID ${currentProc.pid})…`);
+  killBarTextEl.innerHTML = parts.join(" · ");
+  const pct = killBar.total ? (killBar.done / killBar.total) * 100 : 0;
+  killBarPacEl.style.left = pct <= 0 ? "0px" : pct >= 100 ? "calc(100% - 14px)" : `calc(${pct}% - 7px)`;
+}
+
+function killBarBegin(pids) {
+  if (!killBarEl || !killBarBlocksEl) return;
+  if (killBar.hideTimer) {
+    clearTimeout(killBar.hideTimer);
+    killBar.hideTimer = null;
+  }
+  if (!killBar.active) {
+    killBarReset();
+    killBar.active = true;
+    killBarEl.hidden = false;
+    if (killBarPacEl) killBarPacEl.classList.remove("kb-pac-idle");
+  }
+  for (const pid of pids) {
+    if (killBar.blocks.has(pid)) continue;
+    const block = document.createElement("div");
+    block.className = "kb-b";
+    block.title = `PID ${pid} — queued`;
+    killBarBlocksEl.appendChild(block);
+    killBar.blocks.set(pid, block);
+    killBar.total += 1;
+  }
+  killBarRender();
+}
+
+function killBarMarkCurrent(pid) {
+  if (!killBar.active) return;
+  if (killBar.currentPid != null && killBar.blocks.has(killBar.currentPid)) {
+    killBar.blocks.get(killBar.currentPid).classList.remove("kb-cur");
+  }
+  killBar.currentPid = pid;
+  const block = killBar.blocks.get(pid);
+  if (block) {
+    block.classList.add("kb-cur");
+    block.title = `PID ${pid} — killing...`;
+  }
+  const proc = processMap.get(pid);
+  killBarRender(proc ? { name: proc.name, pid } : null);
+}
+
+function killBarResolve(pid, ok) {
+  if (!killBar.active) return;
+  const block = killBar.blocks.get(pid);
+  if (!block) return;
+  block.classList.remove("kb-cur");
+  block.classList.add(ok ? "kb-ok" : "kb-fail");
+  block.title = `PID ${pid} — ${ok ? "killed" : "failed"}`;
+  killBar.done += 1;
+  if (ok) killBar.ok += 1;
+  else killBar.fail += 1;
+  if (killBar.currentPid === pid) killBar.currentPid = null;
+  killBarRender();
+}
+
+function killBarFinish() {
+  if (!killBar.active) return;
+  if (killBarPacEl) killBarPacEl.classList.add("kb-pac-idle");
+  killBarRender();
+  killBar.hideTimer = setTimeout(killBarHide, KILL_BAR_AUTOHIDE_MS);
+}
+
+function killBarHide() {
+  if (killBar.hideTimer) {
+    clearTimeout(killBar.hideTimer);
+    killBar.hideTimer = null;
+  }
+  killBar.active = false;
+  if (killBarEl) killBarEl.hidden = true;
+}
+
+function pruneKillResults() {
+  const now = Date.now();
+  for (const [pid, res] of killResults) {
+    if (res.expiresAt && res.expiresAt <= now) killResults.delete(pid);
+    else if (res.state !== "pending" && !processMap.has(pid)) killResults.delete(pid);
+  }
+}
+
+function queueKills(pids) {
+  // Hard guard: the agent (proc.self) maintains the connection and can never
+  // be killed from the UI, regardless of the kill path taken.
+  const valid = [...new Set(pids)].filter((pid) => {
+    if (!Number.isFinite(pid) || pid <= 0) return false;
+    const proc = processMap.get(pid);
+    return !proc || !proc.self;
+  });
+  if (!valid.length) return;
+  if (!killBatchStats) {
+    killBatchStats = { killed: 0, denied: 0, notfound: 0, failed: 0, timeout: 0, offline: 0 };
+  }
+  for (const pid of valid) {
+    killResults.set(pid, { state: "pending", category: "", text: "Kill queued...", expiresAt: 0 });
+    killQueue.push(pid);
+  }
+  killBarBegin(valid);
+  updateStatus("ok", `Killing ${valid.length} process${valid.length > 1 ? "es" : ""}...`);
+  renderProcesses();
+  pumpKillQueue();
+}
+
+function pumpKillQueue() {
+  if (killInFlight) return;
+  if (killQueue.length === 0) {
+    finalizeKillBatch();
     return;
   }
+  const pid = killQueue.shift();
+  if (!processMap.has(pid)) {
+    recordKillResult(pid, false, "notfound", "Process already exited");
+    pumpKillQueue();
+    return;
+  }
+  killInFlight = {
+    pid,
+    timeout: setTimeout(() => {
+      if (!killInFlight || killInFlight.pid !== pid) return;
+      killInFlight = null;
+      recordKillResult(pid, false, "timeout", "No response from agent (timeout)");
+      pumpKillQueue();
+    }, KILL_STEP_TIMEOUT_MS),
+  };
+  killResults.set(pid, { state: "pending", category: "", text: "Killing...", expiresAt: 0 });
+  killBarMarkCurrent(pid);
+  renderProcesses();
   send({ type: "process_kill", pid });
-  updateStatus("ok", "Killing process...");
+}
+
+function classifyKillFailure(message) {
+  const m = String(message || "");
+  if (/access is denied|access denied|privilege|elevation|permission/i.test(m)) {
+    return { category: "denied", text: "Access denied · admin/SYSTEM required" };
+  }
+  if (/parameter is incorrect|not found|no such process|does not exist|invalid pid/i.test(m)) {
+    return { category: "notfound", text: m || "Process not found" };
+  }
+  if (/timeout|no response/i.test(m)) return { category: "timeout", text: m };
+  return { category: "failed", text: m || "Unknown error" };
+}
+
+function recordKillResult(pid, ok, category, text) {
+  let cat = category;
+  let label = text;
+  if (ok) {
+    cat = "killed";
+    label = "Killed";
+  }
+  killResults.set(pid, { state: "done", category: cat, text: label, expiresAt: Date.now() + KILL_RESULT_TTL_MS });
+  if (killBatchStats && Object.prototype.hasOwnProperty.call(killBatchStats, cat)) {
+    killBatchStats[cat] += 1;
+  } else if (killBatchStats) {
+    killBatchStats.failed += 1;
+  }
+  killBarResolve(pid, ok);
+  renderProcesses();
 }
 
 function handleCommandResult(msg) {
-  if (!msg.ok) {
-    alert(`Operation failed: ${msg.message || "Unknown error"}`);
-    updateStatus("ok", "Connected");
-  } else {
-    setTimeout(() => requestProcessList(), 500);
+  const pid = Number(msg?.pid);
+  const action = typeof msg?.action === "string" ? msg.action : "kill";
+  if (action !== "kill") {
+    updateStatus(
+      msg.ok ? "ok" : "err",
+      msg.ok ? `${action} OK (PID ${pid})` : `${action} failed (PID ${pid}): ${msg.message || "error"}`,
+    );
+    setTimeout(() => requestProcessList(), 400);
+    return;
   }
+  // Only attribute results to our own in-flight kill; anything else is foreign/stale.
+  if (!killInFlight || killInFlight.pid !== pid) return;
+  clearTimeout(killInFlight.timeout);
+  killInFlight = null;
+  if (msg.ok) {
+    recordKillResult(pid, true);
+  } else {
+    const { category, text } = classifyKillFailure(msg.message);
+    recordKillResult(pid, false, category, text);
+  }
+  setTimeout(() => requestProcessList(), 500);
+  pumpKillQueue();
+}
+
+function finalizeKillBatch() {
+  if (!killBatchStats) return;
+  const s = killBatchStats;
+  killBatchStats = null;
+  const total = s.killed + s.denied + s.notfound + s.failed + s.timeout + s.offline;
+  killBarFinish();
+  if (!total) return;
+  const parts = [];
+  if (s.killed) parts.push(`<span class="ok">✔ killed ${s.killed}</span>`);
+  if (s.denied) parts.push(`<span class="bad">⛔ access denied ${s.denied}</span>`);
+  if (s.notfound) parts.push(`<span class="warn">? not found ${s.notfound}</span>`);
+  if (s.failed) parts.push(`<span class="bad">✖ failed ${s.failed}</span>`);
+  if (s.timeout) parts.push(`<span class="warn">⏱ timeout ${s.timeout}</span>`);
+  if (s.offline) parts.push(`<span class="bad">⚡ offline ${s.offline}</span>`);
+  showKillSummary(parts.join(" · "));
+  updateStatus(s.failed || s.denied || s.timeout || s.offline ? "err" : "ok", "Kill batch complete");
+}
+
+function showKillSummary(html) {
+  if (!summaryEl) summaryEl = document.getElementById("proc2-summary");
+  if (!summaryEl) return;
+  summaryEl.innerHTML = `<i class="fa-solid fa-skull-crossbones"></i>&nbsp;${html}`;
+  summaryEl.hidden = false;
+  if (summaryTimer) clearTimeout(summaryTimer);
+  summaryTimer = setTimeout(() => {
+    summaryEl.hidden = true;
+  }, 8000);
+}
+
+function failKillQueue(category, text) {
+  if (killInFlight) {
+    clearTimeout(killInFlight.timeout);
+    const pid = killInFlight.pid;
+    killInFlight = null;
+    recordKillResult(pid, false, category, text);
+  }
+  while (killQueue.length) {
+    recordKillResult(killQueue.shift(), false, category, text);
+  }
+  finalizeKillBatch();
+}
+
+function killSelected() {
+  queueKills([...selectedPids]);
 }
 
 function setSortField(field) {
@@ -469,6 +821,11 @@ function createContextMenu() {
 function showContextMenu(x, y, pid) {
   if (!contextMenuEl) contextMenuEl = createContextMenu();
   contextMenuEl.dataset.pid = pid;
+  const n = selectedPids.size;
+  const killItem = contextMenuEl.querySelector('[data-action="kill"]');
+  if (killItem) {
+    killItem.innerHTML = `<i class="fa-solid fa-skull-crossbones" style="color:#f87171"></i> Kill${n > 1 ? ` (${n})` : ""}`;
+  }
   contextMenuEl.classList.remove("hidden");
 
   const rect = contextMenuEl.getBoundingClientRect();
@@ -512,15 +869,14 @@ document.addEventListener("click", (e) => {
       send({ type: "process_resume", pid });
       updateStatus("ok", "Resuming process...");
       break;
-    case "kill":
-      if (!proc) break;
-      if (!confirm(`Kill process "${proc.name}" (PID: ${pid})?`)) break;
-      send({ type: "process_kill", pid });
-      updateStatus("ok", "Killing process...");
+    case "kill": {
+      // No confirmation: kill the whole selection immediately, one by one.
+      const targets = selectedPids.size ? [...selectedPids] : [pid];
+      queueKills(targets);
       break;
+    }
     case "kill-tree":
       if (!proc) break;
-      if (!confirm(`Kill process "${proc.name}" (PID: ${pid}) and all child processes?`)) break;
       killProcessTree(pid);
       break;
     case "copy-pid":
@@ -547,10 +903,7 @@ function killProcessTree(pid) {
   }
   collectChildren(pid);
   toKill.push(pid);
-  for (const p of toKill) {
-    send({ type: "process_kill", pid: p });
-  }
-  updateStatus("ok", `Killing ${toKill.length} processes...`);
+  queueKills(toKill);
 }
 
 /* ── icons ────────────────────────────────────────────── */
@@ -611,11 +964,24 @@ function applyProcIconToDom(key, entry) {
 
 /* ── wiring ───────────────────────────────────────────── */
 if (refreshBtn) refreshBtn.onclick = () => requestProcessList();
-if (killBtn) killBtn.onclick = () => killProcess();
+if (killBtn) killBtn.onclick = () => killSelected();
+if (selectAllBtn) selectAllBtn.onclick = () => selectAllVisible();
+if (killBarCloseBtn) killBarCloseBtn.onclick = () => killBarHide();
 
 if (searchInput) {
   searchInput.oninput = (e) => {
     searchTerm = e.target.value;
+    renderProcesses();
+  };
+}
+
+if (hideSafeBtn) {
+  hideSafeBtn.onclick = () => {
+    hideKnownSafe = !hideKnownSafe;
+    hideSafeBtn.classList.toggle("active", hideKnownSafe);
+    hideSafeBtn.title = hideKnownSafe
+      ? "Showing only unknown/suspicious processes — click to show all"
+      : "Hide known-safe processes (show only unknown/suspicious; the agent is never shown)";
     renderProcesses();
   };
 }

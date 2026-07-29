@@ -24,7 +24,7 @@ This fork tracks [vxaboveground/Overlord](https://github.com/vxaboveground/Overl
 - Overlord 2.0 rebrand: retro MS-DOS login with typewriter boot, JetBrains Mono chrome
 
 **Tools & pages**
-- **Process Manager 2.0** — compact process manager built for Dashboard 2.0 panes (tree, icons, kill/suspend context menu), original untouched
+- **Process Manager 2.0** — compact process manager built for Dashboard 2.0 panes (tree, icons, kill/suspend context menu, hide-known-safe filter that shows only unknown/suspicious executables — the agent is always protected, Select All with BSOD-safe exclusions, Win98-style batch kill progress bar with pac-man), original untouched
 - **Side action panel** on viewer/remote-desktop pages with pinnable shortcuts
 - **Win98 Classic File Explorer** alongside the modern file browser
 - **Soundboard** (+ dark variant)
