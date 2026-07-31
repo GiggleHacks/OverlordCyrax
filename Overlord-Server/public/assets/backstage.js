@@ -405,11 +405,17 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     stallRecoveryInProgress = false;
   }
 
+  function discardPlaybackBuffers() {
+    pendingFrame = null;
+    destroyVideoDecoder();
+  }
+
   function stopBackstageStream({ userInitiated = false } = {}) {
     if (userInitiated) {
       desiredStreaming = false;
       clearStallRecovery();
       stallRestartCount = 0;
+      discardPlaybackBuffers();
     }
     lastFrameAt = 0;
     sendCmd("backstage_stop", {});
@@ -1278,6 +1284,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     try {
       videoDecoder = new VideoDecoder({
         output: (frame) => {
+          if (!desiredStreaming) {
+            try { frame.close(); } catch {}
+            return;
+          }
           const width = frame.displayWidth || frame.codedWidth || canvas.width;
           const height = frame.displayHeight || frame.codedHeight || canvas.height;
           if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
@@ -1443,6 +1453,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   async function processFrameBuffer(buf) {
+    if (!desiredStreaming) return;
     const fps = buf[5];
     const format = buf[6];
 
@@ -1544,13 +1555,13 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function flushPendingFrame() {
-    if (frameDecodeBusy || !pendingFrame) return;
+    if (!desiredStreaming || frameDecodeBusy || !pendingFrame) return;
     const next = pendingFrame;
     pendingFrame = null;
     frameDecodeBusy = true;
     processFrameBuffer(next).finally(() => {
       frameDecodeBusy = false;
-      if (pendingFrame) flushPendingFrame();
+      if (desiredStreaming && pendingFrame) flushPendingFrame();
     });
   }
 
@@ -1558,7 +1569,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     if (ev.data instanceof ArrayBuffer) {
       const buf = new Uint8Array(ev.data);
       if (isFramePacket(buf)) {
+        if (!desiredStreaming) return;
         markFrameReceived();
+        // Keep only the newest encoded packet while decode/render catches up.
         pendingFrame = buf;
         flushPendingFrame();
         return;

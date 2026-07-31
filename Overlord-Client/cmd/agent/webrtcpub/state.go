@@ -30,7 +30,8 @@ type writerEntry struct {
 	audio AudioWriter
 }
 
-const maxPendingVideoFrames = 6
+// maxPendingVideoFrames is 1 so the WebRTC path stays live: never drain a backlog.
+const maxPendingVideoFrames = 1
 
 type queuedVideoFrame struct {
 	data []byte
@@ -68,11 +69,13 @@ func (w *latestVideoWriter) enqueue(frame []byte, dur time.Duration) {
 	}
 
 	requestKeyframe := false
+	// Prefer the newest frame: replace any unsent pending packet instead of FIFO backlog.
 	if len(w.pending) >= maxPendingVideoFrames {
 		w.pending = nil
-		w.needsKeyframe = true
-		requestKeyframe = true
 		if !isKey {
+			// Dropping a delta breaks the chain; wait for the next IDR.
+			w.needsKeyframe = true
+			requestKeyframe = true
 			w.mu.Unlock()
 			RequestKeyframe(w.kind)
 			return

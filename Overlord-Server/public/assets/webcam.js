@@ -90,7 +90,10 @@ const WEBCAM_JS_VERSION = "1.3.0";
   let devicesLoaded = false;
   let selectedDeviceIndex = 0;
   let hasRenderedFrame = false;
-  let drawPending = false;
+  let frameDecodeBusy = false;
+  let pendingFrame = null;
+  let pendingDecodedVideoFrame = null;
+  let decodedVideoPresentationFrame = 0;
   let clientOs = "";
   let clientIsAdmin = false;
   let firewallWarningAcked = false;
@@ -594,34 +597,75 @@ const WEBCAM_JS_VERSION = "1.3.0";
     videoDecoder = null;
   }
 
+  function discardPlaybackBuffers() {
+    pendingFrame = null;
+    if (decodedVideoPresentationFrame) {
+      cancelAnimationFrame(decodedVideoPresentationFrame);
+      decodedVideoPresentationFrame = 0;
+    }
+    if (pendingDecodedVideoFrame) {
+      try { pendingDecodedVideoFrame.frame.close(); } catch {}
+      pendingDecodedVideoFrame = null;
+    }
+    destroyVideoDecoder();
+  }
+
+  function presentLatestDecodedVideoFrame() {
+    decodedVideoPresentationFrame = 0;
+    const pending = pendingDecodedVideoFrame;
+    pendingDecodedVideoFrame = null;
+    if (!pending) return;
+    if (!desiredStreaming) {
+      try { pending.frame.close(); } catch {}
+      return;
+    }
+    const { frame, width, height } = pending;
+    if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
+      canvas.width = width;
+      canvas.height = height;
+      applyMediaAspect(width, height);
+    }
+    try {
+      ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+      hasRenderedFrame = true;
+      lastRenderedFrameAt = performance.now();
+      startRetryCount = 0;
+      stallRestartCount = 0;
+      h264ErrorCount = 0;
+      clearStallRecovery();
+      if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
+      updateViewerFps();
+      setStreamState("streaming", "Streaming");
+    } catch (err) {
+      console.warn("webcam h264 draw failed", err);
+    } finally {
+      try { frame.close(); } catch {}
+    }
+  }
+
+  function queueDecodedVideoFrame(frame) {
+    if (!desiredStreaming) {
+      try { frame.close(); } catch {}
+      return;
+    }
+    const width = frame.displayWidth || frame.codedWidth || canvas.width;
+    const height = frame.displayHeight || frame.codedHeight || canvas.height;
+    if (pendingDecodedVideoFrame) {
+      try { pendingDecodedVideoFrame.frame.close(); } catch {}
+    }
+    pendingDecodedVideoFrame = { frame, width, height };
+    if (!decodedVideoPresentationFrame) {
+      decodedVideoPresentationFrame = requestAnimationFrame(presentLatestDecodedVideoFrame);
+    }
+  }
+
   function ensureVideoDecoder() {
     if (videoDecoder) return true;
     if (typeof VideoDecoder !== "function") return false;
     try {
       videoDecoder = new VideoDecoder({
         output: (frame) => {
-          hasRenderedFrame = true;
-          lastRenderedFrameAt = performance.now();
-          startRetryCount = 0;
-          if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
-          const width = frame.displayWidth || frame.codedWidth || canvas.width;
-          const height = frame.displayHeight || frame.codedHeight || canvas.height;
-          if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
-            canvas.width = width;
-            canvas.height = height;
-            applyMediaAspect(width, height);
-          }
-          try {
-            ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
-            h264ErrorCount = 0;
-            stallRestartCount = 0;
-            clearStallRecovery();
-            if (desiredStreaming) setStreamState("streaming", "Streaming");
-          } catch (err) {
-            console.warn("webcam h264 draw failed", err);
-          } finally {
-            frame.close();
-          }
+          queueDecodedVideoFrame(frame);
         },
         error: (err) => {
           console.warn("webcam h264 decoder error", err);
@@ -836,45 +880,40 @@ const WEBCAM_JS_VERSION = "1.3.0";
   }
 
   async function drawJpeg(bytes) {
-    noteFrameReceived();
-    if (drawPending) return;
-    drawPending = true;
-    try {
-      const blob = new Blob([bytes], { type: "image/jpeg" });
-      const bitmap = await createImageBitmap(blob);
-      if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
-        applyMediaAspect(bitmap.width, bitmap.height);
-      }
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      hasRenderedFrame = true;
-      lastRenderedFrameAt = performance.now();
-      startRetryCount = 0;
-      stallRestartCount = 0;
-      clearStallRecovery();
-      if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
+    if (!desiredStreaming) return;
+    const blob = new Blob([bytes], { type: "image/jpeg" });
+    const bitmap = await createImageBitmap(blob);
+    if (!desiredStreaming) {
       bitmap.close();
-      updateViewerFps();
-      if (desiredStreaming) setStreamState("streaming", "Streaming");
-    } finally {
-      drawPending = false;
+      return;
     }
+    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      applyMediaAspect(bitmap.width, bitmap.height);
+    }
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    hasRenderedFrame = true;
+    lastRenderedFrameAt = performance.now();
+    startRetryCount = 0;
+    stallRestartCount = 0;
+    clearStallRecovery();
+    if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
+    bitmap.close();
+    updateViewerFps();
+    setStreamState("streaming", "Streaming");
   }
 
-  function handleFrame(data) {
-    const bytes = new Uint8Array(data);
+  async function processFrameBuffer(data) {
+    if (!desiredStreaming) return;
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
     if (bytes.length < 8) return;
     if (bytes[0] !== 0x46 || bytes[1] !== 0x52 || bytes[2] !== 0x4d) return;
     const format = bytes[6];
     const payload = bytes.slice(8);
     if (!payload.length) return;
-    noteFrameReceived();
     if (format === 1) {
-      drawJpeg(payload).catch((err) => {
-        console.warn("webcam draw failed", err, "payloadBytes=", payload.length);
-        // Transient decode glitches under multi-tile load — do not kill the tile.
-      });
+      await drawJpeg(payload);
       return;
     }
     if (format === 4) {
@@ -888,7 +927,7 @@ const WEBCAM_JS_VERSION = "1.3.0";
         return;
       }
       if (isVideoDecoderBackpressured(videoDecoder, 2)) {
-        fallbackToJpeg("decoder_backpressure");
+        // Drop this packet; pendingFrame coalesce already keeps only the newest inbound frame.
         return;
       }
       try {
@@ -901,7 +940,6 @@ const WEBCAM_JS_VERSION = "1.3.0";
         const configuredFps = arrayTile ? 15 : Math.max(1, Number(fpsInput?.value) || 30);
         h264TimestampUs += Math.floor(1_000_000 / configuredFps);
         videoDecoder.decode(chunk);
-        updateViewerFps();
       } catch (err) {
         console.warn("webcam h264 decode failed", err, "payloadBytes=", payload.length);
         h264ErrorCount += 1;
@@ -911,6 +949,32 @@ const WEBCAM_JS_VERSION = "1.3.0";
       return;
     }
     console.warn("webcam unsupported frame format", format, "payloadBytes=", payload.length);
+  }
+
+  function flushPendingFrame() {
+    if (!desiredStreaming || frameDecodeBusy || !pendingFrame) return;
+    const next = pendingFrame;
+    pendingFrame = null;
+    frameDecodeBusy = true;
+    processFrameBuffer(next)
+      .catch((err) => {
+        console.warn("webcam draw failed", err);
+      })
+      .finally(() => {
+        frameDecodeBusy = false;
+        if (desiredStreaming && pendingFrame) flushPendingFrame();
+      });
+  }
+
+  function handleFrame(data) {
+    if (!desiredStreaming) return;
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    if (bytes.length < 8) return;
+    if (bytes[0] !== 0x46 || bytes[1] !== 0x52 || bytes[2] !== 0x4d) return;
+    noteFrameReceived();
+    // Keep only the newest encoded packet while decode/render catches up.
+    pendingFrame = bytes;
+    flushPendingFrame();
   }
 
   function send(type, payload = {}) {
@@ -1133,6 +1197,7 @@ const WEBCAM_JS_VERSION = "1.3.0";
     startRetryCount = 0;
     if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
     if (renderWatchTimer) { clearInterval(renderWatchTimer); renderWatchTimer = null; }
+    discardPlaybackBuffers();
     send("webcam_stop");
     stopAllWebrtc();
     disconnectAudio();
@@ -1141,11 +1206,12 @@ const WEBCAM_JS_VERSION = "1.3.0";
 
   function stopOnExit() {
     sharedSettingsSaver.saveNow();
+    desiredStreaming = false;
+    discardPlaybackBuffers();
     if (ws && ws.readyState === WebSocket.OPEN) {
       send("webcam_stop");
     }
     disconnectAudio();
-    destroyVideoDecoder();
     if (renderWatchTimer) { clearInterval(renderWatchTimer); renderWatchTimer = null; }
   }
   window.addEventListener("beforeunload", stopOnExit);

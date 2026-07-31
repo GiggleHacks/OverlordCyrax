@@ -56,7 +56,8 @@ func TestWriteH264DoesNotBlockAndRequestsRecoveryAfterDroppingDelta(t *testing.T
 	}
 
 	started := time.Now()
-	for frame := 2; frame <= maxPendingVideoFrames+2; frame++ {
+	// Overflow the single pending slot with deltas while the first write is blocked.
+	for frame := 2; frame <= maxPendingVideoFrames+3; frame++ {
 		_ = WriteH264(kind, annexBDelta(byte(frame)), time.Millisecond)
 	}
 	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
@@ -77,11 +78,62 @@ func TestWriteH264DoesNotBlockAndRequestsRecoveryAfterDroppingDelta(t *testing.T
 			if frames[0][len(frames[0])-1] != 1 || !h264util.IsIDR(frames[1]) {
 				t.Fatalf("expected first frame followed by recovery IDR, got %v", frames)
 			}
+			// Latest-only: never deliver a multi-frame delta backlog.
+			if len(frames) > 2 {
+				t.Fatalf("expected at most first frame + recovery IDR, got %d frames", len(frames))
+			}
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("recovery keyframe was not delivered")
+}
+
+func TestWriteH264KeepsOnlyLatestPendingKeyframe(t *testing.T) {
+	kind := Kind("latest-only-test")
+	id := "slow-writer-key"
+	writer := &blockingVideoWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	registerVideoWriter(kind, id, writer)
+	defer unregisterWriter(kind, id)
+	_ = ConsumeKeyframeRequest(kind)
+
+	if err := WriteH264(kind, annexBKey(1), time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-writer.started:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not receive first frame")
+	}
+
+	// While first key is in-flight, replace pending with newer keys.
+	_ = WriteH264(kind, annexBKey(2), time.Millisecond)
+	_ = WriteH264(kind, annexBKey(3), time.Millisecond)
+	close(writer.release)
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		writer.mu.Lock()
+		frames := append([][]byte(nil), writer.frames...)
+		writer.mu.Unlock()
+		if len(frames) >= 2 {
+			if frames[0][len(frames[0])-1] != 1 {
+				t.Fatalf("expected first in-flight key, got %v", frames[0])
+			}
+			if frames[1][len(frames[1])-1] != 3 {
+				t.Fatalf("expected latest pending key only, got %v", frames)
+			}
+			if len(frames) != 2 {
+				t.Fatalf("expected exactly 2 frames (in-flight + latest), got %d", len(frames))
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("latest pending keyframe was not delivered")
 }
 
 func TestKeyframeRequestsAreIsolatedByStreamKind(t *testing.T) {

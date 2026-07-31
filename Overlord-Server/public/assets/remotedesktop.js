@@ -1328,23 +1328,6 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     }, 3000);
   }
 
-  function stopDesktopStream({ userInitiated = false } = {}) {
-    if (userInitiated) {
-      desiredStreaming = false;
-      clearStallRecovery();
-      stallRestartCount = 0;
-    }
-    lastFrameAt = 0;
-    if (isRecording()) stopRecording();
-    disablePrivacyIfActive();
-    sendCmd("desktop_stop", {});
-    disconnectAudio();
-    stopAllWebrtc();
-    if (userInitiated) {
-      setStreamState("idle", "Stopped");
-    }
-  }
-
   function beginStallRecovery() {
     if (stallRecoveryInProgress || !desiredStreaming) return;
     if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
@@ -2147,9 +2130,19 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     }
   }
 
+  function discardPlaybackBuffers() {
+    pendingFrame = null;
+    destroyVideoDecoder();
+  }
+
   function stopDesktopStream({ userInitiated = true } = {}) {
     if (isRecording()) stopRecording();
-    if (userInitiated) desiredStreaming = false;
+    if (userInitiated) {
+      desiredStreaming = false;
+      clearStallRecovery();
+      stallRestartCount = 0;
+      discardPlaybackBuffers();
+    }
     adaptiveProfileRunning = false;
     adaptiveQuality.stop();
     lastFrameAt = 0;
@@ -2584,6 +2577,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     const pending = pendingDecodedVideoFrame;
     pendingDecodedVideoFrame = null;
     if (!pending) return;
+    if (!desiredStreaming) {
+      try { pending.frame.close(); } catch {}
+      return;
+    }
 
     const { frame, timing, width, height } = pending;
     if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
@@ -2608,6 +2605,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
   }
 
   function queueDecodedVideoFrame(frame, timing) {
+    if (!desiredStreaming) {
+      try { frame.close(); } catch {}
+      return;
+    }
     const width = frame.displayWidth || frame.codedWidth || frameWidth;
     const height = frame.displayHeight || frame.codedHeight || frameHeight;
     if (pendingDecodedVideoFrame) {
@@ -2894,6 +2895,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
   }
 
   async function processFrameBuffer(buf, receivedAt = performance.now()) {
+    if (!desiredStreaming) return;
     const decodeStartedAt = performance.now();
     const fps = buf[5];
     const format = buf[6];
@@ -3111,7 +3113,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
   }
 
   function flushPendingFrame() {
-    if (frameDecodeBusy || !pendingFrame) {
+    if (!desiredStreaming || frameDecodeBusy || !pendingFrame) {
       return;
     }
     const next = pendingFrame;
@@ -3119,7 +3121,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     frameDecodeBusy = true;
     processFrameBuffer(next.buf, next.receivedAt).finally(() => {
       frameDecodeBusy = false;
-      if (pendingFrame) {
+      if (desiredStreaming && pendingFrame) {
         flushPendingFrame();
       }
     });
@@ -3129,6 +3131,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     if (ev.data instanceof ArrayBuffer) {
       const buf = new Uint8Array(ev.data);
       if (isFramePacket(buf)) {
+        if (!desiredStreaming) return;
         markFrameReceived();
         recordWsFrameBytes(buf.byteLength);
         // Coalesce bursty arrivals so the renderer catches up to the newest frame.
