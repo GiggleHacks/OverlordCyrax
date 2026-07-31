@@ -182,6 +182,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
   let pendingFrame = null;
   let videoDecoder = null;
   let videoDecoderConfigKey = "";
+  let pendingDecodedVideoFrame = null;
+  let decodedVideoPresentationFrame = 0;
   const disabledDecoderCodecs = new Set();
   let h264StreamCodec = "";
   let canvasDecodePressure = false;
@@ -196,6 +198,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
   let h264KeyframeErrorStreak = 0;
   let h264RecoveryAttempts = 0;
   let h264LastDecodeWarnAt = 0;
+  let h264WaitingForKeyframe = true;
   let h264AwaitingKeyframe = false;
   let h264LastKeyframeRequestAt = 0;
   const H264_LOW_FPS_THRESHOLD = 6;
@@ -206,9 +209,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
   const H264_MAX_RECOVERY_ATTEMPTS = 1;
   const H264_DECODE_WARN_THROTTLE_MS = 2000;
   const inputBackpressureBytes = 256 * 1024;
-  const VIEWER_FRAME_GAP_KEYFRAME_MS = 500;
   const VIEWER_FRAME_GAP_KEYFRAME_THROTTLE_MS = 1000;
-  let lastViewerFrameGapKeyframeAt = 0;
+  let lastViewerKeyframeRequestAt = 0;
   const diagnostics = {
     agent: null,
     network: null,
@@ -271,6 +273,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     h264FirstFrameAt = 0;
     h264FramesSeen = 0;
     h264KeyframeErrorStreak = 0;
+    h264WaitingForKeyframe = true;
     h264AwaitingKeyframe = false;
   }
 
@@ -525,8 +528,6 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
       smoothingSlider.value = String(settings.smoothing);
       smoothingPct = Number(smoothingSlider.value) || 0;
     }
-    if (mouseCtrl && typeof settings.mouse === "boolean") mouseCtrl.checked = settings.mouse;
-    if (kbdCtrl && typeof settings.keyboard === "boolean") kbdCtrl.checked = settings.keyboard;
     if (cursorCtrl && typeof settings.cursor === "boolean") cursorCtrl.checked = settings.cursor;
     if (hideLocalCursorCtrl && typeof settings.hideLocalCursor === "boolean") hideLocalCursorCtrl.checked = settings.hideLocalCursor;
     if (duplicationCtrl && typeof settings.duplication === "boolean") duplicationCtrl.checked = settings.duplication;
@@ -574,6 +575,11 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
   }
 
   applySharedSettings(await loadSharedUiSettings("remote_desktop"));
+  // Interactive input is intentionally session-scoped: opening any client's
+  // page must require the operator to opt in again, regardless of saved UI
+  // settings. Cursor capture remains a separate persisted preference.
+  if (mouseCtrl) mouseCtrl.checked = false;
+  if (kbdCtrl) kbdCtrl.checked = false;
   const sharedSettingsSaver = createSharedUiSettingsSaver("remote_desktop", readSharedSettings);
 
   if (codecH264) {
@@ -1182,6 +1188,15 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     } else if ((finite(media.lossPercent) ?? 0) > 3 || (finite(network.rttMs) ?? 0) > 150 || (finite(media.jitterMs) ?? 0) > 35) {
       summary = "Network conditions are causing delay";
       severity = "bad";
+    } else if (
+      mode === "off" &&
+      fps != null &&
+      viewerRate != null &&
+      viewerRate < fps * 0.8 &&
+      diagnostics.coalescedFrames > 0
+    ) {
+      summary = `Display is presenting ${Math.round(viewerRate)} of ${Math.round(fps)} decoded FPS`;
+      severity = "warn";
     } else if ((queue ?? 0) > 2 || (renderMs != null && renderMs > frameBudget)) {
       summary = "Viewer render queue is backing up";
       severity = "warn";
@@ -2079,7 +2094,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     pushBitrate();
     desiredStreaming = true;
     lastFrameAt = 0;
-    lastViewerFrameGapKeyframeAt = 0;
+    lastViewerKeyframeRequestAt = 0;
+    diagnostics.coalescedFrames = 0;
     firstFrameLogged = false;
     resetH264SessionState();
     setStreamState("starting", "Starting stream");
@@ -2436,7 +2452,6 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
 
   function markFrameReceived() {
     const now = performance.now();
-    const frameGapMs = lastFrameAt ? now - lastFrameAt : 0;
     lastFrameAt = now;
     clearOfflineTimer();
     clearStallRecovery();
@@ -2510,6 +2525,14 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
 
   function destroyVideoDecoder() {
     updateCanvasDecodePressure(true);
+    if (decodedVideoPresentationFrame) {
+      cancelAnimationFrame(decodedVideoPresentationFrame);
+      decodedVideoPresentationFrame = 0;
+    }
+    if (pendingDecodedVideoFrame) {
+      pendingDecodedVideoFrame.frame.close();
+      pendingDecodedVideoFrame = null;
+    }
     if (videoDecoder) {
       try {
         videoDecoder.close();
@@ -2520,6 +2543,47 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     videoDecoder = null;
     videoDecoderConfigKey = "";
     resetH264RuntimeState();
+  }
+
+  function presentLatestDecodedVideoFrame() {
+    decodedVideoPresentationFrame = 0;
+    const pending = pendingDecodedVideoFrame;
+    pendingDecodedVideoFrame = null;
+    if (!pending) return;
+
+    const { frame, timing, width, height } = pending;
+    if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
+      canvas.width = width;
+      canvas.height = height;
+      frameWidth = width;
+      frameHeight = height;
+    }
+    try {
+      ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+    } finally {
+      frame.close();
+    }
+
+    const renderedAt = performance.now();
+    if (timing) {
+      diagnostics.renderMs = smoothed(diagnostics.renderMs, Math.max(0, renderedAt - timing.receivedAt));
+    }
+    diagnostics.width = width;
+    diagnostics.height = height;
+    updateFpsDisplay();
+  }
+
+  function queueDecodedVideoFrame(frame, timing) {
+    const width = frame.displayWidth || frame.codedWidth || frameWidth;
+    const height = frame.displayHeight || frame.codedHeight || frameHeight;
+    if (pendingDecodedVideoFrame) {
+      pendingDecodedVideoFrame.frame.close();
+      diagnostics.coalescedFrames += 1;
+    }
+    pendingDecodedVideoFrame = { frame, timing, width, height };
+    if (!decodedVideoPresentationFrame) {
+      decodedVideoPresentationFrame = requestAnimationFrame(presentLatestDecodedVideoFrame);
+    }
   }
 
   function normalizeFallbackReason(reason) {
@@ -2574,6 +2638,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
 
     h264RecoveryAttempts += 1;
     h264KeyframeErrorStreak = 0;
+    destroyVideoDecoder();
 
     console.warn("rd: h264 decode stuck waiting for keyframe; auto-restarting stream once", {
       reason,
@@ -2694,34 +2759,24 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
         output: (frame) => {
           const outputStartedAt = performance.now();
           const timing = h264PendingTimings.shift();
-          const width = frame.displayWidth || frame.codedWidth || frameWidth;
-          const height = frame.displayHeight || frame.codedHeight || frameHeight;
-          if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
-            canvas.width = width;
-            canvas.height = height;
-            frameWidth = width;
-            frameHeight = height;
-          }
-          try {
-            ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
-          } finally {
-            frame.close();
-          }
-          const renderedAt = performance.now();
+          h264KeyframeErrorStreak = 0;
           if (timing) {
             diagnostics.decodeMs = smoothed(diagnostics.decodeMs, Math.max(0, outputStartedAt - timing.decodeStartedAt));
-            diagnostics.renderMs = smoothed(diagnostics.renderMs, Math.max(0, renderedAt - timing.receivedAt));
           }
           diagnostics.decodeQueue = videoDecoder?.decodeQueueSize || h264PendingTimings.length;
-          diagnostics.width = width;
-          diagnostics.height = height;
-          updateFpsDisplay();
+          queueDecodedVideoFrame(frame, timing);
           updateCanvasDecodePressure();
         },
         error: (err) => {
           console.warn(`rd: ${codecName} decoder error`, err);
+          if (codecName === "h264") h264WaitingForKeyframe = true;
           updateCanvasDecodePressure(true);
-          setTimeout(() => fallbackFromVideoCodec(codecName, err), 0);
+          setTimeout(() => {
+            if (codecName === "h264" && tryRecoverH264Stream("h264_async_decoder_error")) {
+              return;
+            }
+            fallbackFromVideoCodec(codecName, err);
+          }, 0);
         },
       });
       videoDecoder.addEventListener("dequeue", () => {
@@ -2911,6 +2966,23 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
       h264FramesSeen += 1;
 
       const isKey = codecName === "hevc" ? isHEVCKeyFrame(videoBytes) : isH264KeyFrame(videoBytes);
+      if (codecName === "h264" && h264WaitingForKeyframe && !isKey) {
+        h264KeyframeErrorStreak += 1;
+        const now = performance.now();
+        if (!lastViewerKeyframeRequestAt || now - lastViewerKeyframeRequestAt >= VIEWER_FRAME_GAP_KEYFRAME_THROTTLE_MS) {
+          lastViewerKeyframeRequestAt = now;
+          sendCmd("desktop_request_keyframe", { reason: "h264_decoder_keyframe_required" });
+        }
+        if (h264KeyframeErrorStreak >= H264_KEYFRAME_ERROR_RESTART_THRESHOLD) {
+          const restarted = tryRecoverH264Stream("h264_keyframe_timeout");
+          if (!restarted) fallbackToJpegCodec("h264_keyframe_timeout_loop");
+        }
+        updateCanvasDecodePressure(true);
+        return;
+      }
+      if (codecName === "h264" && isKey) {
+        h264WaitingForKeyframe = false;
+      }
 
       if (h264AwaitingKeyframe && !isKey) {
         const now = Date.now();
@@ -2970,10 +3042,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
         videoDecoder.decode(chunk);
         diagnostics.decodeQueue = videoDecoder.decodeQueueSize;
         updateCanvasDecodePressure();
-        h264KeyframeErrorStreak = 0;
       } catch (err) {
         h264PendingTimings.pop();
         if (isKeyframeRequiredError(err)) {
+          if (codecName === "h264") h264WaitingForKeyframe = true;
           h264KeyframeErrorStreak += 1;
           const now = Date.now();
           if (now - h264LastDecodeWarnAt >= H264_DECODE_WARN_THROTTLE_MS) {

@@ -19,6 +19,10 @@ func SetbackstageDXGIEnabled(enabled bool) {}
 
 func GetbackstageDXGIEnabled() bool { return false }
 
+func SetbackstagePrintWindowFallbackEnabled(enabled bool) {}
+
+func GetbackstagePrintWindowFallbackEnabled() bool { return false }
+
 func SetbackstageUIAEnabled(enabled bool) {}
 
 func GetbackstageUIAEnabled() bool { return false }
@@ -47,7 +51,7 @@ func BackstageInputMouseUp(button int) error {
 	return errors.New("backstage not supported on this platform")
 }
 
-func BackstageInputKeyDown(vk uint16) error {
+func BackstageInputKeyDown(vk uint16, text string) error {
 	return errors.New("backstage not supported on this platform")
 }
 

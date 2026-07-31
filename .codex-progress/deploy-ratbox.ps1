@@ -4,7 +4,7 @@
 # v1.3.0: PS 5.1 mangles binary native-to-native pipes; ship a local .tar.gz via scp instead
 $ErrorActionPreference = "Stop"
 $DEPLOY_SCRIPT_VERSION = "1.3.1"
-$VERSION = "2.6.11"
+$VERSION = "3.0.3"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $deploy = "/tmp/overlord-deploy-$VERSION-$stamp"
 $rollbackTag = "overlord-rollback:pre-$VERSION-$stamp"

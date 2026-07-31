@@ -23,6 +23,51 @@ type recordingWriter struct {
 	types []websocket.MessageType
 }
 
+func TestEncodeBlocksBackstageAdvancesOnlyBackstageHistory(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for i := range img.Pix {
+		img.Pix[i] = 0xff
+	}
+	previous := &prevImage{w: 64, h: 64, pix: make([]byte, len(img.Pix))}
+	desktopMarker := &prevImage{w: 1, h: 1, pix: []byte{0x42}}
+
+	prevMu.Lock()
+	savedDesktop := prevFrame
+	prevFrame = desktopMarker
+	prevMu.Unlock()
+	backstagePrevMu.Lock()
+	savedBackstage := backstagePrevFrame
+	backstagePrevFrame = nil
+	backstagePrevMu.Unlock()
+	t.Cleanup(func() {
+		prevMu.Lock()
+		prevFrame = savedDesktop
+		prevMu.Unlock()
+		backstagePrevMu.Lock()
+		backstagePrevFrame = savedBackstage
+		backstagePrevMu.Unlock()
+	})
+
+	regions, _, _, err := encodeBlocksbackstage(img, previous, 90, "raw", 0)
+	if err != nil {
+		t.Fatalf("encodeBlocksbackstage: %v", err)
+	}
+	if regions == 0 {
+		t.Fatal("expected changed backstage regions")
+	}
+
+	prevMu.Lock()
+	if prevFrame != desktopMarker || !bytes.Equal(prevFrame.pix, []byte{0x42}) {
+		t.Error("backstage block encode modified desktop history")
+	}
+	prevMu.Unlock()
+	backstagePrevMu.Lock()
+	if backstagePrevFrame == nil || !bytes.Equal(backstagePrevFrame.pix, img.Pix) {
+		t.Error("backstage block encode did not advance backstage history")
+	}
+	backstagePrevMu.Unlock()
+}
+
 func (w *recordingWriter) Write(ctx context.Context, messageType websocket.MessageType, p []byte) error {
 	w.types = append(w.types, messageType)
 	w.msgs = append(w.msgs, append([]byte(nil), p...))
@@ -456,16 +501,16 @@ func TestSetFrameFlowTargetFPSScalesHighFPS(t *testing.T) {
 	t.Setenv("OVERLORD_DESKTOP_IN_FLIGHT_FRAMES", "")
 	ResetFrameSlots()
 	SetFrameFlowTargetFPS(60)
-	if got := activeFrameSlotLimit(); got != 2 {
-		t.Fatalf("expected 60 fps slot limit 2, got %d", got)
+	if got := activeFrameSlotLimit(); got != 4 {
+		t.Fatalf("expected 60 fps slot limit 4, got %d", got)
 	}
 	SetFrameFlowTargetFPS(120)
-	if got := activeFrameSlotLimit(); got != 4 {
-		t.Fatalf("expected 120 fps slot limit 4, got %d", got)
+	if got := activeFrameSlotLimit(); got != 8 {
+		t.Fatalf("expected 120 fps slot limit 8, got %d", got)
 	}
 	SetFrameFlowTargetFPS(240)
-	if got := activeFrameSlotLimit(); got != 8 {
-		t.Fatalf("expected 240 fps slot limit 8, got %d", got)
+	if got := activeFrameSlotLimit(); got != 12 {
+		t.Fatalf("expected 240 fps slot limit 12, got %d", got)
 	}
 }
 

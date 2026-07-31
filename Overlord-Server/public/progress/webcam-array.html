@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overlord Deploy · Webcam Array Timeout</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #07070d;
+    --panel: #0d0d16;
+    --line: #1c1c2b;
+    --dim: #5b5b74;
+    --magenta: #ff2fd6;
+    --green: #34f5a5;
+    --cyan: #22d3ee;
+    --gold: #fbbf24;
+    --red: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: #c9c9de;
+    font: 13px/1.55 "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  main { width: min(760px, 100%); }
+  header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+  h1 { font-size: 13px; font-weight: 700; letter-spacing: .22em; color: var(--cyan); text-transform: uppercase; }
+  h1 .accent { color: var(--magenta); }
+  .ver { color: var(--dim); font-size: 11px; }
+  .ver b { color: var(--gold); font-weight: 400; }
+  .pct-row { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; }
+  .pct { font-size: 44px; font-weight: 700; color: var(--green); letter-spacing: -.02em; }
+  .phase { color: var(--dim); letter-spacing: .18em; font-size: 11px; text-transform: uppercase; }
+  .phase.done { color: var(--green); }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-bottom: 22px; }
+  .bar i {
+    display: block; height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--magenta), var(--cyan), var(--green));
+    background-size: 200% 100%;
+    animation: shimmer 2.4s linear infinite;
+    transition: width .6s cubic-bezier(.22,1,.36,1);
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  canvas { width: 100%; height: 72px; display: block; margin-bottom: 22px; }
+  .steps { display: grid; gap: 5px; margin-bottom: 22px; }
+  .step { display: flex; gap: 10px; align-items: center; color: var(--dim); }
+  .step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+  .step.done { color: var(--green); }
+  .step.done .dot { background: var(--green); box-shadow: 0 0 8px #34f5a588; }
+  .step.active { color: var(--gold); }
+  .step.active .dot { background: var(--gold); animation: pulse 1s ease-in-out infinite; }
+  .step.failed { color: var(--red); }
+  .step.failed .dot { background: var(--red); }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .log {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    max-height: 220px;
+    overflow-y: auto;
+    font-size: 12px;
+  }
+  .log div { display: flex; gap: 10px; white-space: nowrap; }
+  .log .t { color: var(--dim); flex: none; }
+  .log .info { color: var(--cyan); }
+  .log .ok { color: var(--green); }
+  .log .warn { color: var(--gold); }
+  .log .err { color: var(--red); }
+  footer { margin-top: 16px; color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; }
+  footer a { color: var(--cyan); text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>overlord <span class="accent">//</span> webcam array timeout deploy</h1>
+    <span class="ver">tracker v<b>1.0.0</b> · target v<b id="targetVer">?</b></span>
+  </header>
+  <div class="pct-row">
+    <span class="pct" id="pct">0%</span>
+    <span class="phase" id="phase">starting</span>
+  </div>
+  <div class="bar"><i id="barFill"></i></div>
+  <canvas id="spark" width="760" height="72"></canvas>
+  <div class="steps" id="steps"></div>
+  <div class="log" id="log"></div>
+  <footer>
+    <span id="clock">--:--</span>
+    <span>root@ratbox · overlord-server</span>
+  </footer>
+</main>
+<script>
+const PROGRESS_PAGE_VERSION = "1.0.0";
+const STEP_LABELS = [
+  ["tracker", "progress tracker online"],
+  ["timeout", "30s connect countdown + timeout removal"],
+  ["error", "immediate removal on error/offline/not-found"],
+  ["snapshot", "cached thumbnails on viewer return"],
+  ["css", "tile countdown + snapshot styles"],
+  ["version", "version bump 2.6.2 / webcams.js 1.5.0"],
+  ["tests", "unit tests updated + passing"],
+  ["deploy", "docker build + recreate on ratbox"],
+  ["verify", "live health + version verified"],
+  ["telegram", "telegram notification sent"],
+];
+const t0 = Date.now();
+const stepsEl = document.getElementById("steps");
+const logEl = document.getElementById("log");
+const spark = document.getElementById("spark");
+const sctx = spark.getContext("2d");
+
+function elapsed() {
+  const s = Math.floor((Date.now() - t0) / 1000);
+  return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
+setInterval(() => { document.getElementById("clock").textContent = "elapsed " + elapsed(); }, 1000);
+
+function drawSpark(data) {
+  const w = spark.width, h = spark.height;
+  sctx.clearRect(0, 0, w, h);
+  if (!data || data.length < 2) return;
+  const max = Math.max(100, ...data);
+  const px = (i) => (i / (data.length - 1)) * (w - 4) + 2;
+  const py = (v) => h - 6 - (v / max) * (h - 14);
+  const grad = sctx.createLinearGradient(0, 0, w, 0);
+  grad.addColorStop(0, "#ff2fd6");
+  grad.addColorStop(.55, "#22d3ee");
+  grad.addColorStop(1, "#34f5a5");
+  sctx.beginPath();
+  data.forEach((v, i) => i ? sctx.lineTo(px(i), py(v)) : sctx.moveTo(px(i), py(v)));
+  sctx.strokeStyle = grad; sctx.lineWidth = 2; sctx.stroke();
+  sctx.lineTo(px(data.length - 1), h - 2); sctx.lineTo(px(0), h - 2); sctx.closePath();
+  sctx.fillStyle = "rgba(34,211,238,.07)"; sctx.fill();
+  const lv = data[data.length - 1];
+  sctx.beginPath(); sctx.arc(px(data.length - 1), py(lv), 3, 0, 7);
+  sctx.fillStyle = "#34f5a5"; sctx.fill();
+}
+
+async function poll() {
+  let s;
+  try {
+    const r = await fetch("webcam-array.json?ts=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    s = await r.json();
+  } catch { return; }
+  document.getElementById("pct").textContent = s.percent + "%";
+  document.getElementById("barFill").style.width = s.percent + "%";
+  const phaseEl = document.getElementById("phase");
+  phaseEl.textContent = s.phase;
+  phaseEl.classList.toggle("done", !!s.done);
+  document.getElementById("targetVer").textContent = s.version || "?";
+  stepsEl.innerHTML = STEP_LABELS.map(([id, label]) => {
+    const cls = s.failed.includes(id) ? "failed" : s.completed.includes(id) ? "done" : s.active === id ? "active" : "";
+    return `<div class="step ${cls}"><span class="dot"></span><span>${label}</span></div>`;
+  }).join("");
+  logEl.innerHTML = (s.log || []).map(e =>
+    `<div><span class="t">${e.t}</span><span class="${e.level}">${e.msg}</span></div>`
+  ).join("");
+  logEl.scrollTop = logEl.scrollHeight;
+  drawSpark(s.sparkline);
+}
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Concept C — Split Preview · File Manager 2.0</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden;background:#05070c;color:#cbd5e1;font:12px/1.4 Inter,Segoe UI,system-ui,sans-serif}
+button,input{font:inherit}
+.viewer{height:100%;display:grid;grid-template-columns:52px 1fr;grid-template-rows:36px 1fr}
+.rail{grid-row:1/-1;background:#070a12;border-right:1px solid #141a2e;display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:4px}
+.rail .home{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:#7ee0ff;background:rgba(56,189,248,.08);border:1px solid #1c2440;margin-bottom:8px}
+.rail button{width:36px;height:32px;border:0;background:transparent;color:#64748b;border-radius:6px}
+.top{display:flex;align-items:center;gap:8px;padding:0 10px;background:#0a0e18;border-bottom:1px solid #151c30}
+.top .back{border:1px solid #243049;background:#111827;color:#94a3b8;height:24px;padding:0 8px;border-radius:4px;font-size:11px}
+.top .id{font-family:Consolas,monospace;font-size:11px;color:#a5b4fc;border:1px solid #2a3358;background:#12182c;padding:2px 8px;border-radius:999px}
+.modes{display:inline-flex;gap:4px;margin-left:6px}
+.modes span{height:24px;padding:0 9px;border-radius:4px;font-size:10px;letter-spacing:.04em;text-transform:uppercase;border:1px solid #243049;color:#7c89a8;background:#0f1524;display:inline-flex;align-items:center;gap:5px}
+.modes .on{color:#eaf0ff;border-color:#6a78c8;background:linear-gradient(180deg,#3a4280,#242a55);box-shadow:0 0 12px rgba(90,120,255,.22)}
+.cap{margin-left:auto;font-size:11px;color:#6b7598;display:inline-flex;align-items:center;gap:6px}
+.cap i{color:#2ee66b;font-size:8px}
+.d2{min-width:0;min-height:0;display:flex;flex-direction:column;background:linear-gradient(180deg,#0a0c14,#06080f 48%,#05070c)}
+.chrome{flex-shrink:0;height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;background:linear-gradient(180deg,#2a2f5a,#1a1f3d 55%,#141830);border-bottom:1px solid #3d4578;color:#d7dcff;font-size:11px;letter-spacing:.06em}
+.brand{color:#7ee0ff;font-weight:700;letter-spacing:.14em}
+.sep{color:#5b6494;margin:0 8px}
+.ver{color:#9aa3d4;margin-left:8px}
+.cbtn{border:1px solid #4a5388;background:linear-gradient(180deg,#252b4e,#171c34);color:#b8c0ef;font-size:10px;text-transform:uppercase;padding:3px 8px;margin-left:6px}
+.cbtn.on{color:#eaf0ff;border-color:#6f7bc4}
+.ws{position:relative;flex:1;min-height:0;overflow:hidden;background:radial-gradient(ellipse at 20% 0%,rgba(40,60,120,.14),transparent 55%),#070910}
+.win{position:absolute;display:flex;flex-direction:column;background:#0b0e18;border:1px solid #2a3358;box-shadow:0 10px 28px rgba(0,0,0,.45);overflow:hidden}
+.win.foc{border-color:#4b5fbf;box-shadow:0 0 0 1px rgba(80,100,200,.25),0 14px 36px rgba(0,0,0,.5)}
+.tb{flex-shrink:0;height:28px;display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 10px;background:linear-gradient(180deg,#2a3058,#1c2140 55%,#161a32);border-bottom:1px solid #1a2038;user-select:none}
+.win.foc .tb{background:linear-gradient(180deg,#3a3f78,#262b55 55%,#1c2144)}
+.tt{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:#c5cde0}
+.win.foc .tt{color:#e8ecff}
+.tt i{color:#7ed7ff}
+.sq{width:18px;height:16px;border:1px solid #5a6498;background:#1a2040;color:#b8c0ef;font-size:9px;display:grid;place-items:center}
+.body{flex:1;min-height:0;background:#05070d;position:relative;overflow:hidden}
+/* layout: RD left top, webcam top-right, PM mid-right, FM bottom-left wide */
+.w-rd{left:12px;top:12px;width:calc(70% - 18px);height:calc(66% - 16px);z-index:3}
+.w-cam{left:calc(70% + 6px);top:12px;width:calc(30% - 18px);height:calc(30% - 14px);z-index:4}
+.w-pm{left:calc(70% + 6px);top:calc(30% + 10px);width:calc(30% - 18px);height:calc(70% - 22px);z-index:5}
+.w-fm{left:12px;top:calc(66% + 8px);width:calc(70% - 18px);height:calc(34% - 20px);z-index:6}
+/* fake RD */
+.rd{height:100%;background:linear-gradient(180deg,#1a2744,#0d1528 40%,#0a1020);position:relative}
+.rd .br{position:absolute;left:3%;top:5%;right:3%;bottom:14%;background:#fff;border-radius:8px 8px 0 0;box-shadow:0 12px 40px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden}
+.rd .bb{height:34px;background:#dee1e6;display:flex;align-items:center;gap:6px;padding:0 10px}
+.rd .tab{background:#fff;border-radius:8px 8px 0 0;padding:6px 12px;font-size:11px;color:#202124;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd .omni{flex:1;height:26px;background:#fff;border-radius:14px;border:1px solid #dadce0;margin:0 16px;display:flex;align-items:center;padding:0 12px;font-size:12px;color:#5f6368}
+.rd .pg{flex:1;padding:16px 24px;color:#202124;overflow:hidden}
+.rd .pg h3{margin:0 0 6px;font-size:16px;color:#1a0dab}
+.rd .pg .st{color:#f59e0b;font-size:12px;margin-bottom:10px}
+.rd .pg p{margin:0;color:#4d5156;line-height:1.45;font-size:12.5px;max-width:480px}
+.rd .bar{position:absolute;left:0;right:0;bottom:0;height:38px;background:rgba(20,24,36,.92);border-top:1px solid #2a3350;display:flex;align-items:center;gap:8px;padding:0 10px}
+.rd .ico{width:26px;height:26px;border-radius:4px;background:#1e293b;display:grid;place-items:center;color:#94a3b8;font-size:12px}
+.rd .clk{margin-left:auto;font-size:11px;color:#cbd5e1;text-align:right;line-height:1.15}
+/* cam */
+.cam{height:100%;background:radial-gradient(circle at 45% 35%,#3d4a3a,#1a2218 45%,#0c100c);display:grid;place-items:center;position:relative}
+.face{width:38%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 40% 35%,#c4a574,#6b4f2e 60%,#3a2a18);position:relative}
+.face:before,.face:after{content:"";position:absolute;width:12%;height:12%;border-radius:50%;background:#1a120a;top:38%}
+.face:before{left:28%}.face:after{right:28%}
+.cam .live{position:absolute;bottom:8px;left:8px;font-size:10px;color:#86efac;background:rgba(0,0,0,.45);padding:2px 6px;border-radius:3px}
+.cam-btns{display:inline-flex;gap:4px;align-items:center}
+.cam-btns .b{height:18px;padding:0 6px;border:1px solid #334155;background:#111827;color:#94a3b8;font-size:9px;text-transform:uppercase;border-radius:3px}
+.cam-btns .fps{font-size:9px;color:#67e8f9;border:1px solid #155e75;background:#083344;padding:1px 5px;border-radius:3px}
+/* pm */
+.pm{height:100%;display:flex;flex-direction:column;background:#070a12;font-size:11px}
+.pm .pt{display:flex;align-items:center;gap:6px;padding:4px 8px;min-height:30px;background:#0a0e1a;border-bottom:1px solid #1c2440}
+.pm .dot{width:8px;height:8px;border-radius:50%;background:#2ee66b}
+.pm input{flex:1;height:22px;background:#070a12;border:1px solid #1c2440;border-radius:4px;color:#64748b;padding:0 8px;font-size:11px}
+.pm .cnt{font-size:10px;color:#6b7598}
+.pm .sc{flex:1;overflow:auto}
+.pm table{width:100%;border-collapse:collapse}
+.pm th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#6b7598;padding:3px 8px;border-bottom:1px solid #1c2440;background:rgba(7,10,18,.9)}
+.pm td{height:22px;padding:0 8px;border-bottom:1px solid rgba(28,36,64,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pm tr.sel{background:rgba(56,189,248,.13)}
+.pm .m{color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums}
+/* file manager A */
+.fm{height:100%;display:flex;flex-direction:column;background:#070a12;font-size:11.5px;color:#cbd5e1}
+.fm-t{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:4px 8px;min-height:30px;background:#0a0e1a;border-bottom:1px solid #1c2440}
+.fm-dot{width:8px;height:8px;border-radius:50%;background:#2ee66b;box-shadow:0 0 6px rgba(46,230,107,.4);flex-shrink:0}
+.fbtn{display:inline-flex;align-items:center;justify-content:center;height:22px;min-width:24px;padding:0 6px;border:1px solid #27304f;background:#111827;color:#94a3b8;font-size:10px;border-radius:4px;cursor:pointer;flex-shrink:0}
+.fbtn:hover{color:#e2e8f0;background:#1c2440}
+.fbtn.on{color:#38bdf8;background:rgba(56,189,248,.14);border-color:rgba(56,189,248,.5)}
+.fsep{width:1px;height:16px;background:#1c2440;flex-shrink:0}
+.fpath{flex:1;min-width:0;height:22px;padding:0 8px;font-family:Consolas,monospace;font-size:10.5px;color:#e2e8f0;background:#070a12;border:1px solid #1c2440;border-radius:4px}
+.fsearch{position:relative;width:120px;flex-shrink:0}
+.fsearch i{position:absolute;left:7px;top:50%;transform:translateY(-50%);font-size:9px;color:#475569}
+.fsearch input{width:100%;height:22px;padding:0 8px 0 20px;font-size:11px;color:#e2e8f0;background:#070a12;border:1px solid #1c2440;border-radius:4px}
+.fm-m{flex:1;min-height:0;display:flex}
+.places{width:128px;flex-shrink:0;background:#0a0e1a;border-right:1px solid #1c2440;overflow:auto;padding:4px 0}
+.pl{padding:5px 10px 2px;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#475569}
+.place{display:flex;align-items:center;gap:7px;width:100%;border:0;background:transparent;color:#cbd5e1;font-size:11px;text-align:left;padding:5px 10px;cursor:pointer;border-left:2px solid transparent}
+.place i{width:14px;text-align:center;color:#64748b;font-size:11px}
+.place:hover{background:rgba(56,189,248,.06)}
+.place.on{background:rgba(56,189,248,.13);border-left-color:#38bdf8;color:#e2e8f0}
+.place.on i{color:#38bdf8}
+.list{flex:1;min-width:0;overflow:auto}
+.list::-webkit-scrollbar{width:8px}
+.list::-webkit-scrollbar-thumb{background:#2a3350;border-radius:4px}
+table.ft{width:100%;border-collapse:collapse;table-layout:fixed}
+.ft th{position:sticky;top:0;z-index:1;text-align:left;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#6b7598;background:rgba(7,10,18,.96);border-bottom:1px solid #1c2440;padding:3px 8px;height:22px}
+.ft td{height:22px;padding:0 8px;border-bottom:1px solid rgba(28,36,64,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px}
+.ft tbody tr{cursor:default;border-left:2px solid transparent}
+.ft tbody tr:hover{background:rgba(56,189,248,.05)}
+.ft tbody tr.on{background:rgba(56,189,248,.13);border-left-color:#38bdf8}
+.ft tbody tr.on td{color:#e2e8f0}
+.nm{display:inline-flex;align-items:center;gap:7px;min-width:0}
+.nm i{width:14px;text-align:center;flex-shrink:0;font-size:11px}
+.nm .fo{color:#fbbf24}.nm .pdf{color:#f87171}.nm .img{color:#c084fc}.nm .zip{color:#7dd3fc}.nm .xls{color:#34d399}.nm .txt{color:#94a3b8}.nm .exe{color:#a78bfa}.nm .vid{color:#fb7185}.nm .doc{color:#60a5fa}
+.c-n{width:42%}.c-s{width:12%;color:#64748b;font-variant-numeric:tabular-nums}.c-t{width:18%;color:#64748b}.c-m{width:28%;color:#64748b;font-variant-numeric:tabular-nums;font-size:11px}
+.sb{flex-shrink:0;height:22px;display:flex;align-items:center;gap:12px;padding:0 10px;background:#0a0e1a;border-top:1px solid #1c2440;color:#6b7598;font-size:10.5px}
+.sb .r{margin-left:auto;color:#475569;font-family:Consolas,monospace;font-size:10px}
+.vote{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:999px;background:rgba(15,20,40,.94);border:1px solid #3d4578;box-shadow:0 12px 40px rgba(0,0,0,.5);font-size:12px;color:#d7dcff}
+.vote a{color:#7ee0ff;text-decoration:none;font-weight:600}
+.vote .p{background:#1a2040;border:1px solid #4a5388;color:#a5b4fc;padding:2px 8px;border-radius:999px;font-weight:700}
+.vote nav{display:inline-flex;gap:4px}
+.vote nav a{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;border:1px solid #2a3358;background:#12182c;color:#94a3b8;font-size:11px;font-weight:700}
+.vote nav a:hover,.vote nav a.here{border-color:#6a78c8;color:#eaf0ff;background:#242a55}
+
+.chips{display:flex;gap:4px;flex:1;min-width:0;overflow:hidden}
+.chip{flex-shrink:0;height:20px;padding:0 8px;border-radius:999px;border:1px solid #1c2440;background:#111827;color:#6b7598;font-size:10px;cursor:pointer}
+.chip.on{background:rgba(56,189,248,.13);border-color:rgba(56,189,248,.4);color:#bae6fd}
+.crumb{display:flex;align-items:center;gap:3px;flex:1;min-width:0;font-family:Consolas,monospace;font-size:10.5px;color:#64748b;overflow:hidden}
+.crumb b{color:#e2e8f0;font-weight:500}
+.prev{width:160px;flex-shrink:0;border-left:1px solid #1c2440;background:#0a0e1a;padding:8px;display:flex;flex-direction:column;gap:6px}
+.prev-art{aspect-ratio:4/3;border:1px solid #1c2440;border-radius:6px;background:linear-gradient(145deg,#151b2e,#0a0e18);display:grid;place-items:center;color:#64748b;font-size:26px}
+.prev h4{margin:0;font-size:11px;color:#e2e8f0;word-break:break-all}
+.prev dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:10px}
+.prev dt{color:#475569}.prev dd{margin:0;color:#94a3b8;text-align:right}
+.dual{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr}
+.pane{min-width:0;display:flex;flex-direction:column;border-right:1px solid #1c2440}
+.pane:last-child{border-right:0}
+.pane-h{flex-shrink:0;display:flex;align-items:center;gap:6px;padding:3px 8px;background:#080c16;border-bottom:1px solid #1c2440;font-family:Consolas,monospace;font-size:10px;color:#94a3b8}
+.act{flex-shrink:0;display:flex;align-items:center;gap:6px;padding:4px 8px;background:#080c16;border-top:1px solid #1c2440}
+.dock{width:38px;flex-shrink:0;background:#0a0e1a;border-right:1px solid #1c2440;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0}
+.dock button{width:28px;height:28px;border:1px solid transparent;background:transparent;color:#64748b;border-radius:6px;cursor:pointer;font-size:12px}
+.dock button:hover{background:rgba(56,189,248,.08);color:#e2e8f0}
+.dock button.on{background:rgba(56,189,248,.13);border-color:rgba(56,189,248,.35);color:#38bdf8}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;padding:10px}
+.card{display:flex;flex-direction:column;align-items:center;gap:5px;padding:8px 4px 6px;border:1px solid transparent;border-radius:6px;text-align:center;cursor:default}
+.card:hover{background:rgba(56,189,248,.06);border-color:#1c2440}
+.card.on{background:rgba(56,189,248,.13);border-color:rgba(56,189,248,.4)}
+.card-i{width:40px;height:40px;border-radius:8px;background:#0d1220;border:1px solid #1c2440;display:grid;place-items:center;font-size:17px}
+.card-n{font-size:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#cbd5e1}
+
+</style>
+</head>
+<body>
+<div class="viewer">
+  <aside class="rail">
+    <div class="home"><i class="fa-solid fa-house"></i></div>
+    <button type="button"><i class="fa-solid fa-plug"></i></button>
+    <button type="button"><i class="fa-solid fa-eye"></i></button>
+    <button type="button"><i class="fa-solid fa-server"></i></button>
+    <button type="button"><i class="fa-solid fa-ghost"></i></button>
+    <button type="button"><i class="fa-solid fa-robot"></i></button>
+  </aside>
+  <header class="top">
+    <button type="button" class="back"><i class="fa-solid fa-arrow-left"></i> Clients</button>
+    <span class="id">ID e035883bafb3</span>
+    <div class="modes">
+      <span><i class="fa-solid fa-video"></i> Webcam</span>
+      <span><i class="fa-solid fa-display"></i> Desktop</span>
+      <span><i class="fa-solid fa-columns"></i> Split</span>
+      <span><i class="fa-solid fa-window-restore"></i> PiP</span>
+      <span class="on"><i class="fa-solid fa-table-cells"></i> Dashboard 2.0</span>
+    </div>
+    <div class="cap"><i class="fa-solid fa-circle"></i> camera available · 16 ms</div>
+  </header>
+  <section class="d2">
+    <div class="chrome">
+      <div><span class="brand">OVERLORD</span><span class="sep">//</span><span>Dashboard 2.0</span><span class="ver">concept C</span></div>
+      <div>
+        <button type="button" class="cbtn on">Layout 1</button>
+        <button type="button" class="cbtn">Layout 2</button>
+        <button type="button" class="cbtn">Reset layout</button>
+      </div>
+    </div>
+    <div class="ws">
+      <div class="win w-rd foc">
+        <div class="tb"><span class="tt"><i class="fa-solid fa-display"></i> Remote Desktop</span><span class="sq">□</span></div>
+        <div class="body"><div class="rd">
+          <div class="br">
+            <div class="bb"><div class="tab">rental cars in tenkasi - Google Search</div><div class="omni">google.com/search?q=rental+cars+in+tenkasi</div></div>
+            <div class="pg">
+              <h3>Royal Self Drive Cars (Rental Service), Tenkasi</h3>
+              <div class="st">★★★★☆ 4.8 · 143 reviews</div>
+              <p>People say this car rental service provides well-maintained cars in good condition, with many highlighting the smooth and hassle-free pickup and drop-off process.</p>
+            </div>
+          </div>
+          <div class="bar">
+            <div class="ico"><i class="fa-brands fa-windows"></i></div>
+            <div class="ico"><i class="fa-brands fa-chrome"></i></div>
+            <div class="ico"><i class="fa-solid fa-folder"></i></div>
+            <div class="clk">11:30 AM<br>7/30/2026</div>
+          </div>
+        </div></div>
+      </div>
+      <div class="win w-cam">
+        <div class="tb">
+          <span class="tt"><i class="fa-solid fa-camera"></i> Webcam</span>
+          <div class="cam-btns"><span class="fps">1 FPS</span><span class="b">Start</span><span class="b" style="color:#fca5a5">Stop</span><span class="sq">□</span></div>
+        </div>
+        <div class="body"><div class="cam"><div class="face"></div><span class="live">LIVE mock</span></div></div>
+      </div>
+      <div class="win w-pm">
+        <div class="tb"><span class="tt"><i class="fa-solid fa-list-check"></i> Process Manager 2.0</span><span class="sq">□</span></div>
+        <div class="body"><div class="pm">
+          <div class="pt"><span class="dot"></span><input readonly value="Filter processes…" /><span class="cnt">55 · v1.1</span></div>
+          <div class="sc"><table>
+            <thead><tr><th>Name</th><th style="text-align:right">CPU</th><th style="text-align:right">Mem</th></tr></thead>
+            <tbody>
+              <tr class="sel"><td>SmartAudio3.exe</td><td class="m">0.7</td><td class="m">71M</td></tr>
+              <tr><td>SynTPEnh.exe</td><td class="m">0.1</td><td class="m">22M</td></tr>
+              <tr><td>chrome.exe</td><td class="m">4.2</td><td class="m">412M</td></tr>
+              <tr><td>explorer.exe</td><td class="m">0.3</td><td class="m">98M</td></tr>
+              <tr><td>LocationNotificationWindows.exe</td><td class="m">0.0</td><td class="m">8M</td></tr>
+              <tr><td>svchost.exe</td><td class="m">0.1</td><td class="m">14M</td></tr>
+            </tbody>
+          </table></div>
+        </div></div>
+      </div>
+
+      <div class="win w-fm foc">
+        <div class="tb"><span class="tt"><i class="fa-solid fa-folder"></i> File Manager 2.0</span><span class="sq">□</span></div>
+        <div class="body"><div class="fm">
+          <div class="fm-t">
+            <span class="fm-dot"></span>
+            <button type="button" class="fbtn"><i class="fa-solid fa-arrow-left"></i></button>
+            <button type="button" class="fbtn"><i class="fa-solid fa-arrow-up"></i></button>
+            <input class="fpath" readonly value="C:\Users\Demo\Downloads" />
+            <button type="button" class="fbtn"><i class="fa-solid fa-upload"></i></button>
+            <button type="button" class="fbtn"><i class="fa-solid fa-download"></i></button>
+            <button type="button" class="fbtn"><i class="fa-solid fa-trash"></i></button>
+            <button type="button" class="fbtn on"><i class="fa-solid fa-eye"></i></button>
+            <div class="fsearch"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Filter files…" /></div>
+          </div>
+          <div class="fm-m">
+            <aside class="places" style="width:118px">
+              <div class="pl">Places</div>
+              <button type="button" class="place"><i class="fa-solid fa-desktop"></i>Desktop</button>
+              <button type="button" class="place on"><i class="fa-solid fa-download"></i>Downloads</button>
+              <button type="button" class="place"><i class="fa-solid fa-file-lines"></i>Documents</button>
+              <button type="button" class="place"><i class="fa-solid fa-image"></i>Pictures</button>
+              <button type="button" class="place"><i class="fa-solid fa-hard-drive"></i>C:\</button>
+            </aside>
+            <div class="list"><table class="ft">
+              <thead><tr><th class="c-n">Name</th><th class="c-s">Size</th><th class="c-t">Type</th></tr></thead>
+              <tbody>
+                <tr class="on"><td><span class="nm"><i class="fa-solid fa-file-pdf pdf"></i>rental-quote-tenkasi.pdf</span></td><td class="c-s">1.24 MB</td><td class="c-t">PDF Document</td></tr>
+                <tr><td><span class="nm"><i class="fa-solid fa-folder fo"></i>Invoices</span></td><td class="c-s">—</td><td class="c-t">File folder</td></tr>
+                <tr><td><span class="nm"><i class="fa-solid fa-file-image img"></i>Aadhaar_scan_front.png</span></td><td class="c-s">890 KB</td><td class="c-t">PNG Image</td></tr>
+                <tr><td><span class="nm"><i class="fa-solid fa-file-zipper zip"></i>setup-Overlord-2.6.8.zip</span></td><td class="c-s">48.6 MB</td><td class="c-t">Compressed folder</td></tr>
+                <tr><td><span class="nm"><i class="fa-solid fa-file-excel xls"></i>Q3-costs.xlsx</span></td><td class="c-s">220 KB</td><td class="c-t">Microsoft Excel</td></tr>
+                <tr><td><span class="nm"><i class="fa-solid fa-file-lines txt"></i>meeting-notes.txt</span></td><td class="c-s">4 KB</td><td class="c-t">Text Document</td></tr>
+                <tr><td><span class="nm"><i class="fa-solid fa-gears exe"></i>ChromeSetup.exe</span></td><td class="c-s">1.1 MB</td><td class="c-t">Application</td></tr>
+                <tr><td><span class="nm"><i class="fa-solid fa-file-video vid"></i>vacation-goa.mp4</span></td><td class="c-s">214 MB</td><td class="c-t">MP4 Video</td></tr>
+              </tbody>
+            </table></div>
+            <aside class="prev">
+              <div class="prev-art"><i class="fa-solid fa-file-pdf" style="color:#f87171"></i></div>
+              <h4>rental-quote-tenkasi.pdf</h4>
+              <dl><dt>Type</dt><dd>PDF Document</dd><dt>Size</dt><dd>1.24 MB</dd><dt>Modified</dt><dd>7/30/2026 8:15 AM</dd><dt>Path</dt><dd>Downloads</dd></dl>
+            </aside>
+          </div>
+          <div class="sb"><span>8 items</span><span>1 selected</span><span class="r">C:\Users\Demo\Downloads</span></div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="vote">
+  <span class="p">C</span>
+  <strong>Split Preview</strong>
+  <span style="color:#6b7598">Places + list + preview</span>
+  <nav>
+    <a class="" href="concept-a.html">A</a>
+    <a class="" href="concept-b.html">B</a>
+    <a class="here" href="concept-c.html">C</a>
+    <a class="" href="concept-d.html">D</a>
+    <a class="" href="concept-e.html">E</a>
+  </nav>
+  <a href="index.html">Gallery</a>
+</div>
+<script>
+document.querySelectorAll('.ft tbody tr').forEach(r=>{r.onclick=e=>{if(!e.ctrlKey)r.closest('tbody').querySelectorAll('tr').forEach(x=>x.classList.remove('on'));r.classList.toggle('on')}});
+document.querySelectorAll('.place').forEach(b=>{b.onclick=()=>{document.querySelectorAll('.place').forEach(x=>x.classList.remove('on'));b.classList.add('on')}});
+document.querySelectorAll('.chip').forEach(b=>{b.onclick=()=>{document.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));b.classList.add('on')}});
+document.querySelectorAll('.dock button').forEach(b=>{b.onclick=()=>{document.querySelectorAll('.dock button').forEach(x=>x.classList.remove('on'));b.classList.add('on')}});
+document.querySelectorAll('.card').forEach(c=>{c.onclick=e=>{if(!e.ctrlKey)document.querySelectorAll('.card').forEach(x=>x.classList.remove('on'));c.classList.toggle('on')}});
+const gd=document.getElementById('gridView'),dt=document.getElementById('detView');
+document.getElementById('btnGrid')?.addEventListener('click',function(){if(gd)gd.hidden=false;if(dt)dt.hidden=true;this.classList.add('on');document.getElementById('btnDet')?.classList.remove('on')});
+document.getElementById('btnDet')?.addEventListener('click',function(){if(gd)gd.hidden=true;if(dt)dt.hidden=false;this.classList.add('on');document.getElementById('btnGrid')?.classList.remove('on')});
+</script>
+</body>
+</html>

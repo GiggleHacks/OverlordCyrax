@@ -8,8 +8,6 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,6 +27,7 @@ import (
 	"unicode/utf8"
 
 	agentRuntime "overlord-client/cmd/agent/runtime"
+	agentTLS "overlord-client/cmd/agent/tlsconfig"
 	"overlord-client/cmd/agent/wire"
 )
 
@@ -834,17 +833,13 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 		return failResult("unsupported upload url scheme", resolvedURL)
 	}
 
-	tlsConfig := &tls.Config{InsecureSkipVerify: env.Cfg.TLSInsecureSkipVerify, MinVersion: tls.VersionTLS12}
-	if caPath := strings.TrimSpace(env.Cfg.TLSCAPath); caPath != "" {
-		caBytes, err := os.ReadFile(caPath)
-		if err != nil {
-			return failResult(fmt.Sprintf("failed to read TLS CA: %v", err), resolvedURL)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caBytes) {
-			return failResult("failed to parse TLS CA", resolvedURL)
-		}
-		tlsConfig.RootCAs = pool
+	tlsConfig, err := agentTLS.Build(agentTLS.Options{
+		InsecureSkipVerify: env.Cfg.TLSInsecureSkipVerify,
+		CAPath:             env.Cfg.TLSCAPath,
+		SPKIPins:           env.Cfg.TLSSPKIPins,
+	})
+	if err != nil {
+		return failResult(fmt.Sprintf("invalid TLS configuration: %v", err), resolvedURL)
 	}
 
 	transport := &http.Transport{
@@ -1076,6 +1071,9 @@ func resolveUploadPullURL(env *agentRuntime.Env, raw string) (string, error) {
 		if scheme != "http" && scheme != "https" {
 			return "", fmt.Errorf("unsupported upload url scheme: %s", parsed.Scheme)
 		}
+		if scheme == "http" && !env.Cfg.TLSInsecureSkipVerify {
+			return "", errors.New("plaintext file transfers are disabled; use https")
+		}
 		if !strings.HasPrefix(parsed.Path, "/api/file/upload/pull/") {
 			return parsed.String(), nil
 		}
@@ -1100,8 +1098,15 @@ func resolveUploadPullURL(env *agentRuntime.Env, raw string) (string, error) {
 	case "wss":
 		server.Scheme = "https"
 	case "ws":
+		if !env.Cfg.TLSInsecureSkipVerify {
+			return "", errors.New("plaintext file transfers are disabled; use wss")
+		}
 		server.Scheme = "http"
-	case "https", "http":
+	case "https":
+	case "http":
+		if !env.Cfg.TLSInsecureSkipVerify {
+			return "", errors.New("plaintext file transfers are disabled; use https")
+		}
 	default:
 		return "", fmt.Errorf("unsupported agent server scheme: %s", server.Scheme)
 	}

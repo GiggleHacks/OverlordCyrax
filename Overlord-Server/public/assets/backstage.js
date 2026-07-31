@@ -117,6 +117,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const statusEl = document.getElementById("streamStatus");
   const clipboardSyncCtrl = document.getElementById("clipboardSyncCtrl");
   const uiaCtrl = document.getElementById("uiaCtrl");
+  const printWindowFallbackCtrl = document.getElementById("printWindowFallbackCtrl");
   const backstageResolutionSelect = document.getElementById("backstageResolutionSelect");
   const targetFpsSelect = document.getElementById("targetFpsSelect");
   let whepClient = null;
@@ -125,13 +126,16 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const CANVAS_TRANSPORT_PREF_VERSION = 1;
 
   function getWebrtcMode() {
-    return webrtcMode ? String(webrtcMode.value || "off") : "off";
+    return "off";
   }
 
   function syncInputEnableState() {
     if (mouseCtrl) sendCmd("backstage_enable_mouse", { enabled: mouseCtrl.checked });
     if (kbdCtrl) sendCmd("backstage_enable_keyboard", { enabled: kbdCtrl.checked });
     if (uiaCtrl) sendCmd("backstage_enable_uia", { enabled: uiaCtrl.checked });
+    if (printWindowFallbackCtrl) {
+      sendCmd("backstage_enable_printwindow_fallback", { enabled: printWindowFallbackCtrl.checked });
+    }
     pushbackstageResolution();
   }
   let activeClientId = clientId;
@@ -155,7 +159,10 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   let moveFrame = 0;
   let videoDecoder = null;
   let h264TimestampUs = 0;
-  let prefersH264 = typeof VideoDecoder === "function";
+  let h264AwaitingKeyframe = true;
+  let h264RecoveryRequestedAt = 0;
+  let prefersH264 = false;
+  const maxH264DecodeQueue = 4;
   const inputBackpressureBytes = 256 * 1024;
   let h264ErrorCount = 0;
   let h264RetryTimer = null;
@@ -185,15 +192,14 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     savedDisplay = Number.isFinite(Number(settings.display)) ? Number(settings.display) : savedDisplay;
     setSelectValue(backstageResolutionSelect, settings.resolution);
     setSelectValue(targetFpsSelect, settings.targetFps);
-    setSelectValue(webrtcMode, settings.transportPreferenceVersion === CANVAS_TRANSPORT_PREF_VERSION ? settings.webrtcMode : "off");
+    setSelectValue(webrtcMode, "off");
     if (qualitySlider && settings.quality !== undefined) qualitySlider.value = String(settings.quality);
-    if (mouseCtrl && typeof settings.mouse === "boolean") mouseCtrl.checked = settings.mouse;
-    if (kbdCtrl && typeof settings.keyboard === "boolean") kbdCtrl.checked = settings.keyboard;
     if (clipboardSyncCtrl && typeof settings.clipboardSync === "boolean") clipboardSyncCtrl.checked = settings.clipboardSync;
     if (uiaCtrl && typeof settings.uia === "boolean") uiaCtrl.checked = settings.uia;
-    if (typeof settings.preferH264 === "boolean") {
-      prefersH264 = settings.preferH264 && typeof VideoDecoder === "function";
+    if (printWindowFallbackCtrl && typeof settings.printWindowFallback === "boolean") {
+      printWindowFallbackCtrl.checked = settings.printWindowFallback;
     }
+    prefersH264 = false;
     const cloneToggle = document.getElementById("backstageCloneToggle");
     const cloneLiteToggle = document.getElementById("backstageCloneLiteToggle");
     const killIfRunningToggle = document.getElementById("backstageKillIfRunningToggle");
@@ -211,13 +217,14 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
       resolution: backstageResolutionSelect?.value || "1080",
       targetFps: Number(targetFpsSelect?.value || 120),
       quality: Number(qualitySlider?.value || 90),
-      preferH264: !!prefersH264,
-      webrtcMode: getWebrtcMode(),
+      preferH264: false,
+      webrtcMode: "off",
       transportPreferenceVersion: CANVAS_TRANSPORT_PREF_VERSION,
       mouse: !!mouseCtrl?.checked,
       keyboard: !!kbdCtrl?.checked,
       clipboardSync: !!clipboardSyncCtrl?.checked,
       uia: !!uiaCtrl?.checked,
+      printWindowFallback: printWindowFallbackCtrl?.checked !== false,
       cloneProfile: document.getElementById("backstageCloneToggle")?.checked !== false,
       cloneLite: document.getElementById("backstageCloneLiteToggle")?.checked === true,
       killIfRunning: document.getElementById("backstageKillIfRunningToggle")?.checked === true,
@@ -225,11 +232,20 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   applySharedSettings(await loadSharedUiSettings("backstage"));
+  // Interactive input is intentionally session-scoped: opening any client's
+  // page must require the operator to opt in again, regardless of saved UI
+  // settings.
+  if (mouseCtrl) mouseCtrl.checked = false;
+  if (kbdCtrl) kbdCtrl.checked = false;
   const sharedSettingsSaver = createSharedUiSettingsSaver("backstage", readSharedSettings);
 
   if (codecH264) {
-    codecH264.checked = prefersH264;
-    codecH264.disabled = typeof VideoDecoder !== "function";
+    codecH264.checked = false;
+    codecH264.disabled = true;
+  }
+  if (webrtcMode) {
+    webrtcMode.value = "off";
+    webrtcMode.disabled = true;
   }
 
   function setCodecModeLabel(mode, detail) {
@@ -238,7 +254,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     codecMode.textContent = `Codec: ${String(mode || "auto").toUpperCase()}${suffix}`;
   }
 
-  setCodecModeLabel(prefersH264 ? "h264" : "jpeg", "preferred");
+  setCodecModeLabel("jpeg", "enforced");
   setStreamState("connecting", "Connecting");
 
   function updateFpsDisplay(agentValue) {
@@ -1143,7 +1159,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
   function pushQuality(val) {
     const q = Number(val) || 90;
-    const codec = q >= 100 ? "raw" : (prefersH264 ? "h264" : "jpeg");
+    const codec = "jpeg";
     console.debug("backstage: pushQuality val=", val, "q=", q, "codec=", codec);
     setCodecModeLabel(codec, "requested");
     sendCmd("backstage_set_quality", { quality: q, codec });
@@ -1166,12 +1182,6 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   }
 
   function pushTransportQuality(mode) {
-    if (mode === "relayed" || mode === "p2p") {
-      const q = Number(qualitySlider?.value) || 90;
-      setCodecModeLabel("h264", "webrtc");
-      sendCmd("backstage_set_quality", { quality: q, codec: "h264", source: "webrtc" });
-      return;
-    }
     if (qualitySlider) {
       pushQuality(qualitySlider.value);
     }
@@ -1179,10 +1189,9 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
 
   if (codecH264) {
     codecH264.addEventListener("change", function () {
-      prefersH264 = !!codecH264.checked && typeof VideoDecoder === "function";
-      if (!prefersH264) {
-        destroyVideoDecoder();
-      }
+      prefersH264 = false;
+      codecH264.checked = false;
+      destroyVideoDecoder();
       if (qualitySlider) {
         pushQuality(qualitySlider.value);
       }
@@ -1199,6 +1208,15 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     }
     videoDecoder = null;
     h264TimestampUs = 0;
+    h264AwaitingKeyframe = true;
+    h264RecoveryRequestedAt = 0;
+  }
+
+  function requestH264DecoderRecovery(reason) {
+    const now = performance.now();
+    if (now - h264RecoveryRequestedAt < 500) return;
+    h264RecoveryRequestedAt = now;
+    sendCmd("backstage_request_keyframe", { reason });
   }
 
   function fallbackToJpegCodec(reason) {
@@ -1274,6 +1292,8 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         },
         error: (err) => {
           console.warn("backstage: h264 decoder error", err);
+          h264AwaitingKeyframe = true;
+          requestH264DecoderRecovery("h264_decoder_error");
         },
       });
       videoDecoder.configure({ codec: "avc1.42E01E", optimizeForLatency: true });
@@ -1334,6 +1354,12 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   if (uiaCtrl) {
     uiaCtrl.addEventListener("change", function () {
       sendCmd("backstage_enable_uia", { enabled: uiaCtrl.checked });
+      sharedSettingsSaver.scheduleSave();
+    });
+  }
+  if (printWindowFallbackCtrl) {
+    printWindowFallbackCtrl.addEventListener("change", function () {
+      sendCmd("backstage_enable_printwindow_fallback", { enabled: printWindowFallbackCtrl.checked });
       sharedSettingsSaver.scheduleSave();
     });
   }
@@ -1486,9 +1512,23 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
         fallbackToJpegCodec("WebCodecs decoder unavailable");
         return;
       }
+      const isKeyFrame = isH264KeyFrame(h264Bytes);
+      if (videoDecoder.decodeQueueSize > maxH264DecodeQueue) {
+        videoDecoder.reset();
+        h264TimestampUs = 0;
+        h264AwaitingKeyframe = true;
+        requestH264DecoderRecovery("h264_decoder_backlog");
+      }
+      if (h264AwaitingKeyframe && !isKeyFrame) {
+        requestH264DecoderRecovery("h264_decoder_keyframe_required");
+        return;
+      }
+      if (isKeyFrame) {
+        h264AwaitingKeyframe = false;
+      }
       const frameIntervalUs = Math.floor(1_000_000 / Math.max(1, fps || 25));
       const chunk = new EncodedVideoChunk({
-        type: isH264KeyFrame(h264Bytes) ? "key" : "delta",
+        type: isKeyFrame ? "key" : "delta",
         timestamp: h264TimestampUs,
         data: h264Bytes,
       });
@@ -1797,7 +1837,16 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   const kbdCapture = createKeyboardCapture({
     container: canvasContainer,
     sendKeyDown: (e) => {
-      if (desiredStreaming) sendCmd("backstage_key_down", { key: e.key, code: e.code });
+      if (!desiredStreaming) return;
+      const altGraph = typeof e.getModifierState === "function" && e.getModifierState("AltGraph");
+      const printable = typeof e.key === "string"
+        && Array.from(e.key).length === 1
+        && (!e.ctrlKey && !e.metaKey && !e.altKey || altGraph);
+      sendCmd("backstage_key_down", {
+        key: e.key,
+        code: e.code,
+        text: printable ? e.key : "",
+      });
     },
     sendKeyUp: (e) => {
       if (desiredStreaming) sendCmd("backstage_key_up", { key: e.key, code: e.code });

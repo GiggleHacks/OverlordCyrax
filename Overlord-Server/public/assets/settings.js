@@ -21,6 +21,7 @@ import {
   setSuccessSoundEnabled,
 } from "./sounds.js";
 import { escapeHtml, formatBytes as formatSharedBytes, formatDate as formatSharedDate } from "./format.js";
+import { getCertificateTrustGuide } from "./cert-banner.js";
 
 const PREF_REFRESH_KEY = "overlord_refresh_interval_seconds";
 const NAV_MODE_KEY = "sb_mode";
@@ -102,6 +103,10 @@ const tlsCertbotDomainInput = document.getElementById("tls-certbot-domain");
 const tlsCertbotCertFileInput = document.getElementById("tls-certbot-cert-file");
 const tlsCertbotKeyFileInput = document.getElementById("tls-certbot-key-file");
 const tlsCertbotCaFileInput = document.getElementById("tls-certbot-ca-file");
+const tlsActiveCertSource = document.getElementById("tls-active-cert-source");
+const tlsDownloadCertBtn = document.getElementById("tls-download-cert-btn");
+const tlsTrustHelpBtn = document.getElementById("tls-trust-help-btn");
+const tlsTrustInstructions = document.getElementById("tls-trust-instructions");
 
 const oidcForm = document.getElementById("oidc-form");
 const oidcPermissionNote = document.getElementById("oidc-permission-note");
@@ -478,6 +483,45 @@ function applyTlsForm() {
   tlsCertbotCaFileInput.value = certbot.caFileName || "chain.pem";
 }
 
+tlsTrustHelpBtn?.addEventListener("click", () => {
+  tlsTrustInstructions?.classList.toggle("hidden");
+});
+
+async function loadActiveTlsCertificate() {
+  const guide = getCertificateTrustGuide();
+  if (tlsTrustHelpBtn) {
+    tlsTrustHelpBtn.innerHTML = `<i class="fa-solid fa-shield-halved"></i>Trust on ${guide.label}`;
+  }
+  if (tlsTrustInstructions) {
+    tlsTrustInstructions.innerHTML = guide.instructions;
+  }
+
+  try {
+    const res = await fetch("/api/cert/info", { credentials: "include" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const source = String(data.source || "unknown");
+    if (tlsActiveCertSource) {
+      tlsActiveCertSource.textContent = source === "self-signed"
+        ? "Self-signed"
+        : source === "certbot"
+          ? "Certbot / Let's Encrypt"
+          : source === "configured"
+            ? "Configured certificate"
+            : "Unknown source";
+      tlsActiveCertSource.classList.toggle("border-amber-600", source === "self-signed");
+      tlsActiveCertSource.classList.toggle("bg-amber-950", source === "self-signed");
+      tlsActiveCertSource.classList.toggle("text-amber-200", source === "self-signed");
+    }
+  } catch {
+    if (tlsActiveCertSource) tlsActiveCertSource.textContent = "Unavailable";
+    if (tlsDownloadCertBtn) {
+      tlsDownloadCertBtn.setAttribute("aria-disabled", "true");
+      tlsDownloadCertBtn.classList.add("pointer-events-none", "opacity-50");
+    }
+  }
+}
+
 async function loadTlsSettings() {
   if (!currentUser) return;
 
@@ -510,6 +554,7 @@ async function loadTlsSettings() {
   tlsConfig = data.tls || null;
   applyTlsForm();
   setTlsFormDisabled(false);
+  await loadActiveTlsCertificate();
 }
 
 function listToCsv(value) {
@@ -2030,7 +2075,7 @@ async function exportSettings() {
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";
     const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
-    const filename = filenameMatch ? filenameMatch[1] : "overlord-settings.json";
+    const filename = filenameMatch ? filenameMatch[1] : "overlord-server-backup.zip";
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -2058,35 +2103,39 @@ async function importSettings(event) {
 
   event.target.value = "";
 
-  if (file.size > 512 * 1024) {
-    showExportImportMessage("File too large (max 512 KB).", "error");
+  if (file.size > 1024 * 1024 * 1024) {
+    showExportImportMessage("File too large (max 1 GB).", "error");
     return;
   }
 
-  let data;
-  try {
-    const text = await file.text();
-    data = JSON.parse(text);
-  } catch {
-    showExportImportMessage("Invalid JSON file.", "error");
-    return;
+  const isLegacyJson = file.name.toLowerCase().endsWith(".json") || file.type === "application/json";
+  let requestBody;
+  let contentType;
+  if (isLegacyJson) {
+    try {
+      const data = JSON.parse(await file.text());
+      if (!data || typeof data !== "object") throw new Error();
+      requestBody = JSON.stringify(data);
+      contentType = "application/json";
+    } catch {
+      showExportImportMessage("Invalid legacy settings JSON file.", "error");
+      return;
+    }
+  } else {
+    requestBody = await file.arrayBuffer();
+    contentType = "application/zip";
   }
 
-  if (!data || typeof data !== "object") {
-    showExportImportMessage("File does not contain a valid settings object.", "error");
-    return;
-  }
-
-  if (!confirm("Import settings from this file? This will overwrite your current configuration.")) {
+  if (!confirm("Stage this server restore? On the next restart it will replace the current database, identity keys, TLS certificate, plugins, and persistent server data.")) {
     return;
   }
 
   try {
     const res = await fetch("/api/settings/import", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": contentType },
       credentials: "include",
-      body: JSON.stringify(data),
+      body: requestBody,
     });
 
     const result = await res.json().catch(() => ({}));
@@ -2098,7 +2147,8 @@ async function importSettings(event) {
     const appliedStr = result.applied?.length ? result.applied.join(", ") : "nothing";
     const warningStr = result.warnings?.length ? " \u26A0 " + result.warnings.join(" ") : "";
     const msgType = result.warnings?.length ? "warning" : "ok";
-    showExportImportMessage(`Imported: ${appliedStr}.${warningStr}`, msgType);
+    const restartStr = result.restartRequired ? " Restart the server to apply the restore." : "";
+    showExportImportMessage(`Imported: ${appliedStr}.${restartStr}${warningStr}`, msgType);
 
     await loadSecurityPolicy();
     await loadTlsSettings();

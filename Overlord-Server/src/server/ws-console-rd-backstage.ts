@@ -151,6 +151,7 @@ type FrameBroadcastResult = {
   sent: boolean;
   dropped: boolean;
   viewers: number;
+  sentViewers: Set<ServerWebSocket<SocketData>>;
 };
 
 function broadcastFrameToViewers(
@@ -161,6 +162,7 @@ function broadcastFrameToViewers(
   let sent = false;
   let dropped = false;
   let viewers = 0;
+  const sentViewers = new Set<ServerWebSocket<SocketData>>();
   const t0 = performance.now();
   const byteLen = buf.length;
   for (const session of sessions) {
@@ -174,6 +176,7 @@ function broadcastFrameToViewers(
       session.viewer.send(buf);
       metrics.recordBytesSent(byteLen);
       sent = true;
+      sentViewers.add(session.viewer);
     } catch (err) {
       logger.error("[rd] viewer frame send failed", err);
     }
@@ -185,12 +188,14 @@ function broadcastFrameToViewers(
     rdSendStats.sendMs += elapsed;
   }
   logRdSend(header);
-  return { sent, dropped, viewers };
+  return { sent, dropped, viewers, sentViewers };
 }
 
 const rdSendStats = { lastLog: 0, frames: 0, sendMs: 0, bytes: 0 };
 const rdDebugFrameLogAt = new Map<string, number>();
-const rdCanvasFrameAckPending = new Map<string, string>();
+const rdCanvasFrameAckPending = new Map<string, { sessionId: string; count: number }>();
+const rdBackpressureKeyframeAt = new Map<string, number>();
+const RD_BACKPRESSURE_KEYFRAME_INTERVAL_MS = 1_000;
 const AUTOMATIC_DESKTOP_KEYFRAME_REASONS: Record<string, true> = {
   viewer_frame_gap: true,
   decoder_backpressure: true,
@@ -509,6 +514,7 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
         .filter(s => s.id !== ws.data.sessionId);
       logger.debug(`[rd-debug] desktop_stop requested client=${clientId} session=${ws.data.sessionId || ""} otherViewers=${otherViewers.length} state=${JSON.stringify(state)}`);
       if (otherViewers.length === 0) {
+        rdBackpressureKeyframeAt.delete(clientId);
         stopRemoteDesktopRecording(clientId, "desktop stopped");
         sendDesktopCommand(target, "desktop_stop", {});
         sendDesktopCommand(target, "webrtc_stop", { kind: "desktop" });
@@ -889,23 +895,32 @@ function broadcastRemoteDesktopFrame(clientId: string, bytes: Uint8Array, header
   const result = broadcastFrameToViewers(sessions, buf, header);
   if (result.sent) {
     const controller = sessions.find((session) =>
+      result.sentViewers.has(session.viewer) &&
       (session.viewer.data as any).rdCanvasFlowControl === true &&
       (session.viewer.data as any).rdCanvasBackpressure === true
     );
     if (controller?.viewer.data.sessionId) {
-      rdCanvasFrameAckPending.set(clientId, controller.viewer.data.sessionId);
+      const sessionId = controller.viewer.data.sessionId;
+      const pending = rdCanvasFrameAckPending.get(clientId);
+      rdCanvasFrameAckPending.set(clientId, {
+        sessionId,
+        count: pending?.sessionId === sessionId ? pending.count + 1 : 1,
+      });
     }
   }
   if (result.dropped && shouldRequestDesktopKeyframe(clientId)) {
     const target = clientManager.getClient(clientId);
-    if (target) {
+    const now = Date.now();
+    const lastRequestAt = rdBackpressureKeyframeAt.get(clientId) || 0;
+    if (target && now - lastRequestAt >= RD_BACKPRESSURE_KEYFRAME_INTERVAL_MS) {
+      rdBackpressureKeyframeAt.set(clientId, now);
       sendDesktopCommand(target, "desktop_request_keyframe", {
         reason: "viewer_backpressure",
         format: String(header?.format || ""),
       });
     }
   }
-  return (result.sent && !rdCanvasFrameAckPending.has(clientId)) || result.viewers === 0;
+  return ((result.sent || result.dropped) && !rdCanvasFrameAckPending.has(clientId)) || result.viewers === 0;
 }
 
 (globalThis as any).__rdBroadcast = (clientId: string, bytes: Uint8Array, header?: any): boolean => {
@@ -923,7 +938,7 @@ type backstageStreamingState = {
 };
 
 function defaultbackstageStreamingState(): backstageStreamingState {
-  return { isStreaming: false, virtualMode: false, display: 0, quality: 90, codec: "", maxFps: 120, lastFps: 0 };
+  return { isStreaming: false, virtualMode: false, display: 0, quality: 90, codec: "jpeg", maxFps: 120, lastFps: 0 };
 }
 
 export const backstageStreamingState = new Map<string, backstageStreamingState>();
@@ -1323,26 +1338,9 @@ export function handlebackstageViewerMessage(ws: ServerWebSocket<SocketData>, ra
           sendbackstageCommand(target, "backstage_stop", {});
           state.isStreaming = false;
           logger.debug(`[backstage] restarting stream to change virtual_mode=${state.virtualMode} -> ${virtualMode}`);
-        }
+      }
       if (!state.isStreaming) {
-        if ((payload as any).webrtc === true) {
-          const streamPath = webrtcStreamPathFor(clientId, "backstage");
-          const token = issueWebrtcPublishToken(clientId);
-          sendbackstageCommand(target, "webrtc_publish", {
-            streamPath,
-            whipPath: `/api/webrtc/${streamPath}/whip`,
-            token,
-            kind: "backstage",
-            hasVideo: true,
-            hasAudio: false,
-            iceServers: issueTurnIceServers(`${clientId}:backstage:whip`),
-          });
-          safeSendViewer(ws, {
-            type: "webrtc_ready",
-            streamPath,
-            whepPath: `/api/webrtc/${streamPath}/whep`,
-          });
-        }
+        sendbackstageCommand(target, "backstage_set_quality", { quality: state.quality, codec: "jpeg" });
         sendbackstageCommand(target, "backstage_set_fps", { fps: clampDesktopFps(state.maxFps) });
         sendbackstageCommand(target, "backstage_start", {
           autoStartExplorer: false,
@@ -1385,9 +1383,9 @@ export function handlebackstageViewerMessage(ws: ServerWebSocket<SocketData>, ra
     }
     case "backstage_set_quality": {
       const newQuality = Number(payload.quality) || 90;
-      const newCodec = String(payload.codec || "").toLowerCase();
-		sendbackstageCommand(target, "backstage_set_quality", { quality: newQuality, codec: newCodec });
-		if (state.quality !== newQuality || state.codec !== newCodec) {
+      const newCodec = "jpeg";
+      sendbackstageCommand(target, "backstage_set_quality", { quality: newQuality, codec: newCodec });
+      if (state.quality !== newQuality || state.codec !== newCodec) {
         state.quality = newQuality;
         state.codec = newCodec;
         backstageStreamingState.set(clientId, state);
@@ -1424,6 +1422,9 @@ export function handlebackstageViewerMessage(ws: ServerWebSocket<SocketData>, ra
     case "backstage_enable_dxgi":
       if (state.isStreaming) sendbackstageCommand(target, "backstage_enable_dxgi", { enabled: !!payload.enabled });
       break;
+    case "backstage_enable_printwindow_fallback":
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_enable_printwindow_fallback", { enabled: !!payload.enabled });
+      break;
     case "backstage_enable_uia":
       if (state.isStreaming) sendbackstageCommand(target, "backstage_enable_uia", { enabled: !!payload.enabled });
       break;
@@ -1453,7 +1454,11 @@ export function handlebackstageViewerMessage(ws: ServerWebSocket<SocketData>, ra
       if (state.isStreaming) sendbackstageCommand(target, "backstage_mouse_wheel", { delta: Number(payload.delta) || 0, x: Number(payload.x) || 0, y: Number(payload.y) || 0 });
       break;
     case "backstage_key_down":
-      if (state.isStreaming) sendbackstageCommand(target, "backstage_key_down", { key: payload.key || "", code: payload.code || "" });
+      if (state.isStreaming) sendbackstageCommand(target, "backstage_key_down", {
+        key: String(payload.key || ""),
+        code: String(payload.code || ""),
+        text: String(payload.text || ""),
+      });
       break;
     case "backstage_key_up":
       if (state.isStreaming) sendbackstageCommand(target, "backstage_key_up", { key: payload.key || "", code: payload.code || "" });
@@ -1556,24 +1561,10 @@ export function handlebackstageViewerMessage(ws: ServerWebSocket<SocketData>, ra
       break;
     }
     case "webrtc_p2p_offer": {
-      const sdp = typeof (payload as any).sdp === "string" ? (payload as any).sdp : "";
-      if (!sdp) break;
-      const sessionId = createP2PSession(ws, clientId, "backstage");
-      sendbackstageCommand(target, "webrtc_p2p_offer", { sessionId, sdp, kind: "backstage", hasVideo: true, hasAudio: false, iceServers: issueTurnIceServers(`${clientId}:backstage:${sessionId}`) });
+      safeSendViewer(ws, { type: "error", reason: "Backstage supports JPEG canvas transport only" });
       break;
     }
     case "webrtc_p2p_ice": {
-      const sessionId = getP2PSessionIdForViewer(ws);
-      if (!sessionId) break;
-      const candidate = typeof (payload as any).candidate === "string" ? (payload as any).candidate : "";
-      if (!candidate) break;
-      sendbackstageCommand(target, "webrtc_p2p_ice", {
-        sessionId,
-        kind: "backstage",
-        candidate,
-        sdpMid: typeof (payload as any).sdpMid === "string" ? (payload as any).sdpMid : "",
-        sdpMLineIndex: Number((payload as any).sdpMLineIndex) || 0,
-      });
       break;
     }
     case "webrtc_p2p_stop": {
@@ -1646,13 +1637,16 @@ export function handleDesktopEncoderCapabilities(clientId: string, payload: any)
 }
 
 function releaseCanvasFrameAck(clientId: string, sessionId?: string): boolean {
-  const controllerSessionId = rdCanvasFrameAckPending.get(clientId);
-  if (!controllerSessionId || (sessionId && controllerSessionId !== sessionId)) return false;
+  const pending = rdCanvasFrameAckPending.get(clientId);
+  if (!pending || (sessionId && pending.sessionId !== sessionId)) return false;
   rdCanvasFrameAckPending.delete(clientId);
   const target = clientManager.getClient(clientId);
   if (!target) return false;
   try {
-    target.ws.send(encodeMessage({ type: "frame_ack" }));
+    const ack = encodeMessage({ type: "frame_ack" });
+    for (let i = 0; i < pending.count; i++) {
+      target.ws.send(ack);
+    }
     return true;
   } catch (err) {
     logger.debug(`[rd] canvas frame ack failed client=${clientId}: ${(err as Error).message}`);

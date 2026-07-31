@@ -287,6 +287,10 @@ function succeedJob(job: RemoteExecuteJob) {
   cleanupJob(job);
 }
 
+function isJobStopped(job: RemoteExecuteJob): boolean {
+  return Boolean(job.cancelled) || job.status === "failed" || job.status === "succeeded";
+}
+
 function cancelRemoteExecuteJob(job: RemoteExecuteJob, deps: RemoteExecuteRouteDeps): boolean {
   if (job.status === "succeeded" || job.status === "failed") return false;
   job.cancelled = true;
@@ -487,7 +491,7 @@ async function runRemoteExecuteJob(
   ip: string,
 ) {
   try {
-    if (job.cancelled || job.status === "failed") return;
+    if (isJobStopped(job)) return;
 
     setJobPhase(job, "client_transfer", 0);
     job.commandSentAt = now();
@@ -520,7 +524,7 @@ async function runRemoteExecuteJob(
       (payload) => updateJobFromProgress(job, payload, deps),
     );
 
-    if (job.cancelled || job.status === "failed") return;
+    if (isJobStopped(job)) return;
 
     if (uploadResult.code !== "client_transfer_timeout" && uploadResult.code !== "send_command_failed") {
       job.clientAcknowledged = true;
@@ -561,7 +565,7 @@ async function runRemoteExecuteJob(
         },
         60_000,
       );
-      if (job.cancelled || job.status === "failed") return;
+      if (isJobStopped(job)) return;
       if (!chmodResult.ok) {
         failJob(job, chmodResult.code || "chmod_failed", chmodResult.message || "Failed to set execute permissions", {
           phase: "chmod",
@@ -571,7 +575,7 @@ async function runRemoteExecuteJob(
       }
     }
 
-    if (job.cancelled || job.status === "failed") return;
+    if (isJobStopped(job)) return;
 
     setJobPhase(job, "execute", 96);
     const execResult = await waitForCommandReply(
@@ -594,7 +598,7 @@ async function runRemoteExecuteJob(
       deps.execTimeoutMs ?? EXEC_TIMEOUT_MS,
     );
 
-    if (job.cancelled || job.status === "failed") return;
+    if (isJobStopped(job)) return;
 
     if (!execResult.ok) {
       failJob(job, execResult.code || "execute_failed", execResult.message || "Failed to start remote execution", {

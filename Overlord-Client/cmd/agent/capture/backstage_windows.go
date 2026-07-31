@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -31,8 +32,8 @@ var (
 	procGetWindow                = user32.NewProc("GetWindow")
 	procGetTopWindow             = user32.NewProc("GetTopWindow")
 	procCreateProcessW           = kernel32.NewProc("CreateProcessW")
-	procSendInputbackstage            = user32.NewProc("SendInput")
-	procGetCursorPosbackstage         = user32.NewProc("GetCursorPos")
+	procSendInputbackstage       = user32.NewProc("SendInput")
+	procGetCursorPosbackstage    = user32.NewProc("GetCursorPos")
 	procWindowFromPoint          = user32.NewProc("WindowFromPoint")
 	procScreenToClient           = user32.NewProc("ScreenToClient")
 	procPostMessageW             = user32.NewProc("PostMessageW")
@@ -147,7 +148,7 @@ const (
 	GA_ROOT                = 2
 	SMTO_ABORTIFHUNG       = 0x0002
 
-	GWL_EXSTYLE     = -20
+	GWL_EXSTYLE      = -20
 	WS_EX_TOOLWINDOW = 0x00000080
 )
 
@@ -223,6 +224,7 @@ type backstageTask struct {
 	y               int32
 	button          int
 	vk              uint16
+	text            string
 	delta           int32
 	dllBytes        []byte
 	captureDllBytes []byte
@@ -375,6 +377,7 @@ func CleanupbackstageDesktop() {
 	defer backstageDesktopMu.Unlock()
 
 	backstageCleanupFrameReaders()
+	backstageCleanupDWMThumbnails()
 
 	backstageFreeCapCache()
 
@@ -510,9 +513,9 @@ func ensurebackstageThread() error {
 				case backstageTaskMouseUp:
 					result.err = backstageMouseButtonOnThread(task.button, false)
 				case backstageTaskKeyDown:
-					result.err = backstageKeyOnThread(task.vk, true)
+					result.err = backstageKeyOnThread(task.vk, task.text, true)
 				case backstageTaskKeyUp:
-					result.err = backstageKeyOnThread(task.vk, false)
+					result.err = backstageKeyOnThread(task.vk, "", false)
 				case backstageTaskMouseWheel:
 					result.err = backstageMouseWheelOnThread(task.delta)
 				case backstageTaskAutoStartExplorer:
@@ -590,6 +593,9 @@ func BackstageKillAll() error {
 
 	pids := make(map[uint32]struct{})
 	cb := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
+		if backstageIsDWMHost(hwnd) {
+			return 1
+		}
 		var pid uint32
 		procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
 		if pid != 0 {
@@ -650,8 +656,8 @@ func BackstageInputMouseUp(button int) error {
 	return result.err
 }
 
-func BackstageInputKeyDown(vk uint16) error {
-	result, err := executebackstageTask(backstageTask{kind: backstageTaskKeyDown, vk: vk}, 3*time.Second)
+func BackstageInputKeyDown(vk uint16, text string) error {
+	result, err := executebackstageTask(backstageTask{kind: backstageTaskKeyDown, vk: vk, text: printableKeyText(text)}, 3*time.Second)
 	if err != nil {
 		return err
 	}
@@ -887,6 +893,18 @@ func BackstageCaptureDisplayOnThread(display int) (*image.RGBA, error) {
 	if dstW <= 0 || dstH <= 0 {
 		dstW = srcW
 		dstH = srcH
+	}
+
+	if dwmHDC, dwmBuf, ok := backstageEnsureDWMCompCache(dstW, dstH); ok {
+		for i := range dwmBuf {
+			dwmBuf[i] = 0
+		}
+		if drawbackstageStagingFromDWM(dwmHDC, bounds, dstW, dstH, dwmBuf) {
+			swapRB(dwmBuf)
+			img := GetRGBA(dstW, dstH)
+			copy(img.Pix, dwmBuf)
+			return img, nil
+		}
 	}
 
 	capW := srcW
@@ -1229,7 +1247,7 @@ func backstageMouseButtonOnThread(button int, down bool) error {
 	return nil
 }
 
-func backstageKeyOnThread(vk uint16, down bool) error {
+func backstageKeyOnThread(vk uint16, text string, down bool) error {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	pt := currentbackstageCursor()
 	hwnd := windowFromPoint(pt)
@@ -1260,7 +1278,7 @@ func backstageKeyOnThread(vk uint16, down bool) error {
 		if isModifierVK(vk) {
 			return nil
 		}
-		return uiaHandleKey(hwnd, vk, down)
+		return uiaHandleKey(hwnd, vk, text, down)
 	}
 
 	if isModifierVK(vk) {
@@ -1268,7 +1286,9 @@ func backstageKeyOnThread(vk uint16, down bool) error {
 	}
 
 	if down {
-		if ch := virtualKeyToChars(vk); len(ch) > 0 && !isNonPrintableVK(vk) {
+		if text != "" && !isNonPrintableVK(vk) {
+			postTextMessage(hwnd, text)
+		} else if ch := virtualKeyToChars(vk); len(ch) > 0 && !isNonPrintableVK(vk) {
 			for _, r := range ch {
 				procPostMessageW.Call(hwnd, WM_CHAR, uintptr(r), uintptr(1))
 			}
@@ -1281,6 +1301,25 @@ func backstageKeyOnThread(vk uint16, down bool) error {
 	return nil
 }
 
+func printableKeyText(text string) string {
+	if !utf8.ValidString(text) || utf8.RuneCountInString(text) != 1 {
+		return ""
+	}
+	r, _ := utf8.DecodeRuneInString(text)
+	if r < 0x20 || r == 0x7f {
+		return ""
+	}
+	return text
+}
+
+func postTextMessage(hwnd uintptr, text string) {
+	for _, unit := range syscall.StringToUTF16(text) {
+		if unit != 0 {
+			procPostMessageW.Call(hwnd, WM_CHAR, uintptr(unit), uintptr(1))
+		}
+	}
+}
+
 func foregroundWindow() uintptr {
 	r, _, _ := procGetForegroundWindow.Call()
 	return r
@@ -1289,7 +1328,7 @@ func foregroundWindow() uintptr {
 func findAnyVisibleTopLevelWindow() uintptr {
 	hwnd := getTopWindow(0)
 	for hwnd != 0 {
-		if isWindowVisible(hwnd) {
+		if !backstageIsDWMHost(hwnd) && isWindowVisible(hwnd) {
 			return hwnd
 		}
 		hwnd = getWindow(hwnd, GW_HWNDNEXT)
@@ -1303,6 +1342,9 @@ func makeLParam(x, y int32) uintptr {
 
 func windowFromPoint(pt point) uintptr {
 	ret, _, _ := procWindowFromPoint.Call(uintptr(*(*int64)(unsafe.Pointer(&pt))))
+	if backstageIsDWMHost(ret) {
+		return 0
+	}
 	return ret
 }
 
@@ -1655,7 +1697,7 @@ func drawbackstageWindowsToBuffer(hdcScreen uintptr, bounds image.Rectangle, tar
 
 	drawn := 0
 	for hwnd != 0 {
-		if drawbackstageWindow(hdcScreen, hwnd, bounds, target, targetStride) {
+		if !backstageIsDWMHost(hwnd) && drawbackstageWindow(hdcScreen, hwnd, bounds, target, targetStride) {
 			drawn++
 		}
 		alive[hwnd] = true
@@ -1728,10 +1770,13 @@ var dxgiFrameBuf []byte
 
 var backstageDXGIEnabled atomic.Bool
 var backstageUIAEnabled atomic.Bool
+var backstagePrintWindowFallbackEnabled atomic.Bool
+var backstagePrintWindowFallbackLogNs atomic.Int64
 
 func init() {
 	backstageDXGIEnabled.Store(false) // disabled by default
 	backstageUIAEnabled.Store(false)  // disabled by default
+	backstagePrintWindowFallbackEnabled.Store(true)
 }
 
 func SetbackstageDXGIEnabled(enabled bool) {
@@ -1748,6 +1793,14 @@ func SetbackstageUIAEnabled(enabled bool) {
 
 func GetbackstageUIAEnabled() bool {
 	return backstageUIAEnabled.Load()
+}
+
+func SetbackstagePrintWindowFallbackEnabled(enabled bool) {
+	backstagePrintWindowFallbackEnabled.Store(enabled)
+}
+
+func GetbackstagePrintWindowFallbackEnabled() bool {
+	return backstagePrintWindowFallbackEnabled.Load()
 }
 
 func drawbackstageWindowFromDXGI(hwnd uintptr, winLeft, winTop, winW, winH int, bounds image.Rectangle, target []byte, targetStride int) bool {
@@ -1824,6 +1877,9 @@ func drawbackstageWindowFromDXGI(hwnd uintptr, winLeft, winTop, winW, winH int, 
 }
 
 func drawbackstageWindow(hdcScreen, hwnd uintptr, bounds image.Rectangle, target []byte, targetStride int) bool {
+	if backstageIsDWMHost(hwnd) {
+		return false
+	}
 	if !isWindowVisible(hwnd) {
 		return false
 	}
@@ -1851,6 +1907,15 @@ func drawbackstageWindow(hdcScreen, hwnd uintptr, bounds image.Rectangle, target
 
 	if drawn := drawbackstageWindowFromDXGI(hwnd, winLeft, winTop, winW, winH, bounds, target, targetStride); drawn {
 		return true
+	}
+	if !backstagePrintWindowFallbackEnabled.Load() {
+		now := time.Now().UnixNano()
+		last := backstagePrintWindowFallbackLogNs.Load()
+		if now-last > int64(5*time.Second) &&
+			backstagePrintWindowFallbackLogNs.CompareAndSwap(last, now) {
+			log.Printf("backstage capture: per-window PrintWindow fallback is disabled")
+		}
+		return false
 	}
 
 	// Use pooled DC+DIB from cache
@@ -2025,6 +2090,9 @@ func BackstageEnumWindows() ([]BackstageWindowInfo, []BackstageMonitorInfo) {
 	var windows []rawWin
 
 	cb := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
+		if backstageIsDWMHost(hwnd) {
+			return 1
+		}
 		windows = append(windows, rawWin{hwnd: hwnd})
 		return 1
 	})

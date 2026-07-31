@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File Manager 2.0 - Overlord</title>
+    <link rel="stylesheet" href="/vendor/inter/400.css" />
+    <link rel="stylesheet" href="/vendor/inter/600.css" />
+    <link rel="stylesheet" href="/vendor/inter/700.css" />
+    <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+    <script defer src="/vendor/msgpackr/msgpackr.js"></script>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #070a12;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        font-family: Inter, system-ui, sans-serif;
+        color: #cbd5e1;
+        font-size: 11.5px;
+      }
+      .fm2-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 8px;
+        background: #0a0e1a;
+        border-bottom: 1px solid #1c2440;
+        flex-shrink: 0;
+        min-height: 30px;
+      }
+      .fm2-status {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        font-size: 8px;
+        flex-shrink: 0;
+      }
+      .fm2-status.is-connecting { color: #e6b828; }
+      .fm2-status.is-ok { color: #2ee66b; }
+      .fm2-status.is-err { color: #ef4444; }
+      .fm2-status.is-off { color: #475569; }
+      .fm2-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 22px;
+        font-size: 10px;
+        color: #94a3b8;
+        background: #111827;
+        border: 1px solid #27304f;
+        border-radius: 4px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .fm2-btn:hover:not(:disabled) { color: #e2e8f0; background: #1c2440; }
+      .fm2-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+      .fm2-btn.is-on {
+        color: #38bdf8;
+        background: rgba(56, 189, 248, 0.14);
+        border-color: rgba(56, 189, 248, 0.5);
+      }
+      .fm2-btn-danger:hover:not(:disabled) { color: #fca5a5; border-color: rgba(239, 68, 68, 0.45); }
+      .fm2-sep {
+        width: 1px;
+        height: 16px;
+        background: #1c2440;
+        flex-shrink: 0;
+        margin: 0 1px;
+      }
+      .fm2-path {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 22px;
+        padding: 0 8px;
+        font-family: "JetBrains Mono", Consolas, monospace;
+        font-size: 10.5px;
+        color: #e2e8f0;
+        background: #070a12;
+        border: 1px solid #1c2440;
+        border-radius: 4px;
+        outline: none;
+      }
+      .fm2-path:focus { border-color: rgba(56, 189, 248, 0.5); }
+      .fm2-search {
+        position: relative;
+        width: 120px;
+        flex-shrink: 0;
+      }
+      .fm2-search > i {
+        position: absolute;
+        left: 7px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 9px;
+        color: #475569;
+        pointer-events: none;
+      }
+      .fm2-search input {
+        width: 100%;
+        height: 22px;
+        padding: 0 8px 0 20px;
+        font-size: 11px;
+        font-family: inherit;
+        color: #e2e8f0;
+        background: #070a12;
+        border: 1px solid #1c2440;
+        border-radius: 4px;
+        outline: none;
+      }
+      .fm2-search input::placeholder { color: #3f4a63; }
+      .fm2-search input:focus { border-color: rgba(56, 189, 248, 0.5); }
+      .fm2-ver {
+        font-size: 9px;
+        color: #3f4a63;
+        white-space: nowrap;
+        flex-shrink: 0;
+        user-select: none;
+      }
+      .fm2-main {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+      }
+      .fm2-places {
+        width: 128px;
+        flex-shrink: 0;
+        background: #0a0e1a;
+        border-right: 1px solid #1c2440;
+        overflow: auto;
+        padding: 4px 0;
+      }
+      .fm2-plabel {
+        padding: 5px 10px 2px;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #475569;
+      }
+      .fm2-place {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: #cbd5e1;
+        font: inherit;
+        font-size: 11px;
+        text-align: left;
+        padding: 5px 10px;
+        cursor: pointer;
+        border-left: 2px solid transparent;
+      }
+      .fm2-place i {
+        width: 14px;
+        text-align: center;
+        color: #64748b;
+        font-size: 11px;
+      }
+      .fm2-place:hover { background: rgba(56, 189, 248, 0.06); }
+      .fm2-place.is-on {
+        background: rgba(56, 189, 248, 0.13);
+        border-left-color: #38bdf8;
+        color: #e2e8f0;
+      }
+      .fm2-place.is-on i { color: #38bdf8; }
+      .fm2-list-wrap {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .fm2-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 72px 100px 130px;
+        gap: 0;
+        flex-shrink: 0;
+        background: rgba(7, 10, 18, 0.92);
+        border-bottom: 1px solid #1c2440;
+        user-select: none;
+      }
+      .fm2-col {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        height: 22px;
+        padding: 0 8px;
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #6b7598;
+        cursor: pointer;
+      }
+      .fm2-col:hover { color: #94a3b8; }
+      .fm2-col i { font-size: 8px; opacity: 0.7; }
+      .fm2-col-num { justify-content: flex-end; }
+      .fm2-list {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+      .fm2-list::-webkit-scrollbar { width: 8px; height: 8px; }
+      .fm2-list::-webkit-scrollbar-thumb { background: #2a3350; border-radius: 4px; }
+      .fm2-list::-webkit-scrollbar-track { background: transparent; }
+      .fm2-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 72px 100px 130px;
+        align-items: center;
+        height: 22px;
+        border-left: 2px solid transparent;
+        border-bottom: 1px solid rgba(28, 36, 64, 0.45);
+        cursor: default;
+        padding: 0;
+      }
+      .fm2-row:hover { background: rgba(56, 189, 248, 0.05); }
+      .fm2-row.is-on {
+        background: rgba(56, 189, 248, 0.13);
+        border-left-color: #38bdf8;
+      }
+      .fm2-row > span {
+        padding: 0 8px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11.5px;
+      }
+      .fm2-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .fm2-name i {
+        width: 14px;
+        text-align: center;
+        flex-shrink: 0;
+        font-size: 11px;
+      }
+      .fm2-name .fo { color: #fbbf24; }
+      .fm2-name .pdf { color: #f87171; }
+      .fm2-name .img { color: #c084fc; }
+      .fm2-name .zip { color: #7dd3fc; }
+      .fm2-name .xls { color: #34d399; }
+      .fm2-name .doc { color: #60a5fa; }
+      .fm2-name .txt { color: #94a3b8; }
+      .fm2-name .exe { color: #a78bfa; }
+      .fm2-name .vid { color: #fb7185; }
+      .fm2-name .aud { color: #2dd4bf; }
+      .fm2-name .file { color: #7dd3fc; }
+      .fm2-muted {
+        color: #64748b;
+        font-variant-numeric: tabular-nums;
+      }
+      .fm2-num { text-align: right; }
+      .fm2-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        height: 100%;
+        color: #475569;
+        font-size: 12px;
+      }
+      .fm2-statusbar {
+        flex-shrink: 0;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 10px;
+        background: #0a0e1a;
+        border-top: 1px solid #1c2440;
+        color: #6b7598;
+        font-size: 10.5px;
+      }
+      .fm2-statusbar .r {
+        margin-left: auto;
+        color: #475569;
+        font-family: "JetBrains Mono", Consolas, monospace;
+        font-size: 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 55%;
+      }
+      .fm2-xfer {
+        flex-shrink: 0;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 8px;
+        background: #0c1120;
+        border-top: 1px solid #1c2440;
+        font-size: 10.5px;
+        color: #94a3b8;
+      }
+      .fm2-xfer.is-on { display: flex; }
+      .fm2-xfer-track {
+        flex: 1;
+        height: 6px;
+        background: #070a12;
+        border: 1px solid #1c2440;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .fm2-xfer-fill {
+        height: 100%;
+        width: 0%;
+        background: #38bdf8;
+        transition: width 120ms ease;
+      }
+      .fm2-toast {
+        position: fixed;
+        right: 10px;
+        bottom: 28px;
+        z-index: 50;
+        max-width: min(360px, 80%);
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: #10152a;
+        border: 1px solid #27304f;
+        color: #e2e8f0;
+        font-size: 11px;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+        display: none;
+      }
+      .fm2-toast.is-on { display: block; }
+      .fm2-toast.is-err { border-color: rgba(239, 68, 68, 0.45); color: #fecaca; }
+      .fm2-hidden-input { display: none; }
+      .fm2-drop {
+        outline: 1px dashed rgba(56, 189, 248, 0.55);
+        outline-offset: -3px;
+        background: rgba(56, 189, 248, 0.06);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="fm2-toolbar">
+      <span id="fm2-status" class="fm2-status is-connecting" title="Connecting…">
+        <i class="fa-solid fa-circle-notch fa-spin"></i>
+      </span>
+      <button type="button" id="fm2-back" class="fm2-btn" title="Back" disabled><i class="fa-solid fa-arrow-left"></i></button>
+      <button type="button" id="fm2-forward" class="fm2-btn" title="Forward" disabled><i class="fa-solid fa-arrow-right"></i></button>
+      <button type="button" id="fm2-up" class="fm2-btn" title="Up" disabled><i class="fa-solid fa-arrow-up"></i></button>
+      <div class="fm2-sep"></div>
+      <input id="fm2-path" class="fm2-path" spellcheck="false" autocomplete="off" />
+      <div class="fm2-sep"></div>
+      <button type="button" id="fm2-mkdir" class="fm2-btn" title="New folder" disabled><i class="fa-solid fa-folder-plus"></i></button>
+      <button type="button" id="fm2-upload" class="fm2-btn" title="Upload" disabled><i class="fa-solid fa-upload"></i></button>
+      <button type="button" id="fm2-download" class="fm2-btn" title="Download" disabled><i class="fa-solid fa-download"></i></button>
+      <button type="button" id="fm2-delete" class="fm2-btn fm2-btn-danger" title="Delete" disabled><i class="fa-solid fa-trash"></i></button>
+      <button type="button" id="fm2-refresh" class="fm2-btn" title="Refresh" disabled><i class="fa-solid fa-rotate"></i></button>
+      <div class="fm2-sep"></div>
+      <div class="fm2-search">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input id="fm2-filter" type="search" placeholder="Filter…" autocomplete="off" spellcheck="false" />
+      </div>
+      <span id="fm2-ver" class="fm2-ver" title="File Manager 2.0">v1.0.0</span>
+    </div>
+
+    <div class="fm2-main">
+      <aside id="fm2-places" class="fm2-places"></aside>
+      <div class="fm2-list-wrap">
+        <div class="fm2-head">
+          <div class="fm2-col" id="fm2-sort-name" data-sort="name">Name <i class="fa-solid fa-sort"></i></div>
+          <div class="fm2-col fm2-col-num" id="fm2-sort-size" data-sort="size">Size <i class="fa-solid fa-sort"></i></div>
+          <div class="fm2-col" id="fm2-sort-type" data-sort="type">Type <i class="fa-solid fa-sort"></i></div>
+          <div class="fm2-col" id="fm2-sort-mod" data-sort="mod">Modified <i class="fa-solid fa-sort"></i></div>
+        </div>
+        <div id="fm2-list" class="fm2-list">
+          <div class="fm2-placeholder"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting…</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="fm2-xfer" class="fm2-xfer">
+      <span id="fm2-xfer-label">Transferring…</span>
+      <div class="fm2-xfer-track"><div id="fm2-xfer-fill" class="fm2-xfer-fill"></div></div>
+    </div>
+
+    <div class="fm2-statusbar">
+      <span id="fm2-count">0 items</span>
+      <span id="fm2-sel">0 selected</span>
+      <span id="fm2-msg"></span>
+      <span id="fm2-path-status" class="r"></span>
+    </div>
+
+    <div id="fm2-toast" class="fm2-toast"></div>
+    <input id="fm2-file-input" class="fm2-hidden-input" type="file" multiple />
+
+    <script type="module" src="/assets/files2-bootstrap.js"></script>
+  </body>
+</html>

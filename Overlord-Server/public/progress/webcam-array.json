@@ -1,0 +1,25 @@
+{
+  "percent": 100,
+  "phase": "COMPLETE",
+  "version": "2.6.2",
+  "active": "",
+  "completed": ["tracker", "timeout", "error", "snapshot", "css", "version", "tests", "deploy", "verify", "telegram"],
+  "failed": [],
+  "sparkline": [0, 4, 8, 12, 16, 20, 24, 28, 33, 38, 42, 45, 52, 58, 64, 70, 76, 82, 88, 93, 97, 100],
+  "log": [
+    { "t": "00:00", "level": "info", "msg": "task started: webcam array 30s timeout + cached thumbnails" },
+    { "t": "00:01", "level": "ok", "msg": "progress tracker online" },
+    { "t": "00:03", "level": "ok", "msg": "webcams.js: 30s connect budget + live countdown per tile" },
+    { "t": "00:03", "level": "ok", "msg": "webcams.js: error/offline/not-found/disconnected remove tile immediately" },
+    { "t": "00:04", "level": "ok", "msg": "webcams.js: snapshot cache + instant thumbnails on viewer return" },
+    { "t": "00:04", "level": "ok", "msg": "main.css: countdown + cached snapshot tile styles" },
+    { "t": "00:05", "level": "ok", "msg": "versions bumped: server 2.6.2, agent 2.6.2, webcams.js 1.5.0" },
+    { "t": "00:06", "level": "ok", "msg": "unit tests: 8 pass, 0 fail (webcam-tiles-ui)" },
+    { "t": "00:07", "level": "ok", "msg": "rollback image tagged on ratbox" },
+    { "t": "00:09", "level": "ok", "msg": "source transferred + docker image built" },
+    { "t": "00:11", "level": "ok", "msg": "container recreated, healthy, /api/version = 2.6.2" },
+    { "t": "00:11", "level": "ok", "msg": "deployed assets verified: countdown + snapshot code live" },
+    { "t": "00:12", "level": "ok", "msg": "telegram notification sent" }
+  ],
+  "done": true
+}
