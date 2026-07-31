@@ -1,6 +1,12 @@
 const MIN_BITRATE_MBPS = 2;
 const MAX_BITRATE_MBPS = 50;
 
+/** Default Cyrax ladder: start 480p15, upgrade to 720p15 when the link is healthy. */
+export const DEFAULT_EFFICIENT_PROFILES = Object.freeze([
+  { maxHeight: 720, width: 1280, height: 720, fps: 15, label: "15 FPS - 720p" },
+  { maxHeight: 480, width: 854, height: 480, fps: 15, label: "15 FPS - 480p" },
+]);
+
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
@@ -43,6 +49,7 @@ export class AdaptiveDesktopQuality {
     this.badSamplesRequired = Number(options.badSamplesRequired) || 2;
     this.strainedSamplesRequired = Number(options.strainedSamplesRequired) || 3;
     this.stableSamplesRequired = Number(options.stableSamplesRequired) || 10;
+    this.startAtLowest = options.startAtLowest === true;
     this.profiles = [];
     this.enabled = false;
     this.profileIndex = 0;
@@ -66,7 +73,10 @@ export class AdaptiveDesktopQuality {
     this.resetState();
     if (!this.enabled) return null;
     this.lastChangeAt = now;
-    return this.emit("Auto started at best profile");
+    const reason = this.startAtLowest
+      ? "Auto started at efficient profile"
+      : "Auto started at best profile";
+    return this.emit(reason);
   }
 
   stop() {
@@ -112,26 +122,69 @@ export class AdaptiveDesktopQuality {
       (rtt == null || rtt < 120) && (jitterBuffer == null || jitterBuffer < 25) &&
       (fpsRatio == null || fpsRatio >= 0.95);
 
+    return this.applyHealthSample({ bad, strained, stable, now, badLabel: "Severe congestion", strainedLabel: "Sustained congestion", stableLabel: "Connection stable" });
+  }
+
+  /**
+   * Canvas / non-WebRTC path: use viewer + agent FPS and decode pressure.
+   * @param {{ viewerFps?: number, agentFps?: number, decodeQueue?: number, decodePressure?: boolean, wsBitrateMbps?: number }} metrics
+   */
+  sampleCanvas(metrics, now = Date.now()) {
+    if (!this.enabled || !this.profiles.length) return null;
+    const viewerFps = finite(metrics?.viewerFps);
+    const agentFps = finite(metrics?.agentFps);
+    const decodeQueue = finite(metrics?.decodeQueue) ?? 0;
+    const decodePressure = metrics?.decodePressure === true;
+    const targetFps = Math.max(1, Number(this.profiles[this.profileIndex]?.fps) || 15);
+    const fpsRatio = viewerFps != null && agentFps != null && agentFps > 0
+      ? viewerFps / agentFps
+      : (viewerFps != null ? viewerFps / targetFps : null);
+
+    const bad = decodePressure || decodeQueue > 6 ||
+      (fpsRatio != null && fpsRatio < 0.55) ||
+      (viewerFps != null && viewerFps < targetFps * 0.45);
+    const strained = !bad && (decodeQueue > 3 ||
+      (fpsRatio != null && fpsRatio < 0.85) ||
+      (viewerFps != null && viewerFps < targetFps * 0.75));
+    const stable = !bad && !strained && decodeQueue <= 1 &&
+      (fpsRatio == null || fpsRatio >= 0.92) &&
+      (viewerFps == null || viewerFps >= targetFps * 0.9);
+
+    return this.applyHealthSample({
+      bad,
+      strained,
+      stable,
+      now,
+      badLabel: "Severe canvas backlog",
+      strainedLabel: "Sustained canvas strain",
+      stableLabel: "Canvas connection stable",
+    });
+  }
+
+  applyHealthSample({ bad, strained, stable, now, badLabel, strainedLabel, stableLabel }) {
     this.badSamples = bad ? this.badSamples + 1 : 0;
     this.strainedSamples = strained ? this.strainedSamples + 1 : 0;
     this.stableSamples = stable ? this.stableSamples + 1 : 0;
     if (now - this.lastChangeAt < this.cooldownMs) return null;
 
     if (this.badSamples >= this.badSamplesRequired) {
-      return this.reduce("Severe WebRTC congestion", now, 0.72);
+      return this.reduce(badLabel, now, 0.72);
     }
     if (this.strainedSamples >= this.strainedSamplesRequired) {
-      return this.reduce("Sustained WebRTC congestion", now, 0.84);
+      return this.reduce(strainedLabel, now, 0.84);
     }
     if (this.stableSamples >= this.stableSamplesRequired) {
-      return this.increase("WebRTC connection stable", now);
+      return this.increase(stableLabel, now);
     }
     return null;
   }
 
   resetState() {
-    this.profileIndex = 0;
-    this.targetBitrateMbps = this.profiles[0] ? automaticBitrateMbps(this.profiles[0]) : 0;
+    this.profileIndex = this.startAtLowest && this.profiles.length > 0
+      ? this.profiles.length - 1
+      : 0;
+    const profile = this.profiles[this.profileIndex];
+    this.targetBitrateMbps = profile ? automaticBitrateMbps(profile) : 0;
     this.bitrateReductionsAtProfile = 0;
     this.lastReason = "";
     this.resetCounters();

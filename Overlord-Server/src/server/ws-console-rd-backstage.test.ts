@@ -165,7 +165,7 @@ describe("remote desktop viewer control", () => {
 
     let commands = agentCommands(agentWs);
     expect(commands.filter((msg) => msg.commandType === "desktop_start")).toHaveLength(1);
-    expect(commands.find((msg) => msg.commandType === "desktop_set_fps")?.payload?.fps).toBe(120);
+    expect(commands.find((msg) => msg.commandType === "desktop_set_fps")?.payload?.fps).toBe(15);
     expect(rdStreamingState.get(clientId)?.isStreaming).toBe(true);
 
     handleRemoteDesktopViewerMessage(firstViewer as any, JSON.stringify({ type: "desktop_stop" }));

@@ -218,7 +218,9 @@ describe("unified viewer UI", () => {
   test("uses capability-driven desktop profiles with safe defaults", async () => {
     const html = await publicFile("remotedesktop.html");
     const js = await publicFile("assets/remotedesktop.js");
-    expect(html).toContain('<option value="auto" selected>Auto (best)</option>');
+    expect(html).toContain('<option value="auto" selected>Auto (480p→720p @ 15 FPS)</option>');
+    expect(html).toContain('<option value="480:15">15 FPS - 480p</option>');
+    expect(html).toContain('<option value="720:15">15 FPS - 720p</option>');
     expect(html).toContain('<option value="480:30">30 FPS - 480p</option>');
     expect(html).toContain('<option value="720:30">30 FPS - 720p</option>');
     expect(html).toContain('<option value="1080:60">60 FPS - 1080p</option>');
@@ -226,6 +228,11 @@ describe("unified viewer UI", () => {
     expect(js).toContain('sendCmd("desktop_encoder_capabilities"');
     expect(js).toContain('streamProfileSelect?.value || "auto"');
     expect(js).toContain("manualExtraProfiles");
+    expect(js).toContain("DEFAULT_EFFICIENT_PROFILES");
+    expect(js).toContain("maxHeight: 480, fps: 15");
+    expect(js).toContain("const frameGapMs = lastFrameAt ? now - lastFrameAt : 0");
+    expect(js).toContain("lastViewerKeyframeRequestAt");
+    expect(js).not.toContain("lastViewerFrameGapKeyframeAt");
     expect(js).toContain("480");
   });
 

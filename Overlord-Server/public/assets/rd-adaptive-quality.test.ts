@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { AdaptiveDesktopQuality, automaticBitrateMbps, normalizeAdaptiveProfiles } from "./rd-adaptive-quality.js";
+import {
+  AdaptiveDesktopQuality,
+  DEFAULT_EFFICIENT_PROFILES,
+  automaticBitrateMbps,
+  normalizeAdaptiveProfiles,
+} from "./rd-adaptive-quality.js";
 
 const profiles = [
   { maxHeight: 720, width: 1280, height: 720, fps: 60 },
@@ -48,5 +53,36 @@ describe("adaptive remote desktop quality", () => {
     expect(controller.sample(stable, { fps: 60 }, 6)).toBeNull();
     const recovered = controller.sample(stable, { fps: 60 }, 7);
     expect(recovered?.height).toBe(1440);
+  });
+
+  test("efficient ladder starts at 480p15 and upgrades to 720p15 when stable", () => {
+    const targets: any[] = [];
+    const controller = new AdaptiveDesktopQuality((target) => targets.push(target), {
+      startAtLowest: true,
+      cooldownMs: 1,
+      stableSamplesRequired: 2,
+      badSamplesRequired: 1,
+      strainedSamplesRequired: 1,
+    });
+    controller.setProfiles(DEFAULT_EFFICIENT_PROFILES);
+    const started = controller.start(0);
+    expect(started?.height).toBe(480);
+    expect(started?.fps).toBe(15);
+    expect(started?.maxHeight).toBe(480);
+
+    expect(controller.sampleCanvas({ viewerFps: 15, agentFps: 15, decodeQueue: 0 }, 5)).toBeNull();
+    const upgraded = controller.sampleCanvas({ viewerFps: 15, agentFps: 15, decodeQueue: 0 }, 6);
+    expect(upgraded?.height).toBe(720);
+    expect(upgraded?.fps).toBe(15);
+    expect(upgraded?.maxHeight).toBe(720);
+
+    const downgraded = controller.sampleCanvas({
+      viewerFps: 4,
+      agentFps: 15,
+      decodeQueue: 8,
+      decodePressure: true,
+    }, 20);
+    expect(downgraded?.height).toBe(480);
+    expect(downgraded?.fps).toBe(15);
   });
 });

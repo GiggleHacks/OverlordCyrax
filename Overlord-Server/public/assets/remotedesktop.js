@@ -2,7 +2,11 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 import { checkFeatureAccess } from "./feature-gate.js";
 import { WhepClient } from "./whep.js";
 import { P2PClient } from "./webrtc-p2p.js";
-import { AdaptiveDesktopQuality, normalizeAdaptiveProfiles } from "./rd-adaptive-quality.js";
+import {
+  AdaptiveDesktopQuality,
+  DEFAULT_EFFICIENT_PROFILES,
+  normalizeAdaptiveProfiles,
+} from "./rd-adaptive-quality.js";
 import { createKeyboardCapture } from "./keyboard-capture.js";
 import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
 import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
@@ -10,7 +14,7 @@ import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 import { initSidePanel } from "./side-panel.js";
 import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.js";
 
-const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
+const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
@@ -209,6 +213,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
   const H264_MAX_RECOVERY_ATTEMPTS = 1;
   const H264_DECODE_WARN_THROTTLE_MS = 2000;
   const inputBackpressureBytes = 256 * 1024;
+  const VIEWER_FRAME_GAP_KEYFRAME_MS = 500;
   const VIEWER_FRAME_GAP_KEYFRAME_THROTTLE_MS = 1000;
   let lastViewerKeyframeRequestAt = 0;
   const diagnostics = {
@@ -233,18 +238,26 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     sendCmd("desktop_set_profile", {
       maxHeight: target.maxHeight,
       fps: target.fps,
-      source: "webrtc_auto",
+      source: "auto_efficient",
       reason: target.reason,
     });
+    const manualBitrate = Math.max(0, Math.min(50, Number.parseInt(bitrateSelect?.value || "0", 10) || 0));
+    const useAutoBitrate = manualBitrate === 0;
     sendCmd("desktop_set_bitrate", {
-      bitrateMbps: target.bitrateMbps,
-      adaptive: true,
-      source: "webrtc_auto",
+      bitrateMbps: useAutoBitrate ? target.bitrateMbps : manualBitrate,
+      adaptive: useAutoBitrate,
+      source: "auto_efficient",
       reason: target.reason,
     });
     if (streamProfileDetail) {
-      streamProfileDetail.textContent = `Auto: ${target.width}×${target.height} @ ${target.fps} FPS, ${target.bitrateMbps} Mbps. ${target.reason}.`;
+      streamProfileDetail.textContent = `Auto: ${target.width}×${target.height} @ ${target.fps} FPS${
+        useAutoBitrate ? `, ${target.bitrateMbps} Mbps` : ""
+      }. ${target.reason}.`;
     }
+  }, {
+    startAtLowest: true,
+    stableSamplesRequired: 8,
+    cooldownMs: 4000,
   });
 
   let clipboardSyncTimer = null;
@@ -495,6 +508,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
 
   let savedDisplay = null;
   let savedStreamProfile = "auto";
+  const DEFAULT_STREAM_PROFILE = "auto";
+  const DEFAULT_MANUAL_PROFILE = { maxHeight: 480, fps: 15 };
 
   function setSelectValue(select, value) {
     if (!select || value === undefined || value === null) return false;
@@ -1233,7 +1248,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
   diagnosticsClose?.addEventListener("click", () => setDiagnosticsVisible(false));
   networkStats?.addEventListener("click", () => setDiagnosticsVisible(true));
   try { setDiagnosticsVisible(localStorage.getItem("overlord.rd.statsHud") === "1"); } catch {}
-  setInterval(renderDiagnostics, 250);
+  setInterval(() => {
+    sampleCanvasAdaptiveQuality();
+    renderDiagnostics();
+  }, 250);
 
   function updateNetworkStats(stats) {
     if (!networkStats || !stats) return;
@@ -1276,6 +1294,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     if (agentFps && diagnostics.currentAgentFps != null) {
       agentFps.textContent = String(Math.round(diagnostics.currentAgentFps));
     }
+    sampleCanvasAdaptiveQuality();
     renderDiagnostics();
   }
 
@@ -1827,37 +1846,37 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
 
   function selectedStreamProfile() {
     if (streamProfileSelect?.value === "auto") {
-      const best = encoderProfiles[0];
-      return best ? { maxHeight: best.maxHeight, fps: best.fps } : { maxHeight: -1, fps: 120 };
+      const current = adaptiveQuality.current()?.profile;
+      if (current) {
+        return { maxHeight: current.maxHeight || current.height, fps: current.fps };
+      }
+      return { ...DEFAULT_MANUAL_PROFILE };
     }
     const [heightValue, fpsValue] = String(streamProfileSelect?.value || "auto").split(":");
     const maxHeight = Number.parseInt(heightValue, 10);
     const fps = Number.parseInt(fpsValue, 10);
     return {
-      maxHeight: Number.isFinite(maxHeight) ? maxHeight : 720,
-      fps: Number.isFinite(fps) ? Math.max(1, Math.min(240, fps)) : 30,
+      maxHeight: Number.isFinite(maxHeight) ? maxHeight : DEFAULT_MANUAL_PROFILE.maxHeight,
+      fps: Number.isFinite(fps) ? Math.max(1, Math.min(240, fps)) : DEFAULT_MANUAL_PROFILE.fps,
     };
+  }
+
+  function efficientAutoProfiles() {
+    return normalizeAdaptiveProfiles(DEFAULT_EFFICIENT_PROFILES);
   }
 
   function pushStreamProfile() {
     if (streamProfileSelect?.value === "auto") {
-      const adaptiveWebrtc = getWebrtcMode() !== "off" && Number(bitrateSelect?.value || 0) === 0;
-      if (adaptiveWebrtc && encoderProfiles.length) {
-        adaptiveQuality.setProfiles(encoderProfiles);
-        adaptiveProfileRunning = true;
-        adaptiveQuality.start(Date.now());
-        return;
+      const ladder = efficientAutoProfiles();
+      adaptiveQuality.setProfiles(ladder);
+      adaptiveProfileRunning = true;
+      const started = adaptiveQuality.start(Date.now());
+      console.debug("rd: pushStreamProfile auto efficient", started || selectedStreamProfile());
+      if (!started) {
+        sendCmd("desktop_set_profile", { ...DEFAULT_MANUAL_PROFILE, source: "auto_efficient" });
       }
-      adaptiveProfileRunning = false;
-      adaptiveQuality.stop();
-      const best = selectedStreamProfile();
-      console.debug("rd: pushStreamProfile auto best", best);
-      sendCmd("desktop_set_profile", { ...best, source: "auto_best" });
-      if (streamProfileDetail) {
-        const profile = encoderProfiles[0];
-        streamProfileDetail.textContent = profile
-          ? `Auto selected ${profile.width}×${profile.height} @ ${profile.fps} FPS (best available).`
-          : "Auto selected native resolution while capabilities are loading.";
+      if (streamProfileDetail && !started) {
+        streamProfileDetail.textContent = "Auto starts at 480p @ 15 FPS and upgrades to 720p @ 15 FPS when the link is healthy.";
       }
       return;
     }
@@ -1866,6 +1885,18 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     const profile = selectedStreamProfile();
     console.debug("rd: pushStreamProfile", profile);
     sendCmd("desktop_set_profile", profile);
+  }
+
+  function sampleCanvasAdaptiveQuality() {
+    if (!adaptiveProfileRunning || streamProfileSelect?.value !== "auto") return;
+    if (getWebrtcMode() !== "off" && diagnostics.network?.video) return;
+    adaptiveQuality.sampleCanvas({
+      viewerFps: diagnostics.currentViewerFps,
+      agentFps: diagnostics.currentAgentFps ?? diagnostics.agent?.fps,
+      decodeQueue: diagnostics.decodeQueue,
+      decodePressure: canvasDecodePressure,
+      wsBitrateMbps: diagnostics.wsBitrateMbps,
+    }, Date.now());
   }
 
   function pushBitrate() {
@@ -1963,8 +1994,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     streamProfileSelect.innerHTML = "";
     const autoOption = document.createElement("option");
     autoOption.value = "auto";
-    autoOption.textContent = "Auto (best)";
-    autoOption.title = "Starts at the best supported profile and adapts to WebRTC congestion";
+    autoOption.textContent = "Auto (480p→720p @ 15 FPS)";
+    autoOption.title = "Starts at 480p 15 FPS and upgrades to 720p 15 FPS when the connection is healthy";
     streamProfileSelect.appendChild(autoOption);
     for (const profile of encoderProfiles) {
       const maxHeight = Number(profile.maxHeight);
@@ -1981,9 +2012,12 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
       streamProfileSelect.appendChild(option);
     }
     const manualExtraProfiles = [
-      { maxHeight: 480, fps: 15, label: "15 FPS - 480p", title: "Manual low-bandwidth profile" },
+      { maxHeight: 480, fps: 15, label: "15 FPS - 480p", title: "Default low-bandwidth profile" },
+      { maxHeight: 720, fps: 15, label: "15 FPS - 720p", title: "Efficient HD profile" },
       { maxHeight: 480, fps: 30, label: "30 FPS - 480p", title: "Manual low-bandwidth profile" },
       { maxHeight: 480, fps: 60, label: "60 FPS - 480p", title: "Manual low-bandwidth profile" },
+      { maxHeight: 720, fps: 30, label: "30 FPS - 720p", title: "Manual profile" },
+      { maxHeight: 720, fps: 60, label: "60 FPS - 720p", title: "Manual profile" },
       { maxHeight: 1440, fps: 30, label: "30 FPS - 1440p", title: "Manual high-resolution profile" },
       { maxHeight: 1440, fps: 60, label: "60 FPS - 1440p", title: "Manual high-resolution profile" },
       { maxHeight: 2160, fps: 30, label: "30 FPS - 2160p (4K)", title: "Manual high-resolution profile" },
@@ -1999,17 +2033,16 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
       option.title = profile.title;
       streamProfileSelect.appendChild(option);
     }
-    if (!setSelectValue(streamProfileSelect, savedStreamProfile || "auto") &&
+    if (!setSelectValue(streamProfileSelect, savedStreamProfile || DEFAULT_STREAM_PROFILE) &&
         !setSelectValue(streamProfileSelect, previous) &&
-        !setSelectValue(streamProfileSelect, "auto")) {
-      streamProfileSelect.value = "auto";
+        !setSelectValue(streamProfileSelect, DEFAULT_STREAM_PROFILE)) {
+      streamProfileSelect.value = DEFAULT_STREAM_PROFILE;
     }
     savedStreamProfile = streamProfileSelect.value;
     if (streamProfileDetail) {
       const providers = streamProfileSelect.selectedOptions[0]?.dataset?.providers || "";
-      const best = encoderProfiles[0];
-      streamProfileDetail.textContent = streamProfileSelect.value === "auto" && best
-        ? `Auto starts at ${best.width}×${best.height} @ ${best.fps} FPS and adapts on WebRTC.`
+      streamProfileDetail.textContent = streamProfileSelect.value === "auto"
+        ? "Auto starts at 480p @ 15 FPS and upgrades to 720p @ 15 FPS when the link is healthy."
         : (providers ? `Available through ${providers}.` :
           (msg.detail || (msg.probed ? "Profiles tested on this display adapter." : "Safe fallback profiles shown.")));
     }
@@ -2452,6 +2485,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
 
   function markFrameReceived() {
     const now = performance.now();
+    const frameGapMs = lastFrameAt ? now - lastFrameAt : 0;
     lastFrameAt = now;
     clearOfflineTimer();
     clearStallRecovery();
@@ -2459,9 +2493,9 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
     if (
       desiredStreaming &&
       frameGapMs >= VIEWER_FRAME_GAP_KEYFRAME_MS &&
-      (!lastViewerFrameGapKeyframeAt || now - lastViewerFrameGapKeyframeAt >= VIEWER_FRAME_GAP_KEYFRAME_THROTTLE_MS)
+      (!lastViewerKeyframeRequestAt || now - lastViewerKeyframeRequestAt >= VIEWER_FRAME_GAP_KEYFRAME_THROTTLE_MS)
     ) {
-      lastViewerFrameGapKeyframeAt = now;
+      lastViewerKeyframeRequestAt = now;
       sendCmd("desktop_request_keyframe", { reason: "viewer_frame_gap" });
     }
     if (!firstFrameLogged) {
