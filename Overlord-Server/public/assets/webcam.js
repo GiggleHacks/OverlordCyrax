@@ -5,7 +5,7 @@ import { P2PClient } from "./webrtc-p2p.js";
 import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
 import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 
-const WEBCAM_JS_VERSION = "1.2.0";
+const WEBCAM_JS_VERSION = "1.3.0";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
@@ -394,12 +394,41 @@ const WEBCAM_JS_VERSION = "1.2.0";
     return `webcam-${clientId}-${ts}.jpg`;
   }
 
+  function webrtcVideoHasFrame() {
+    return !!webrtcVideo
+      && webrtcVideo.style.display !== "none"
+      && webrtcVideo.videoWidth > 0
+      && webrtcVideo.videoHeight > 0;
+  }
+
+  function captureFrameBlob(format = "image/jpeg", quality = 0.92) {
+    return new Promise((resolve) => {
+      let source = canvas;
+      if (webrtcVideoHasFrame()) {
+        // WebRTC modes render into <video>, not the canvas — grab the live frame.
+        const tmp = document.createElement("canvas");
+        tmp.width = webrtcVideo.videoWidth;
+        tmp.height = webrtcVideo.videoHeight;
+        tmp.getContext("2d").drawImage(webrtcVideo, 0, 0, tmp.width, tmp.height);
+        source = tmp;
+      } else if (!hasRenderedFrame || !canvas || !canvas.width || !canvas.height) {
+        resolve(null);
+        return;
+      }
+      try {
+        source.toBlob((blob) => resolve(blob || null), format, quality);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
   function downloadScreenshot() {
-    if (!hasRenderedFrame) {
+    if (!hasRenderedFrame && !webrtcVideoHasFrame()) {
       setStreamState("error", "No frame available for screenshot");
       return;
     }
-    canvas.toBlob((blob) => {
+    captureFrameBlob("image/jpeg", 0.92).then((blob) => {
       if (!blob) {
         setStreamState("error", "Failed to encode screenshot");
         return;
@@ -412,7 +441,7 @@ const WEBCAM_JS_VERSION = "1.2.0";
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }, "image/jpeg", 0.92);
+    });
   }
 
   function selectedDeviceMaxFps() {
@@ -1270,6 +1299,26 @@ const WEBCAM_JS_VERSION = "1.2.0";
     }
     if (action === "ping") {
       postStatusToParent();
+      return;
+    }
+    if (action === "capture_frame") {
+      // Dashboard 2.0 titlebar copy/save — parent owns clipboard/download, we own the pixels.
+      const format = data.format === "image/png" ? "image/png" : "image/jpeg";
+      const replyTo = typeof data.replyTo === "string" ? data.replyTo : "";
+      captureFrameBlob(format, 0.92).then((blob) => {
+        try {
+          window.parent.postMessage({
+            type: "webcam_frame",
+            clientId,
+            replyTo,
+            format,
+            blob: blob || null,
+            error: blob ? null : "no_frame",
+          }, "*");
+        } catch {
+          /* parent gone */
+        }
+      });
     }
   });
 

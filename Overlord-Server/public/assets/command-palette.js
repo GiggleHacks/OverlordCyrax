@@ -6,12 +6,7 @@ const ALL_PER_CLIENT_ACTIONS = [
   { key: "console",    feature: "console",        label: "Console",        icon: "fa-terminal",     color: "text-emerald-400", href: (id) => `/${id}/console` },
   { key: "backstage",       feature: "backstage",           label: "backstage",           icon: "fa-desktop",      color: "text-fuchsia-400", href: (id) => `/backstage?clientId=${id}` },
   { key: "rdp",        feature: "remote_desktop", label: "Remote Desktop", icon: "fa-display",      color: "text-sky-400",     href: (id) => `/remotedesktop?clientId=${id}` },
-  { key: "files",      feature: "file_browser",   label: "File Browser",   icon: "fa-folder-open",  color: "text-cyan-400",    href: (id) => {
-      try {
-        if (localStorage.getItem("overlord.filebrowser.skin") === "classic") return `/${id}/files/classic`;
-      } catch {}
-      return `/${id}/files`;
-    } },
+  { key: "files",      feature: "file_browser",   label: "File Browser",   icon: "fa-folder-open",  color: "text-cyan-400",    href: (id) => `/${id}/files` },
   { key: "files-classic", feature: "file_browser", label: "Classic Explorer", icon: "fa-folder", color: "text-amber-300", href: (id) => `/${id}/files/classic` },
   { key: "processes",  feature: "processes",      label: "Processes",      icon: "fa-microchip",    color: "text-orange-400",  href: (id) => `/${id}/processes` },
   { key: "keylogger",  feature: "keylogger",      label: "Keylogger",      icon: "fa-keyboard",     color: "text-yellow-400",  href: (id) => `/${id}/keylogger` },

@@ -1,12 +1,13 @@
-# deploy-ratbox.ps1 — build + deploy Overlord 2.6.5 to root@ratbox. v1.2.2
+# deploy-ratbox.ps1 — build + deploy Overlord 2.6.11 to root@ratbox. v1.3.1
 # Steps: rollback tag -> source transfer -> docker build -> recreate -> health.
 # v1.1.0: exclude Overlord-Desktop (5.6 GB Electron artifacts, unused by server image)
-# v1.2.2: PS 5.1 mangles binary native-to-native pipes; ship a local .tar.gz via scp instead
+# v1.3.0: PS 5.1 mangles binary native-to-native pipes; ship a local .tar.gz via scp instead
 $ErrorActionPreference = "Stop"
-$DEPLOY_SCRIPT_VERSION = "1.2.2"
+$DEPLOY_SCRIPT_VERSION = "1.3.1"
+$VERSION = "2.6.11"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$deploy = "/tmp/overlord-deploy-2.6.5-$stamp"
-$rollbackTag = "overlord-rollback:pre-2.6.5-$stamp"
+$deploy = "/tmp/overlord-deploy-$VERSION-$stamp"
+$rollbackTag = "overlord-rollback:pre-$VERSION-$stamp"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 function Log([string]$msg) {
@@ -25,8 +26,8 @@ if ($LASTEXITCODE -ne 0) { throw "rollback tag failed" }
 
 # 2. Transfer source tree (local archive -> scp -> remote extract)
 Log "[2/5] transferring source to ${deploy}"
-$payload = Join-Path $env:TEMP "overlord-2.6.5-$stamp.tar.gz"
-$remotePayload = "/tmp/overlord-2.6.5-$stamp.tar.gz"
+$payload = Join-Path $env:TEMP "overlord-$VERSION-$stamp.tar.gz"
+$remotePayload = "/tmp/overlord-$VERSION-$stamp.tar.gz"
 Push-Location $root
 try {
   tar -czf $payload --exclude=.git --exclude=tools/vlog-transfer --exclude=.docker-cache --exclude=Overlord-Desktop --exclude=Overlord-Server/node_modules --exclude=Overlord-Server/dist .
@@ -60,6 +61,6 @@ Log "      container state: $state"
 $version = (ssh root@ratbox "curl -ks https://127.0.0.1:5173/api/version").Trim()
 Log "      /api/version: $version"
 ssh root@ratbox "docker logs --tail 30 overlord-server 2>&1"
-if ($version -notmatch "2\.6\.5") { throw "version mismatch: expected 2.6.5, got '$version' (rollback: docker tag $rollbackTag ghcr.io/vxaboveground/overlord:latest && cd $deploy && docker compose -p overlord up -d overlord-server)" }
+if ($version -notmatch [regex]::Escape($VERSION)) { throw "version mismatch: expected $VERSION, got '$version' (rollback: docker tag $rollbackTag ghcr.io/vxaboveground/overlord:latest && cd $deploy && docker compose -p overlord up -d overlord-server)" }
 
-Log "DEPLOY_OK 2.6.5 healthy=$state rollback=$rollbackTag"
+Log "DEPLOY_OK $VERSION healthy=$state rollback=$rollbackTag"

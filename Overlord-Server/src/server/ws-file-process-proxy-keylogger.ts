@@ -70,6 +70,54 @@ function finishFileBrowserCommand(commandId: string): void {
   fileBrowserCommandSessions.delete(commandId);
 }
 
+/* ── process viewer command tracking (kill/suspend/resume results) ── */
+type PendingProcessCommand = {
+  sessionId: string;
+  clientId: string;
+  action: string;
+  pid?: number;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+const PROCESS_COMMAND_TIMEOUT_MS = 12_000;
+const pendingProcessCommands = new Map<string, PendingProcessCommand>();
+
+export function trackProcessCommand(commandId: string, sessionId: string, clientId: string, action: string, pid?: number): void {
+  const existing = pendingProcessCommands.get(commandId);
+  if (existing) clearTimeout(existing.timeout);
+  const timeout = setTimeout(() => {
+    const entry = pendingProcessCommands.get(commandId);
+    if (!entry) return;
+    pendingProcessCommands.delete(commandId);
+    const result = {
+      type: "command_result",
+      commandId,
+      ok: false,
+      message: "No response from agent (timeout)",
+      pid: entry.pid,
+      action: entry.action,
+      synthetic: true,
+    };
+    const owner = sessionManager.getProcessSession(entry.sessionId);
+    if (owner) {
+      safeSendViewer(owner.viewer, result);
+    } else {
+      for (const session of sessionManager.getProcessSessionsByClient(entry.clientId)) {
+        safeSendViewer(session.viewer, result);
+      }
+    }
+  }, PROCESS_COMMAND_TIMEOUT_MS);
+  pendingProcessCommands.set(commandId, { sessionId, clientId, action, pid, timeout });
+}
+
+export function finishProcessCommand(commandId: string): PendingProcessCommand | undefined {
+  const entry = pendingProcessCommands.get(commandId);
+  if (!entry) return undefined;
+  clearTimeout(entry.timeout);
+  pendingProcessCommands.delete(commandId);
+  return entry;
+}
+
 function viewerCommandId(value: unknown, fallback: string): string {
   return typeof value === "string" && value.length > 0 && value.length <= 128 ? value : fallback;
 }
@@ -532,31 +580,34 @@ export function handleProcessViewerMessage(ws: ServerWebSocket<SocketData>, raw:
     case "process_kill": {
       const pid = Number(payload.pid);
       if (!Number.isFinite(pid) || pid <= 0) {
-        safeSendViewer(ws, { type: "command_result", commandId, ok: false, message: "Invalid PID" });
+        safeSendViewer(ws, { type: "command_result", commandId, ok: false, message: "Invalid PID", pid: 0, action: "kill" });
         break;
       }
       target.ws.send(encodeMessage({ type: "command", commandType: "process_kill", id: commandId, payload: { pid } } as any));
       metrics.recordCommand("process_kill");
+      if (ws.data.sessionId) trackProcessCommand(commandId, ws.data.sessionId, clientId, "kill", pid);
       break;
     }
     case "process_suspend": {
       const pid = Number(payload.pid);
       if (!Number.isFinite(pid) || pid <= 0) {
-        safeSendViewer(ws, { type: "command_result", commandId, ok: false, message: "Invalid PID" });
+        safeSendViewer(ws, { type: "command_result", commandId, ok: false, message: "Invalid PID", pid: 0, action: "suspend" });
         break;
       }
       target.ws.send(encodeMessage({ type: "command", commandType: "process_suspend", id: commandId, payload: { pid } } as any));
       metrics.recordCommand("process_suspend");
+      if (ws.data.sessionId) trackProcessCommand(commandId, ws.data.sessionId, clientId, "suspend", pid);
       break;
     }
     case "process_resume": {
       const pid = Number(payload.pid);
       if (!Number.isFinite(pid) || pid <= 0) {
-        safeSendViewer(ws, { type: "command_result", commandId, ok: false, message: "Invalid PID" });
+        safeSendViewer(ws, { type: "command_result", commandId, ok: false, message: "Invalid PID", pid: 0, action: "resume" });
         break;
       }
       target.ws.send(encodeMessage({ type: "command", commandType: "process_resume", id: commandId, payload: { pid } } as any));
       metrics.recordCommand("process_resume");
+      if (ws.data.sessionId) trackProcessCommand(commandId, ws.data.sessionId, clientId, "resume", pid);
       break;
     }
     default:
@@ -565,6 +616,23 @@ export function handleProcessViewerMessage(ws: ServerWebSocket<SocketData>, raw:
 }
 
 export function handleProcessMessage(clientId: string, payload: any) {
+  if (payload?.type === "command_result") {
+    const commandId = typeof payload.commandId === "string" ? payload.commandId : "";
+    // Peek first: only consume the pending entry when the client actually matches.
+    const pending = commandId ? pendingProcessCommands.get(commandId) : undefined;
+    if (!pending || pending.clientId !== clientId) return;
+    finishProcessCommand(commandId);
+    const enriched = { ...payload, pid: pending.pid, action: pending.action };
+    const owner = sessionManager.getProcessSession(pending.sessionId);
+    if (owner) {
+      safeSendViewer(owner.viewer, enriched);
+    } else {
+      for (const session of sessionManager.getProcessSessionsByClient(clientId)) {
+        safeSendViewer(session.viewer, enriched);
+      }
+    }
+    return;
+  }
   for (const session of sessionManager.getProcessSessionsByClient(clientId)) {
     if (payload.type === "process_icon_result" && Array.isArray(payload.icons)) {
       const icons = payload.icons.map((item: any) => {

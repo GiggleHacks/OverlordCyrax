@@ -121,6 +121,7 @@ const QUERY_CLIENT_PAGES: QueryClientPageDef[] = [
 const PATH_CLIENT_PAGES: ClientPageDef[] = [
   { pattern: /^\/(.+)\/console$/,          file: "console.html",            clientIdGroup: 1, feature: "console" },
   { pattern: /^\/(.+)\/files\/classic$/,   file: "filebrowser-classic.html", clientIdGroup: 1, feature: "file_browser" },
+  { pattern: /^\/(.+)\/files2$/,           file: "files2.html",              clientIdGroup: 1, feature: "file_browser" },
   { pattern: /^\/(.+)\/files$/,            file: "filebrowser.html",         clientIdGroup: 1, feature: "file_browser" },
   { pattern: /^\/(.+)\/processes$/,        file: "processes.html",           clientIdGroup: 1, feature: "processes" },
   { pattern: /^\/(.+)\/processes2$/,       file: "processes2.html",          clientIdGroup: 1, feature: "processes" },

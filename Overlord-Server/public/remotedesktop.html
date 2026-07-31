@@ -192,6 +192,9 @@
                     title="Auto starts with the best supported resolution and adapts to WebRTC network conditions"
                   >
                     <option value="auto" selected>Auto (best)</option>
+                    <option value="480:15">15 FPS - 480p</option>
+                    <option value="480:30">30 FPS - 480p</option>
+                    <option value="480:60">60 FPS - 480p</option>
                     <option value="720:30">30 FPS - 720p</option>
                     <option value="720:60">60 FPS - 720p</option>
                     <option value="1080:30">30 FPS - 1080p</option>
@@ -648,6 +651,42 @@
             display: flex;
             flex-wrap: wrap;
             gap: 0.5rem;
+          }
+          /* Compact mode: slim bottom pill for transient retry/start states so
+             the desktop view is never covered while reconnecting. */
+          .rd-state-overlay.is-compact {
+            place-items: end center;
+            padding: 0.75rem;
+          }
+          .rd-state-overlay.is-compact .rd-state-card {
+            width: auto;
+            max-width: 100%;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: 0.5rem 0.7rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: 999px;
+          }
+          .rd-state-overlay.is-compact .rd-state-card > i {
+            width: 1.4rem;
+            height: 1.4rem;
+            font-size: 0.78rem;
+          }
+          .rd-state-overlay.is-compact .rd-state-title {
+            font-size: 0.84rem;
+            white-space: nowrap;
+          }
+          .rd-state-overlay.is-compact .rd-state-detail {
+            display: none;
+          }
+          .rd-state-overlay.is-compact .rd-state-actions {
+            grid-column: auto;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+          }
+          .rd-state-overlay.is-compact .rd-state-actions button {
+            white-space: nowrap;
+            padding: 0.3rem 0.55rem;
+            font-size: 0.72rem;
           }
           @media (max-width: 760px) {
             .rd-fullscreen-hud {

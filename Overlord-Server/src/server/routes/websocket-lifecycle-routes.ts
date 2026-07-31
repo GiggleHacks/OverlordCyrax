@@ -854,6 +854,10 @@ export async function handleWebSocketMessage(
           (payload as any).message,
         );
         deps.handleFileBrowserMessage(client.id, payload);
+        if (payloadType === "command_result") {
+          // Forward kill/suspend/resume results to the owning process viewer (pid attached).
+          deps.handleProcessMessage(client.id, payload);
+        }
         if (payloadType === "command_result" && typeof (payload as any).commandId === "string") {
           deps.handleProxyConnectResult(
             client.id,

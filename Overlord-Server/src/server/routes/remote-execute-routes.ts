@@ -35,6 +35,8 @@ type RemoteExecuteRouteDeps = {
   pendingCommandReplies: Map<string, PendingCommandReply>;
   uploadTimeoutMs?: number;
   execTimeoutMs?: number;
+  idleAckTimeoutMs?: number;
+  idleProgressTimeoutMs?: number;
 };
 
 type RemoteExecutePhase =
@@ -80,12 +82,14 @@ type RemoteExecuteJob = {
   tmpFilePath: string;
   pullId: string;
   pullOrigin: string;
+  pullPath: string;
   endpointSource: EndpointSource;
   clientVersion?: string;
   clientOs: string;
   clientAcknowledged: boolean;
   transferComplete: boolean;
   commandSentAt?: number;
+  uploadCommandId?: string;
   destinationPath: string;
   totalBytes: number;
   bytesTransferred: number;
@@ -98,8 +102,12 @@ type RemoteExecuteJob = {
   completedAt?: number;
   expiresAt: number;
   timeout: NodeJS.Timeout;
+  idleWatchdog?: NodeJS.Timeout;
   lastClientMessage?: string;
   lastProgressAt?: number;
+  lastClientStatus?: string;
+  lastClientAttempt?: number;
+  cancelled?: boolean;
   error?: RemoteExecuteJobError;
 };
 
@@ -107,6 +115,8 @@ const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
 const UPLOAD_TIMEOUT_MS = 30 * 60_000;
 const EXEC_TIMEOUT_MS = 60_000;
 const JOB_TTL_MS = 30 * 60_000;
+const IDLE_ACK_TIMEOUT_MS = 60_000;
+const IDLE_PROGRESS_TIMEOUT_MS = 90_000;
 
 const remoteExecuteJobs = new Map<string, RemoteExecuteJob>();
 
@@ -127,7 +137,15 @@ function cleanupPull(pullId: string) {
   }
 }
 
+function clearIdleWatchdog(job: RemoteExecuteJob) {
+  if (job.idleWatchdog) {
+    clearTimeout(job.idleWatchdog);
+    job.idleWatchdog = undefined;
+  }
+}
+
 function cleanupJob(job: RemoteExecuteJob) {
+  clearIdleWatchdog(job);
   cleanupPull(job.pullId);
   fs.unlink(job.tmpFilePath).catch(() => {});
 }
@@ -169,6 +187,8 @@ function serializeJob(job: RemoteExecuteJob) {
     transferState: transferState(job),
     commandSentAt: job.commandSentAt,
     lastClientMessage: job.lastClientMessage,
+    lastClientStatus: job.lastClientStatus,
+    lastClientAttempt: job.lastClientAttempt,
     lastProgressAt: job.lastProgressAt,
     originalName: job.originalName,
     args: job.args,
@@ -193,7 +213,47 @@ function setJobPhase(job: RemoteExecuteJob, phase: RemoteExecutePhase, percent?:
   job.updatedAt = now();
 }
 
-function failJob(job: RemoteExecuteJob, code: string, message: string, extra: Partial<RemoteExecuteJobError> = {}) {
+function abortClientCommand(clientId: string, commandId?: string) {
+  if (!commandId) return;
+  try {
+    const target = clientManager.getClient(clientId);
+    if (!target?.ws) return;
+    target.ws.send(encodeMessage({ type: "command_abort", commandId } as any));
+  } catch {
+    /* best effort */
+  }
+}
+
+function resolvePendingCommand(
+  deps: RemoteExecuteRouteDeps,
+  commandId: string | undefined,
+  result: CommandReplyResult,
+) {
+  if (!commandId) return;
+  const pending = deps.pendingCommandReplies.get(commandId);
+  if (!pending) return;
+  clearTimeout(pending.timeout);
+  deps.pendingCommandReplies.delete(commandId);
+  pending.resolve(result);
+}
+
+function failJob(
+  job: RemoteExecuteJob,
+  code: string,
+  message: string,
+  extra: Partial<RemoteExecuteJobError> = {},
+  deps?: RemoteExecuteRouteDeps,
+) {
+  if (job.status === "succeeded" || job.status === "failed") return;
+  clearIdleWatchdog(job);
+  if (deps && job.uploadCommandId) {
+    abortClientCommand(job.clientId, job.uploadCommandId);
+    resolvePendingCommand(deps, job.uploadCommandId, {
+      ok: false,
+      code,
+      message,
+    });
+  }
   job.phase = extra.phase || job.phase || "failed";
   job.status = "failed";
   job.percent = Math.min(job.percent, 99);
@@ -217,6 +277,7 @@ function failJob(job: RemoteExecuteJob, code: string, message: string, extra: Pa
 }
 
 function succeedJob(job: RemoteExecuteJob) {
+  clearIdleWatchdog(job);
   job.phase = "succeeded";
   job.status = "succeeded";
   job.bytesTransferred = job.totalBytes;
@@ -226,18 +287,68 @@ function succeedJob(job: RemoteExecuteJob) {
   cleanupJob(job);
 }
 
+function cancelRemoteExecuteJob(job: RemoteExecuteJob, deps: RemoteExecuteRouteDeps): boolean {
+  if (job.status === "succeeded" || job.status === "failed") return false;
+  job.cancelled = true;
+  failJob(job, "cancelled", "Remote execute cancelled by operator", { phase: job.phase }, deps);
+  return true;
+}
+
+function scheduleIdleWatchdog(job: RemoteExecuteJob, deps: RemoteExecuteRouteDeps) {
+  clearIdleWatchdog(job);
+  if (job.phase !== "client_transfer" || job.status !== "running") return;
+
+  const ackTimeout = deps.idleAckTimeoutMs ?? IDLE_ACK_TIMEOUT_MS;
+  const progressTimeout = deps.idleProgressTimeoutMs ?? IDLE_PROGRESS_TIMEOUT_MS;
+  const delay = job.clientAcknowledged ? progressTimeout : ackTimeout;
+
+  job.idleWatchdog = setTimeout(() => {
+    if (job.status !== "running" || job.phase !== "client_transfer") return;
+    if (!job.clientAcknowledged) {
+      failJob(
+        job,
+        "client_transfer_idle",
+        "client did not acknowledge the transfer; the pull never started (check network path / OVERLORD_EXTERNAL_URL)",
+        {
+          phase: "client_transfer",
+          transferState: "command_sent_no_client_progress",
+          serverMessage: `No command_progress within ${Math.round(ackTimeout / 1000)}s after command send`,
+        },
+        deps,
+      );
+      return;
+    }
+    failJob(
+      job,
+      "client_transfer_stalled",
+      "client transfer stalled with no progress updates",
+      {
+        phase: "client_transfer",
+        transferState: "client_transfer_active",
+        clientMessage: job.lastClientMessage,
+        serverMessage: `No progress update within ${Math.round(progressTimeout / 1000)}s`,
+      },
+      deps,
+    );
+  }, delay);
+}
+
 function firstHeaderValue(value: string | null): string {
   return String(value || "").split(",", 1)[0].trim();
 }
 
-function buildPullUrl(req: Request, pullId: string): { url: string; source: EndpointSource } {
+function buildPullUrl(req: Request, pullId: string): { url: string; path: string; source: EndpointSource } {
   const pathName = `/api/file/upload/pull/${encodeURIComponent(pullId)}`;
   const configured = String(process.env.OVERLORD_EXTERNAL_URL || "").trim();
   if (configured) {
     try {
       const external = new URL(configured);
       if (external.protocol === "https:" || external.protocol === "http:") {
-        return { url: new URL(pathName, external.origin).toString(), source: "external_config" };
+        return {
+          url: new URL(pathName, external.origin).toString(),
+          path: pathName,
+          source: "external_config",
+        };
       }
     } catch {
       /* fall through */
@@ -256,6 +367,7 @@ function buildPullUrl(req: Request, pullId: string): { url: string; source: Endp
         : "http";
   return {
     url: `${protocol}://${host}${pathName}`,
+    path: pathName,
     source: forwardedHost ? "forwarded_host" : "request_host",
   };
 }
@@ -266,7 +378,6 @@ function parseArgs(raw: unknown): string[] {
   }
   const text = String(raw || "").trim();
   if (!text) return [];
-  // Simple whitespace split with quoted segments.
   const out: string[] = [];
   const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
   let m: RegExpExecArray | null;
@@ -282,12 +393,13 @@ function parseHideWindow(raw: unknown): boolean {
   return s === "1" || s === "true" || s === "yes" || s === "on";
 }
 
-function updateJobFromProgress(job: RemoteExecuteJob, payload: any) {
+function updateJobFromProgress(job: RemoteExecuteJob, payload: any, deps: RemoteExecuteRouteDeps) {
+  if (job.status !== "running") return;
   job.clientAcknowledged = true;
   const transferred = Number(payload?.transferred);
   const total = Number(payload?.total);
   if (Number.isFinite(transferred) && transferred >= 0) {
-    job.bytesTransferred = Math.min(transferred, job.totalBytes);
+    job.bytesTransferred = Math.min(transferred, job.totalBytes || transferred);
   }
   if (Number.isFinite(total) && total > 0 && total !== job.totalBytes) {
     job.totalBytes = total;
@@ -299,15 +411,23 @@ function updateJobFromProgress(job: RemoteExecuteJob, payload: any) {
   if (typeof payload?.message === "string") {
     job.lastClientMessage = payload.message;
   }
+  if (typeof payload?.status === "string") {
+    job.lastClientStatus = payload.status;
+  }
+  const attempt = Number(payload?.attempt);
+  if (Number.isFinite(attempt) && attempt > 0) {
+    job.lastClientAttempt = attempt;
+  }
   job.lastProgressAt = now();
   job.updatedAt = job.lastProgressAt;
   if (job.phase === "queued" || job.phase === "staging") {
     setJobPhase(job, "client_transfer");
   }
   if (job.totalBytes > 0) {
-    // Transfer maps to 5–90% of overall progress.
-    job.percent = clampPercent(5 + (job.bytesTransferred / job.totalBytes) * 85);
+    // Transfer maps to 0–90% of overall progress (honest byte ratio).
+    job.percent = clampPercent((job.bytesTransferred / job.totalBytes) * 90);
   }
+  scheduleIdleWatchdog(job, deps);
 }
 
 function waitForCommandReply(
@@ -367,8 +487,13 @@ async function runRemoteExecuteJob(
   ip: string,
 ) {
   try {
-    setJobPhase(job, "client_transfer", 5);
+    if (job.cancelled || job.status === "failed") return;
+
+    setJobPhase(job, "client_transfer", 0);
     job.commandSentAt = now();
+    const uploadCommandId = uuidv4();
+    job.uploadCommandId = uploadCommandId;
+    scheduleIdleWatchdog(job, deps);
     logger.info(
       `[remote-execute] upload ${job.originalName} → ${job.destinationPath} via ${job.pullOrigin} (${job.totalBytes} bytes)`,
     );
@@ -379,16 +504,23 @@ async function runRemoteExecuteJob(
       {
         type: "command",
         commandType: "file_upload_http",
-        id: uuidv4(),
-        payload: { path: job.destinationPath, url: job.pullOrigin, total: job.totalBytes },
+        id: uploadCommandId,
+        payload: {
+          path: job.destinationPath,
+          // Prefer relative path so the agent rewrites to its live server URL.
+          url: job.pullPath || job.pullOrigin,
+          total: job.totalBytes,
+        },
       },
       {
         code: "client_transfer_timeout",
         message: "client did not complete pulling the file before the transfer timeout",
       },
       deps.uploadTimeoutMs ?? UPLOAD_TIMEOUT_MS,
-      (payload) => updateJobFromProgress(job, payload),
+      (payload) => updateJobFromProgress(job, payload, deps),
     );
+
+    if (job.cancelled || job.status === "failed") return;
 
     if (uploadResult.code !== "client_transfer_timeout" && uploadResult.code !== "send_command_failed") {
       job.clientAcknowledged = true;
@@ -406,9 +538,11 @@ async function runRemoteExecuteJob(
       return;
     }
 
+    clearIdleWatchdog(job);
     job.transferComplete = true;
     job.bytesTransferred = job.totalBytes;
     job.percent = 90;
+    job.uploadCommandId = undefined;
 
     if (job.clientOs !== "windows") {
       setJobPhase(job, "chmod", 92);
@@ -427,6 +561,7 @@ async function runRemoteExecuteJob(
         },
         60_000,
       );
+      if (job.cancelled || job.status === "failed") return;
       if (!chmodResult.ok) {
         failJob(job, chmodResult.code || "chmod_failed", chmodResult.message || "Failed to set execute permissions", {
           phase: "chmod",
@@ -435,6 +570,8 @@ async function runRemoteExecuteJob(
         return;
       }
     }
+
+    if (job.cancelled || job.status === "failed") return;
 
     setJobPhase(job, "execute", 96);
     const execResult = await waitForCommandReply(
@@ -456,6 +593,8 @@ async function runRemoteExecuteJob(
       },
       deps.execTimeoutMs ?? EXEC_TIMEOUT_MS,
     );
+
+    if (job.cancelled || job.status === "failed") return;
 
     if (!execResult.ok) {
       failJob(job, execResult.code || "execute_failed", execResult.message || "Failed to start remote execution", {
@@ -499,8 +638,9 @@ export async function handleRemoteExecuteRoutes(
   const statusMatch = url.pathname.match(/^\/api\/clients\/([^/]+)\/remote-execute\/([^/]+)$/);
   const postMatch = url.pathname.match(/^\/api\/clients\/([^/]+)\/remote-execute$/);
   if (req.method === "GET" && !statusMatch) return null;
+  if (req.method === "DELETE" && !statusMatch) return null;
   if (req.method === "POST" && !postMatch) return null;
-  if (req.method !== "GET" && req.method !== "POST") return null;
+  if (req.method !== "GET" && req.method !== "POST" && req.method !== "DELETE") return null;
 
   const user = await authenticateRequest(req);
   if (!user) return new Response("Unauthorized", { status: 401 });
@@ -512,7 +652,7 @@ export async function handleRemoteExecuteRoutes(
     return new Response("Forbidden", { status: 403 });
   }
 
-  if (req.method === "GET" && statusMatch) {
+  if ((req.method === "GET" || req.method === "DELETE") && statusMatch) {
     const targetId = decodeURIComponent(statusMatch[1]);
     const jobId = decodeURIComponent(statusMatch[2]);
     try {
@@ -525,6 +665,16 @@ export async function handleRemoteExecuteRoutes(
     if (!job || job.clientId !== targetId) {
       return Response.json({ ok: false, message: "Job not found" }, { status: 404 });
     }
+
+    if (req.method === "DELETE") {
+      const cancelled = cancelRemoteExecuteJob(job, deps);
+      return Response.json({
+        ...serializeJob(job),
+        ok: true,
+        cancelled,
+      });
+    }
+
     return Response.json(serializeJob(job));
   }
 
@@ -611,6 +761,7 @@ export async function handleRemoteExecuteRoutes(
     tmpFilePath,
     pullId,
     pullOrigin: pullEndpoint.url,
+    pullPath: pullEndpoint.path,
     endpointSource: pullEndpoint.source,
     clientVersion: target.version,
     clientOs,
@@ -620,7 +771,7 @@ export async function handleRemoteExecuteRoutes(
     totalBytes: bytes.length,
     bytesTransferred: 0,
     speedBytesPerSecond: 0,
-    percent: 2,
+    percent: 0,
     phase: "staging",
     status: "running",
     startedAt,
@@ -646,5 +797,6 @@ export async function handleRemoteExecuteRoutes(
     endpointSource: job.endpointSource,
     clientVersion: job.clientVersion,
     originalName: job.originalName,
+    transferState: transferState(job),
   });
 }

@@ -26,10 +26,15 @@ describe("unified viewer UI", () => {
     expect(html).toContain('data-d2-id="desktop"');
     expect(html).toContain('data-d2-id="webcam"');
     expect(html).toContain('data-d2-id="processes"');
+    expect(html).toContain('data-d2-id="files"');
+    expect(html).toContain('id="viewerD2Files"');
+    expect(html).toContain("File Manager 2.0");
     expect(html).not.toContain('data-d2-id="status"');
     expect(html).not.toContain("data-d2-status-id");
     expect(html).toContain("data-d2-reset");
-    expect(html).toContain("data-d2-save");
+    expect(html).toContain('data-d2-slot="1"');
+    expect(html).toContain('data-d2-slot="2"');
+    expect(html).not.toContain("data-d2-save");
     expect(html).toContain("data-d2-cam-start");
     expect(html).toContain("data-d2-cam-stop");
     expect(html).toContain('data-mode="dashboard2"');
@@ -40,11 +45,18 @@ describe("unified viewer UI", () => {
   test("ships Dashboard 2.0 MDI controller and mode wiring", async () => {
     const mdi = await publicFile("assets/dashboard2-mdi.js");
     expect(mdi).toContain("export const DASHBOARD2_MDI_VERSION");
-    expect(mdi).toContain("0.2.1");
+    expect(mdi).toContain("0.4.1");
     expect(mdi).toContain("export function initDashboard2Mdi");
     expect(mdi).toContain("overlord_dashboard2_layout_v2");
-    expect(mdi).toContain("overlord_dashboard2_layout_saved_v2");
-    expect(mdi).toContain("savePreferredLayout");
+    expect(mdi).toContain("overlord_dashboard2_layout_slots_v1");
+    expect(mdi).toContain("saveToSlot");
+    expect(mdi).toContain("applySlot");
+    expect(mdi).toContain("setSlotLocked");
+    expect(mdi).toContain("d2-slot-menu");
+    expect(mdi).toContain("fa-lock");
+    expect(mdi).toContain("is-locked");
+    expect(mdi).toContain("factoryReset");
+    expect(mdi).toContain("custom slots are never cleared");
     expect(mdi).toContain("setPointerCapture");
     expect(mdi).toContain("pointercancel");
     expect(mdi).toContain("lostpointercapture");
@@ -91,7 +103,6 @@ describe("unified viewer UI", () => {
     expect(css).toMatch(/body\.rd-embedded #frameCanvas[\s\S]*?object-fit:\s*contain/);
     expect(css).not.toMatch(/body\.rd-embedded #frameCanvas[\s\S]*?object-fit:\s*fill/);
     expect(css).toContain("body.processes-embedded");
-    expect(css).toContain(".sp-pins");
     expect(css).toContain(".d2-cam-status");
   });
 
@@ -109,14 +120,11 @@ describe("unified viewer UI", () => {
     expect(css).toContain("order: 1");
   });
 
-  test("side panel exposes Clients home link and shortcut pins", async () => {
+  test("side panel exposes Clients home link", async () => {
     const js = await publicFile("assets/side-panel.js");
     expect(js).toContain('className = "sp-item sp-home"');
     expect(js).toContain('home.href = "/"');
     expect(js).toContain("Clients");
-    expect(js).toContain("overlord_side_panel_pins_v1");
-    expect(js).toContain("Create Shortcut");
-    expect(js).toContain("buildPinsFooter");
     expect(js).toContain("mode=dashboard2");
   });
 
@@ -369,33 +377,79 @@ describe("unified viewer UI", () => {
     expect(routes).toContain("processes2.html");
   });
 
-  test("dashboard2 renders draggable desktop shortcut icons from side-panel pins", async () => {
-    const icons = await publicFile("assets/dashboard2-icons.js");
-    expect(icons).toContain("DASHBOARD2_ICONS_VERSION");
-    expect(icons).toContain('from "./side-panel.js"');
-    expect(icons).toContain("overlord_dashboard2_icons_v1");
-    expect(icons).toContain("overlord_side_panel_pins_v1");
-    expect(icons).toContain("runPinnedCommand");
-    expect(icons).toContain("initDashboard2Icons");
-    expect(icons).toContain("overlord:pins-changed");
-    expect(icons).toContain("setPointerCapture");
-    const sidePanel = await publicFile("assets/side-panel.js");
-    expect(sidePanel).toContain("export { SIDE_PINS_KEY, loadPins, runPinnedCommand }");
-    expect(sidePanel).toContain("overlord:pins-changed");
+  test("dashboard2 webcam window ships one-click frame copy and save buttons", async () => {
+    const html = await publicFile("viewer.html");
+    expect(html).toContain('data-d2-cam-copy');
+    expect(html).toContain('data-d2-cam-save');
+    expect(html).toContain("Copy current frame to clipboard");
+    expect(html).toContain("Save current frame as JPG");
     const viewerJs = await publicFile("assets/viewer.js");
-    expect(viewerJs).toContain('from "./dashboard2-icons.js"');
-    expect(viewerJs).toContain("dashboard2Icons.activate()");
-    expect(viewerJs).toContain("dashboard2Icons.deactivate()");
+    expect(viewerJs).toContain('[data-d2-cam-copy]');
+    expect(viewerJs).toContain('[data-d2-cam-save]');
+    expect(viewerJs).toContain('"capture_frame"');
+    expect(viewerJs).toContain('"webcam_frame"');
+    expect(viewerJs).toContain("ClipboardItem");
+    expect(viewerJs).toContain("pendingCamCapture");
+    // copy/save only enabled with a live (or stalled) frame
+    expect(viewerJs).toContain('status === "streaming" || status === "stalled"');
+    const webcamJs = await publicFile("assets/webcam.js");
+    expect(webcamJs).toContain('action === "capture_frame"');
+    expect(webcamJs).toContain('type: "webcam_frame"');
+    expect(webcamJs).toContain("captureFrameBlob");
+    // WebRTC modes render into <video>, not the canvas — capture must handle both
+    expect(webcamJs).toContain("webrtcVideoHasFrame");
+  });
+
+  test("dashboard2 MDI keeps drag and 8-way resize handles", async () => {
     const css = await publicFile("assets/main.css");
-    expect(css).toContain(".d2-icon");
-    expect(css).toContain(".d2-icon-img");
-    expect(css).toContain(".d2-icon-label");
-    expect(css).toContain(".d2-icon.is-dragging");
-    // every MDI window keeps drag (titlebar) + 8-way resize handles
     const mdi = await publicFile("assets/dashboard2-mdi.js");
     expect(mdi).toContain('["n", "s", "e", "w", "ne", "nw", "se", "sw"]');
     expect(css).toContain(".d2-edge-se");
     expect(css).toContain("cursor: move");
+    expect(css).toContain(".d2-slot-menu");
+    expect(css).toContain(".d2-slot-lock");
+    expect(css).toContain(".d2-chrome-btn.is-locked");
+  });
+
+  test("file manager 2.0 ships compact page wired into dashboard2", async () => {
+    const html = await publicFile("files2.html");
+    expect(html).toContain("File Manager 2.0");
+    expect(html).toContain("fm2-toolbar");
+    expect(html).toContain("fm2-places");
+    expect(html).toContain("fm2-list");
+    expect(html).toContain("fm2-path");
+    expect(html).toContain("/assets/files2-bootstrap.js");
+    expect(html).not.toContain("nav.js");
+    expect(html).not.toMatch(/<script(?![^>]*src=)[^>]*>/);
+    const bootstrap = await publicFile("assets/files2-bootstrap.js");
+    expect(bootstrap).toContain("/assets/files2.js");
+    const js = await publicFile("assets/files2.js");
+    expect(js).toContain("FILES2_JS_VERSION");
+    expect(js).toContain('"1.0.0"');
+    expect(js).toContain('checkFeatureAccess("file_browser", clientId)');
+    expect(js).toContain("/files/ws");
+    expect(js).toContain("file_list");
+    expect(js).toContain("file_delete");
+    expect(js).toContain("file_mkdir");
+    expect(js).toContain("file_upload_http");
+    expect(js).toContain("/api/file/download/request");
+    expect(js).toContain("updatePlaces");
+    expect(js).toContain("/assets/filebrowser-classic");
+    expect(js).toContain("sounds/manifest.json");
+    expect(js).toContain("playSound");
+    const viewerJs = await publicFile("assets/viewer.js");
+    expect(viewerJs).toContain("/files2?embedded=1");
+    expect(viewerJs).toContain("viewerD2Files");
+    const viewerHtml = await publicFile("viewer.html");
+    expect(viewerHtml).toContain('data-d2-id="files"');
+    expect(viewerHtml).toContain("File Manager 2.0");
+    const mdi = await publicFile("assets/dashboard2-mdi.js");
+    expect(mdi).toMatch(/files:\s*\{[^}]*x:\s*0\.74/);
+    expect(mdi).toMatch(/files:\s*\{[^}]*y:\s*0\.63/);
+    expect(mdi).toMatch(/processes:\s*\{[^}]*h:\s*0\.3/);
+    expect(mdi).toMatch(/desktop:\s*\{[^}]*h:\s*0\.96/);
+    const routes = await readFile(new URL("../src/server/routes/page-routes.ts", import.meta.url), "utf8");
+    expect(routes).toContain("files2.html");
   });
 });
 

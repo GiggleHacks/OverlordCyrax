@@ -1,10 +1,9 @@
 import { initSidePanel } from "./side-panel.js";
 import { initPipOverlay } from "./pip-overlay.js";
 import { initDashboard2Mdi, DASHBOARD2_MDI_VERSION } from "./dashboard2-mdi.js";
-import { initDashboard2Icons, DASHBOARD2_ICONS_VERSION } from "./dashboard2-icons.js";
 
 /** viewer.js — unified remote viewer shell */
-export const VIEWER_JS_VERSION = "1.4.0";
+export const VIEWER_JS_VERSION = "1.5.0";
 
 const params = new URLSearchParams(location.search);
 const clientId = params.get("clientId") || "";
@@ -27,9 +26,13 @@ const dashboard2Root = document.getElementById("viewerDashboard2");
 const d2Desktop = document.getElementById("viewerD2Desktop");
 const d2Webcam = document.getElementById("viewerD2Webcam");
 const d2Processes = document.getElementById("viewerD2Processes");
+const d2Files = document.getElementById("viewerD2Files");
 const d2CamStart = document.querySelector("[data-d2-cam-start]");
 const d2CamStop = document.querySelector("[data-d2-cam-stop]");
+const d2CamCopy = document.querySelector("[data-d2-cam-copy]");
+const d2CamSave = document.querySelector("[data-d2-cam-save]");
 const d2CamSettings = document.querySelector("[data-d2-cam-settings]");
+const d2CamStatus = document.querySelector("[data-d2-cam-status]");
 const d2WebcamEmpty = document.querySelector("[data-d2-webcam-empty]");
 const idLabel = document.getElementById("viewerClientId");
 const capability = document.getElementById("viewerCapability");
@@ -48,24 +51,23 @@ const camMaxFps = document.getElementById("viewerCamMaxFps");
 const camH264 = document.getElementById("viewerCamH264");
 
 idLabel.textContent = clientId.slice(0, 12) || "unknown";
-idLabel.title = `viewer.js v${VIEWER_JS_VERSION} · dashboard2-mdi v${DASHBOARD2_MDI_VERSION} · d2-icons v${DASHBOARD2_ICONS_VERSION}`;
+idLabel.title = `viewer.js v${VIEWER_JS_VERSION} · dashboard2-mdi v${DASHBOARD2_MDI_VERSION}`;
 
 const dashboard2 = initDashboard2Mdi({
   root: dashboard2Root,
 });
-const dashboard2Icons = initDashboard2Icons({
-  root: dashboard2Root,
-  clientId,
-});
+
 const transition = params.get("transition") || "";
 const fromArray = params.get("fromArray") === "1";
 // Webcam-only mode keeps in-frame controls; split/pip use the parent bar (no embedded chrome).
 const webcamUrlFull = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&controls=1${transition ? "&transition=1" : ""}`;
 const webcamUrlBar = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1${transition ? "&transition=1" : ""}`;
 // D2: full-bleed video; Start/Stop/Settings live on the MDI titlebar (not over the feed).
-const webcamUrlD2 = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&autostart=0&d2=1`;
+// Webcam auto-starts when Dashboard 2.0 is entered (stop via the titlebar Stop button).
+const webcamUrlD2 = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&d2=1`;
 const desktopUrl = `/remotedesktop?clientId=${encodeURIComponent(clientId)}&embedded=1`;
 const processesUrlD2 = clientId ? `/${encodeURIComponent(clientId)}/processes2?embedded=1` : "about:blank";
+const filesUrlD2 = clientId ? `/${encodeURIComponent(clientId)}/files2?embedded=1` : "about:blank";
 
 function notifyArrayViewerClosed() {
   if (!fromArray || !clientId) return;
@@ -148,6 +150,10 @@ function syncD2CamButtons(status) {
   if (d2CamStart) d2CamStart.disabled = noCam || streaming;
   if (d2CamStop) d2CamStop.disabled = noCam || (!streaming && status !== "stopping");
   if (d2CamSettings) d2CamSettings.disabled = false;
+  // Copy/save need a rendered frame — allow stalled (last frame still on canvas).
+  const frameReady = status === "streaming" || status === "stalled";
+  if (d2CamCopy) d2CamCopy.disabled = noCam || !frameReady;
+  if (d2CamSave) d2CamSave.disabled = noCam || !frameReady;
 }
 
 const SPLIT_RATIO_KEY = "overlord_viewer_split_ratio";
@@ -216,6 +222,28 @@ function updateCamStatusUi(status, fps, label) {
     camStatus.dataset.status = key;
   }
   if (camFps && fps != null) camFps.textContent = fps === "" || fps == null ? "--" : String(fps);
+  if (d2CamStatus) {
+    const key = status || "idle";
+    const fpsNum = Number(fps);
+    const d2Labels = {
+      connecting: "Connecting…",
+      starting: "Starting…",
+      stopping: "Stopping…",
+      stalled: "No frames",
+      offline: "Offline",
+      disconnected: "Disconnected",
+      error: "Error",
+    };
+    let text = "";
+    if (key === "streaming") {
+      text = Number.isFinite(fpsNum) && fpsNum > 0 ? `${Math.round(fpsNum)} FPS` : "Live";
+    } else if (key !== "idle") {
+      text = (typeof label === "string" && label.trim()) ? label.trim() : (d2Labels[key] || "");
+    }
+    d2CamStatus.textContent = text;
+    d2CamStatus.hidden = !text;
+    d2CamStatus.dataset.status = key;
+  }
   syncD2CamButtons(status || "idle");
 
   const streaming = status === "streaming" || status === "starting" || status === "stalled";
@@ -397,16 +425,16 @@ function setMode(nextMode) {
     ensureFrame(d2Desktop, desktopUrl);
     ensureFrame(d2Webcam, webcamUrlD2);
     ensureFrame(d2Processes, processesUrlD2);
+    ensureFrame(d2Files, filesUrlD2);
     dashboard2.activate();
-    dashboard2Icons.activate();
     syncD2CamButtons("idle");
     setTimeout(() => postToWebcam({ type: "webcam_cmd", action: "ping" }), 600);
   } else {
     dashboard2.deactivate();
-    dashboard2Icons.deactivate();
     unloadFrame(d2Desktop);
     unloadFrame(d2Webcam);
     unloadFrame(d2Processes);
+    unloadFrame(d2Files);
   }
 
   if (needsWebcam) {
@@ -469,6 +497,74 @@ d2CamStop?.addEventListener("click", (e) => {
   e.stopPropagation();
   postToWebcam({ type: "webcam_cmd", action: "stop" });
   syncD2CamButtons("stopping");
+});
+
+/* Dashboard 2.0 — one-click webcam frame copy / save */
+let pendingCamCapture = null; // "copy" | "save"
+
+function flashCamCaptureBtn(btn, ok, title) {
+  if (!btn) return;
+  const icon = btn.querySelector("i");
+  const prevIconClass = icon ? icon.className : "";
+  const prevTitle = btn.title;
+  if (icon) icon.className = ok ? "fa-solid fa-check" : "fa-solid fa-xmark";
+  btn.title = title || (ok ? "Done" : "Capture failed — no frame");
+  setTimeout(() => {
+    if (icon) icon.className = prevIconClass;
+    btn.title = prevTitle;
+  }, 1400);
+}
+
+function buildCamCaptureFilename() {
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  return `webcam-${clientId}-${ts}.jpg`;
+}
+
+function downloadCamCapture(blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = buildCamCaptureFilename();
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function copyCamCaptureToClipboard(blob) {
+  if (!navigator.clipboard || typeof ClipboardItem !== "function") return false;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requestCamCapture(kind) {
+  if (pendingCamCapture) return;
+  const btn = kind === "copy" ? d2CamCopy : d2CamSave;
+  pendingCamCapture = kind;
+  const sent = postToWebcam({
+    type: "webcam_cmd",
+    action: "capture_frame",
+    replyTo: kind,
+    // PNG for clipboard (universal ClipboardItem support), JPG for file save.
+    format: kind === "copy" ? "image/png" : "image/jpeg",
+  });
+  if (!sent) {
+    pendingCamCapture = null;
+    flashCamCaptureBtn(btn, false, "Webcam frame not ready");
+  }
+}
+
+d2CamCopy?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  requestCamCapture("copy");
+});
+d2CamSave?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  requestCamCapture("save");
 });
 camRefresh?.addEventListener("click", () => postToWebcam({ type: "webcam_cmd", action: "refresh_cameras" }));
 
@@ -565,6 +661,33 @@ window.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || typeof data !== "object") return;
   if (data.clientId && data.clientId !== clientId) return;
+
+  if (data.type === "webcam_frame") {
+    const kind = data.replyTo === "copy" || data.replyTo === "save" ? data.replyTo : pendingCamCapture;
+    pendingCamCapture = null;
+    if (kind !== "copy" && kind !== "save") return;
+    const btn = kind === "copy" ? d2CamCopy : d2CamSave;
+    const blob = data.blob;
+    if (!(blob instanceof Blob) || blob.size === 0) {
+      flashCamCaptureBtn(btn, false);
+      return;
+    }
+    if (kind === "copy") {
+      copyCamCaptureToClipboard(blob).then((ok) => {
+        if (ok) {
+          flashCamCaptureBtn(btn, true, "Frame copied to clipboard");
+        } else {
+          // Clipboard API unavailable (non-secure context / denied) — fall back to a download.
+          downloadCamCapture(blob);
+          flashCamCaptureBtn(btn, true, "Clipboard unavailable — frame downloaded instead");
+        }
+      });
+    } else {
+      downloadCamCapture(blob);
+      flashCamCaptureBtn(btn, true, "Frame saved");
+    }
+    return;
+  }
 
   if (data.type === "webcam_status") {
     updateCamStatusUi(data.status, data.fps != null ? data.fps : undefined, data.label);

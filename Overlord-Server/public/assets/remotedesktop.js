@@ -10,7 +10,7 @@ import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 import { initSidePanel } from "./side-panel.js";
 import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.js";
 
-const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
+const REMOTE_DESKTOP_JS_VERSION = "1.0.3";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
@@ -1092,6 +1092,12 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
     rdStateOverlay.hidden = !show;
     if (!show) return;
 
+    // Transient states (auto-start/reconnect/stall recovery) render as a slim
+    // bottom pill so the message never covers the desktop; terminal states
+    // (offline/disconnected/error) keep the centered card with full detail.
+    const compact = streamState === "connecting" || streamState === "starting" || streamState === "stalled";
+    rdStateOverlay.classList.toggle("is-compact", compact);
+
     const iconClasses = {
       connecting: "fa-solid fa-circle-notch fa-spin",
       starting: "fa-solid fa-circle-notch fa-spin",
@@ -1959,20 +1965,23 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.2";
       }
       streamProfileSelect.appendChild(option);
     }
-    const manualHighResolutionProfiles = [
-      { maxHeight: 1440, fps: 30, label: "30 FPS - 1440p" },
-      { maxHeight: 1440, fps: 60, label: "60 FPS - 1440p" },
-      { maxHeight: 2160, fps: 30, label: "30 FPS - 2160p (4K)" },
-      { maxHeight: 2160, fps: 60, label: "60 FPS - 2160p (4K)" },
+    const manualExtraProfiles = [
+      { maxHeight: 480, fps: 15, label: "15 FPS - 480p", title: "Manual low-bandwidth profile" },
+      { maxHeight: 480, fps: 30, label: "30 FPS - 480p", title: "Manual low-bandwidth profile" },
+      { maxHeight: 480, fps: 60, label: "60 FPS - 480p", title: "Manual low-bandwidth profile" },
+      { maxHeight: 1440, fps: 30, label: "30 FPS - 1440p", title: "Manual high-resolution profile" },
+      { maxHeight: 1440, fps: 60, label: "60 FPS - 1440p", title: "Manual high-resolution profile" },
+      { maxHeight: 2160, fps: 30, label: "30 FPS - 2160p (4K)", title: "Manual high-resolution profile" },
+      { maxHeight: 2160, fps: 60, label: "60 FPS - 2160p (4K)", title: "Manual high-resolution profile" },
     ];
     const existingProfiles = new Set(Array.from(streamProfileSelect.options, (option) => option.value));
-    for (const profile of manualHighResolutionProfiles) {
+    for (const profile of manualExtraProfiles) {
       const value = `${profile.maxHeight}:${profile.fps}`;
       if (existingProfiles.has(value)) continue;
       const option = document.createElement("option");
       option.value = value;
       option.textContent = profile.label;
-      option.title = "Manual high-resolution profile";
+      option.title = profile.title;
       streamProfileSelect.appendChild(option);
     }
     if (!setSelectValue(streamProfileSelect, savedStreamProfile || "auto") &&

@@ -215,4 +215,58 @@ describe("wsHandlers frame routing", () => {
       delete runtime.__rdBroadcast;
     }
   });
+
+  test("relays webcam and backstage frames even when fps is 0 (legacy agents)", () => {
+    const webcamBroadcasts: unknown[] = [];
+    const backstageBroadcasts: unknown[] = [];
+    const runtime = globalThis as unknown as {
+      __webcamBroadcast?: (clientId: string, bytes: Uint8Array, header: unknown) => boolean;
+      __backstageBroadcast?: (clientId: string, bytes: Uint8Array, header: unknown) => boolean;
+    };
+    runtime.__webcamBroadcast = (clientId, bytes, header) => {
+      webcamBroadcasts.push({ clientId, bytes, header });
+      return true;
+    };
+    runtime.__backstageBroadcast = (clientId, bytes, header) => {
+      backstageBroadcasts.push({ clientId, bytes, header });
+      return true;
+    };
+    const client = {
+      id: "legacy-agent",
+      lastSeen: Date.now(),
+      online: true,
+      isAdmin: false,
+    } as unknown as ClientInfo;
+
+    try {
+      const webcamFrame = {
+        type: "frame",
+        header: { fps: 0, format: "jpeg", webcam: true },
+        data: new Uint8Array([1, 2, 3]),
+      };
+      expect(shouldRelayFrameToViewers(webcamFrame)).toBe(true);
+      handleFrame(client, webcamFrame, shouldRelayFrameToViewers(webcamFrame));
+      expect(webcamBroadcasts).toHaveLength(1);
+
+      const backstageFrame = {
+        type: "frame",
+        header: { fps: 0, format: "jpeg", backstage: true },
+        data: new Uint8Array([1, 2, 3]),
+      };
+      expect(shouldRelayFrameToViewers(backstageFrame)).toBe(true);
+      handleFrame(client, backstageFrame, shouldRelayFrameToViewers(backstageFrame));
+      expect(backstageBroadcasts).toHaveLength(1);
+
+      // Webcam frames with no fps field at all must also relay.
+      const noFpsWebcamFrame = {
+        type: "frame",
+        header: { format: "jpeg", webcam: true },
+        data: new Uint8Array([1, 2, 3]),
+      };
+      expect(shouldRelayFrameToViewers(noFpsWebcamFrame)).toBe(true);
+    } finally {
+      delete runtime.__webcamBroadcast;
+      delete runtime.__backstageBroadcast;
+    }
+  });
 });

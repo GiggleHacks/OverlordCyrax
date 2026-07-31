@@ -1,17 +1,22 @@
-/** Dashboard 2.0 MDI window manager — v0.2.1 */
-export const DASHBOARD2_MDI_VERSION = "0.2.1";
+/** Dashboard 2.0 MDI window manager — v0.4.1 */
+export const DASHBOARD2_MDI_VERSION = "0.4.1";
 
 const LAYOUT_KEY = "overlord_dashboard2_layout_v2";
-const LAYOUT_SAVED_KEY = "overlord_dashboard2_layout_saved_v2";
+const LAYOUT_SAVED_LEGACY_KEY = "overlord_dashboard2_layout_saved_v2";
+const SLOTS_KEY = "overlord_dashboard2_layout_slots_v1";
+const ACTIVE_SLOT_KEY = "overlord_dashboard2_layout_active_slot_v1";
+const SLOT_IDS = ["1", "2"];
 const MIN_W = 220;
 const MIN_H = 140;
 const TITLE_H = 28;
 const EDGES = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 
+// Default geometry: RD full-left; right stack Webcam → shorter PM → FM under PM.
 const DEFAULTS = {
-  desktop: { x: 12, y: 12, w: 0.7, h: 0.9, z: 3, minimized: false, maximized: false },
-  webcam: { x: 0.74, y: 12, w: 0.24, h: 0.32, z: 4, minimized: false, maximized: false },
-  processes: { x: 0.74, y: 0.38, w: 0.24, h: 0.42, z: 5, minimized: false, maximized: false },
+  desktop: { x: 12, y: 12, w: 0.7, h: 0.96, z: 3, minimized: false, maximized: false },
+  webcam: { x: 0.74, y: 12, w: 0.24, h: 0.28, z: 4, minimized: false, maximized: false },
+  processes: { x: 0.74, y: 0.31, w: 0.24, h: 0.3, z: 5, minimized: false, maximized: false },
+  files: { x: 0.74, y: 0.63, w: 0.24, h: 0.33, z: 6, minimized: false, maximized: false },
 };
 
 function clamp(n, lo, hi) {
@@ -38,10 +43,99 @@ function saveJson(key, state) {
   }
 }
 
+function removeJson(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
 function cloneDefaults() {
   const out = {};
   for (const k of Object.keys(DEFAULTS)) out[k] = { ...DEFAULTS[k] };
   return out;
+}
+
+function cloneLayout(src) {
+  const snap = {};
+  const base = src && typeof src === "object" ? src : {};
+  for (const k of Object.keys(base)) {
+    if (base[k] && typeof base[k] === "object" && !Array.isArray(base[k])) snap[k] = { ...base[k] };
+  }
+  for (const k of Object.keys(DEFAULTS)) {
+    if (!snap[k]) snap[k] = { ...DEFAULTS[k] };
+  }
+  return snap;
+}
+
+function emptySlots() {
+  return { "1": null, "2": null };
+}
+
+function isBareLayoutMap(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  if (Object.prototype.hasOwnProperty.call(entry, "layout")) return false;
+  return Object.keys(DEFAULTS).some((k) => entry[k] && typeof entry[k] === "object");
+}
+
+function normalizeSlotEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  if (isBareLayoutMap(entry)) {
+    return { layout: cloneLayout(entry), locked: false };
+  }
+  const layoutSrc = entry.layout && typeof entry.layout === "object" ? entry.layout : null;
+  if (!layoutSrc || !Object.keys(layoutSrc).length) return null;
+  return { layout: cloneLayout(layoutSrc), locked: !!entry.locked };
+}
+
+function normalizeSlots(raw) {
+  const slots = emptySlots();
+  if (!raw || typeof raw !== "object") return slots;
+  for (const id of SLOT_IDS) {
+    slots[id] = normalizeSlotEntry(raw[id]);
+  }
+  return slots;
+}
+
+function serializeSlots(slots) {
+  const out = emptySlots();
+  for (const id of SLOT_IDS) {
+    const entry = slots[id];
+    if (!entry || !entry.layout) {
+      out[id] = null;
+      continue;
+    }
+    out[id] = { layout: cloneLayout(entry.layout), locked: !!entry.locked };
+  }
+  return out;
+}
+
+function loadSlots() {
+  return normalizeSlots(loadJson(SLOTS_KEY));
+}
+
+function saveSlots(slots) {
+  saveJson(SLOTS_KEY, serializeSlots(slots));
+}
+
+function migrateLegacySavedLayout(slots) {
+  if (slots["1"]) return slots;
+  const legacy = loadJson(LAYOUT_SAVED_LEGACY_KEY);
+  if (!legacy || !Object.keys(legacy).length) return slots;
+  slots["1"] = { layout: cloneLayout(legacy), locked: false };
+  saveSlots(slots);
+  removeJson(LAYOUT_SAVED_LEGACY_KEY);
+  return slots;
+}
+
+function getSlotLayout(slots, id) {
+  const entry = slots[id];
+  return entry && entry.layout ? entry.layout : null;
+}
+
+function isSlotLocked(slots, id) {
+  return !!(slots[id] && slots[id].locked);
 }
 
 function resolveRect(spec, hostW, hostH) {
@@ -92,16 +186,27 @@ export function initDashboard2Mdi(opts) {
       activate() {},
       deactivate() {},
       resetLayout() {},
-      savePreferredLayout() {},
+      saveToSlot() {},
+      applySlot() {},
+      setSlotLocked() {},
       destroy() {},
     };
   }
 
   const workspace = root.querySelector("[data-d2-workspace]") || root;
   const windows = [...workspace.querySelectorAll("[data-d2-id]")];
+  let slots = migrateLegacySavedLayout(loadSlots());
+  let activeSlot = (() => {
+    try {
+      const v = localStorage.getItem(ACTIVE_SLOT_KEY);
+      return SLOT_IDS.includes(v) ? v : null;
+    } catch {
+      return null;
+    }
+  })();
   let layout = loadJson(LAYOUT_KEY);
   if (!layout || !Object.keys(layout).length) {
-    layout = loadJson(LAYOUT_SAVED_KEY) || cloneDefaults();
+    layout = cloneDefaults();
   }
   let topZ = 10;
   let active = false;
@@ -111,6 +216,7 @@ export function initDashboard2Mdi(opts) {
 
   const versionEl = root.querySelector("[data-d2-version]");
   if (versionEl) versionEl.textContent = `v${DASHBOARD2_MDI_VERSION}`;
+  const slotButtons = SLOT_IDS.map((id) => root.querySelector(`[data-d2-slot="${id}"]`)).filter(Boolean);
 
   function hostSize() {
     const r = workspace.getBoundingClientRect();
@@ -371,40 +477,199 @@ export function initDashboard2Mdi(opts) {
 
   windows.forEach(bindWindow);
 
+  let slotMenuEl = null;
+  let slotMenuCleanup = null;
+
+  function setActiveSlot(id) {
+    activeSlot = SLOT_IDS.includes(id) ? id : null;
+    try {
+      if (activeSlot) localStorage.setItem(ACTIVE_SLOT_KEY, activeSlot);
+      else localStorage.removeItem(ACTIVE_SLOT_KEY);
+    } catch {
+      /* ignore */
+    }
+    syncSlotButtons();
+  }
+
+  function slotLabel(id) {
+    return `Layout ${id}`;
+  }
+
+  function closeSlotMenu() {
+    if (slotMenuCleanup) {
+      slotMenuCleanup();
+      slotMenuCleanup = null;
+    }
+    if (slotMenuEl) {
+      slotMenuEl.remove();
+      slotMenuEl = null;
+    }
+  }
+
+  function syncSlotButtons() {
+    for (const btn of slotButtons) {
+      const id = btn.getAttribute("data-d2-slot");
+      if (!SLOT_IDS.includes(id)) continue;
+      const filled = !!getSlotLayout(slots, id);
+      const locked = isSlotLocked(slots, id);
+      const label = slotLabel(id);
+      btn.classList.toggle("is-empty", !filled);
+      btn.classList.toggle("is-active-slot", activeSlot === id);
+      btn.classList.toggle("is-locked", locked);
+      btn.innerHTML = locked
+        ? `<span class="d2-slot-label">${label}</span><i class="fa-solid fa-lock d2-slot-lock" aria-hidden="true"></i>`
+        : `<span class="d2-slot-label">${label}</span>`;
+      if (!filled) {
+        btn.title = `${label} — Click: apply · Right-click: save / lock`;
+      } else if (locked) {
+        btn.title = `${label} — Locked · Click: apply · Right-click: unlock`;
+      } else {
+        btn.title = `${label} — Click: apply · Right-click: save / lock`;
+      }
+    }
+  }
+
+  function flashSlotButton(btn, text) {
+    if (!btn) return;
+    btn.classList.add("is-saved");
+    btn.classList.remove("is-empty");
+    btn.textContent = text;
+    setTimeout(() => {
+      btn.classList.remove("is-saved");
+      syncSlotButtons();
+    }, 1200);
+  }
+
   function factoryReset() {
+    // Factory working layout only — custom slots are never cleared or rewritten.
     layout = cloneDefaults();
+    setActiveSlot(null);
     applyAll();
     persist();
   }
 
-  function savePreferredLayout() {
-    // snapshot current working layout
-    const snap = {};
-    for (const k of Object.keys(layout)) {
-      snap[k] = { ...layout[k] };
-    }
-    // ensure all known windows present
-    for (const k of Object.keys(DEFAULTS)) {
-      if (!snap[k]) snap[k] = { ...DEFAULTS[k] };
-    }
-    saveJson(LAYOUT_SAVED_KEY, snap);
+  function saveToSlot(id) {
+    if (!SLOT_IDS.includes(id)) return false;
+    if (isSlotLocked(slots, id)) return false;
+    const prevLocked = !!(slots[id] && slots[id].locked);
+    slots[id] = { layout: cloneLayout(layout), locked: prevLocked };
+    saveSlots(slots);
+    setActiveSlot(id);
     persist();
     return true;
+  }
+
+  function setSlotLocked(id, locked) {
+    if (!SLOT_IDS.includes(id)) return false;
+    const existing = getSlotLayout(slots, id);
+    if (!existing) return false;
+    slots[id] = { layout: cloneLayout(existing), locked: !!locked };
+    saveSlots(slots);
+    syncSlotButtons();
+    return true;
+  }
+
+  function applySlot(id) {
+    if (!SLOT_IDS.includes(id)) return false;
+    const snap = getSlotLayout(slots, id);
+    if (!snap || !Object.keys(snap).length) return false;
+    layout = cloneLayout(snap);
+    setActiveSlot(id);
+    applyAll();
+    persist();
+    return true;
+  }
+
+  function openSlotMenu(btn, id, clientX, clientY) {
+    closeSlotMenu();
+    const filled = !!getSlotLayout(slots, id);
+    const locked = isSlotLocked(slots, id);
+    const menu = document.createElement("div");
+    menu.className = "d2-slot-menu";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML = `
+      <button type="button" class="d2-slot-menu-item" data-d2-slot-action="save" role="menuitem" ${locked ? "disabled" : ""}>
+        <i class="fa-solid fa-floppy-disk"></i><span>Save layout</span>
+      </button>
+      <button type="button" class="d2-slot-menu-item" data-d2-slot-action="toggle-lock" role="menuitem" ${!filled && !locked ? "disabled" : ""}>
+        <i class="fa-solid ${locked ? "fa-lock-open" : "fa-lock"}"></i><span>${locked ? "Unlock" : "Lock"}</span>
+      </button>
+    `;
+    document.body.appendChild(menu);
+    slotMenuEl = menu;
+
+    const pad = 6;
+    const rect = menu.getBoundingClientRect();
+    let left = clientX;
+    let top = clientY;
+    if (left + rect.width > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - rect.width - pad);
+    if (top + rect.height > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - rect.height - pad);
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+
+    menu.addEventListener("click", (e) => {
+      const item = e.target.closest("[data-d2-slot-action]");
+      if (!item || item.disabled) return;
+      const action = item.getAttribute("data-d2-slot-action");
+      closeSlotMenu();
+      if (action === "save") {
+        if (saveToSlot(id)) flashSlotButton(btn, "Saved");
+        else flashSlotButton(btn, locked ? "Locked" : "Empty");
+        return;
+      }
+      if (action === "toggle-lock") {
+        if (locked) {
+          setSlotLocked(id, false);
+          return;
+        }
+        if (setSlotLocked(id, true)) return;
+        flashSlotButton(btn, "Empty");
+      }
+    });
+
+    const onDocPointer = (e) => {
+      if (menu.contains(e.target) || btn.contains(e.target)) return;
+      closeSlotMenu();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") closeSlotMenu();
+    };
+    setTimeout(() => {
+      document.addEventListener("pointerdown", onDocPointer, true);
+      window.addEventListener("keydown", onKey, true);
+      window.addEventListener("blur", closeSlotMenu);
+      window.addEventListener("resize", closeSlotMenu);
+    }, 0);
+    slotMenuCleanup = () => {
+      document.removeEventListener("pointerdown", onDocPointer, true);
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", closeSlotMenu);
+      window.removeEventListener("resize", closeSlotMenu);
+    };
   }
 
   const resetBtn = root.querySelector("[data-d2-reset]");
   resetBtn?.addEventListener("click", () => factoryReset());
 
-  const saveBtn = root.querySelector("[data-d2-save]");
-  saveBtn?.addEventListener("click", () => {
-    savePreferredLayout();
-    saveBtn.classList.add("is-saved");
-    saveBtn.textContent = "Saved";
-    setTimeout(() => {
-      saveBtn.classList.remove("is-saved");
-      saveBtn.textContent = "Save layout";
-    }, 1200);
-  });
+  for (const btn of slotButtons) {
+    const id = btn.getAttribute("data-d2-slot");
+    if (!SLOT_IDS.includes(id)) continue;
+    btn.addEventListener("click", (e) => {
+      closeSlotMenu();
+      if (e.shiftKey) {
+        if (saveToSlot(id)) flashSlotButton(btn, "Saved");
+        else flashSlotButton(btn, isSlotLocked(slots, id) ? "Locked" : "Empty");
+        return;
+      }
+      if (applySlot(id)) return;
+      flashSlotButton(btn, "Empty");
+    });
+    btn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      openSlotMenu(btn, id, e.clientX, e.clientY);
+    });
+  }
+  syncSlotButtons();
 
   function activate() {
     active = true;
@@ -441,8 +706,11 @@ export function initDashboard2Mdi(opts) {
     activate,
     deactivate,
     resetLayout: factoryReset,
-    savePreferredLayout,
+    saveToSlot,
+    applySlot,
+    setSlotLocked,
     destroy() {
+      closeSlotMenu();
       deactivate();
     },
   };

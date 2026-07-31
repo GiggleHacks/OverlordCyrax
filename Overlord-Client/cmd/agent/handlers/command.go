@@ -2679,7 +2679,16 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		path, _ := payload["path"].(string)
 		sourceURL, _ := payload["url"].(string)
 		total := payloadNumberToInt64(payload["total"])
-		return HandleFileUploadHTTP(ctx, env, cmdID, path, sourceURL, total)
+
+		uploadCtx, cancel := context.WithCancel(ctx)
+		registerCancellableCommand(cmdID, cancel)
+		goSafe("file_upload_http", env.Cancel, func() {
+			defer unregisterCommand(cmdID)
+			if err := HandleFileUploadHTTP(uploadCtx, env, cmdID, path, sourceURL, total); err != nil && err != context.Canceled {
+				log.Printf("file_upload_http error: %v", err)
+			}
+		})
+		return nil
 	case "file_delete":
 		path, _ := envelopePayloadString(envelope, "path")
 		return HandleFileDelete(ctx, env, cmdID, path)

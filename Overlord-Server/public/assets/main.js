@@ -2111,13 +2111,8 @@ menu.addEventListener("click", async (e) => {
         return;
       }
     }
-    let skin = open === "files-classic" ? "classic" : "modern";
-    if (open === "files") {
-      try {
-        skin = localStorage.getItem("overlord.filebrowser.skin") || "modern";
-      } catch {}
-    }
-    if (skin === "classic") {
+    // Explicit menu targets always open their own UI (never remap via last-used skin).
+    if (open === "files-classic") {
       try {
         localStorage.setItem("overlord.filebrowser.skin", "classic");
       } catch {}

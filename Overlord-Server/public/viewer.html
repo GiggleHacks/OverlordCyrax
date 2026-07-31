@@ -157,11 +157,12 @@
                 <span class="d2-brand">OVERLORD</span>
                 <span class="d2-chrome-sep">//</span>
                 <span class="d2-chrome-title">Dashboard 2.0</span>
-                <span class="d2-version" data-d2-version>v0.2.0</span>
+                <span class="d2-version" data-d2-version>v0.4.0</span>
               </div>
               <div class="d2-chrome-right">
-                <button type="button" class="d2-chrome-btn" data-d2-save title="Save preferred layout">Save layout</button>
-                <button type="button" class="d2-chrome-btn" data-d2-reset title="Reset to factory layout">Reset layout</button>
+                <button type="button" class="d2-chrome-btn" data-d2-slot="1" title="Layout 1 — Click: apply · Right-click: save / lock">Layout 1</button>
+                <button type="button" class="d2-chrome-btn" data-d2-slot="2" title="Layout 2 — Click: apply · Right-click: save / lock">Layout 2</button>
+                <button type="button" class="d2-chrome-btn" data-d2-reset title="Reset to factory layout (keeps Layout 1/2)">Reset layout</button>
               </div>
             </div>
             <div class="d2-workspace" data-d2-workspace id="d2Workspace">
@@ -180,8 +181,11 @@
                 <header class="d2-titlebar" data-d2-drag>
                   <span class="d2-title"><i class="fa-solid fa-camera"></i> Webcam</span>
                   <div class="d2-win-btns d2-cam-btns">
+                    <span class="d2-cam-status" data-d2-cam-status hidden></span>
                     <button type="button" class="d2-cam-btn d2-cam-start" data-d2-cam-start title="Start webcam">Start</button>
                     <button type="button" class="d2-cam-btn d2-cam-stop" data-d2-cam-stop title="Stop webcam" disabled>Stop</button>
+                    <button type="button" class="d2-cam-btn d2-cam-copy" data-d2-cam-copy title="Copy current frame to clipboard" aria-label="Copy frame to clipboard" disabled><i class="fa-solid fa-copy"></i></button>
+                    <button type="button" class="d2-cam-btn d2-cam-save" data-d2-cam-save title="Save current frame as JPG" aria-label="Save frame as JPG" disabled><i class="fa-solid fa-download"></i></button>
                     <button type="button" class="d2-cam-btn d2-cam-settings" data-d2-cam-settings title="Webcam settings" aria-label="Webcam settings"><i class="fa-solid fa-sliders"></i></button>
                   </div>
                 </header>
@@ -202,6 +206,17 @@
                 </header>
                 <div class="d2-body">
                   <iframe id="viewerD2Processes" title="Process Manager"></iframe>
+                </div>
+              </div>
+              <div class="d2-window" data-d2-id="files">
+                <header class="d2-titlebar" data-d2-drag>
+                  <span class="d2-title"><i class="fa-solid fa-folder-tree"></i> File Manager 2.0</span>
+                  <div class="d2-win-btns">
+                    <button type="button" data-d2-max title="Maximize" aria-label="Maximize">□</button>
+                  </div>
+                </header>
+                <div class="d2-body">
+                  <iframe id="viewerD2Files" title="File Manager"></iframe>
                 </div>
               </div>
             </div>

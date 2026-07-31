@@ -4,23 +4,37 @@ import { readFile } from "node:fs/promises";
 const publicAsset = (name: string) => readFile(new URL(`../public/assets/${name}`, import.meta.url), "utf8");
 
 describe("webcam tile failures", () => {
-  test("retries recoverable tile failures before removing offline tiles", async () => {
+  test("gives each webcam one 30s connect budget with a visible countdown, then removes it", async () => {
     const js = await publicAsset("webcams.js");
-    expect(js).toContain("const TILE_FAILURE_TIMEOUT_MS = 20000");
-    expect(js).toContain('const terminalTileStates = new Set(["offline", "not-found"])');
-    expect(js).toContain('const recoverableTileStates = new Set(["error", "disconnected"])');
-    expect(js).toContain("function scheduleTileRetry(tile)");
-    expect(js).toContain("MAX_TILE_RETRIES");
+    expect(js).toContain("const CONNECT_TIMEOUT_MS = 30000");
+    expect(js).toContain("function armConnectBudget(clientId)");
+    expect(js).toContain("function tickConnectBudgets()");
+    expect(js).toContain("tile-countdown");
+    expect(js).toContain("connectDeadlines.set(clientId, Date.now() + CONNECT_TIMEOUT_MS)");
+    expect(js).toContain("if (remainingMs <= 0) removeTile(clientId, tile)");
+    // The budget is cancelled only when the webcam actually streams.
+    expect(js).toContain('if (state === "streaming") {\n    clearConnectBudget(clientId);');
     expect(js).toContain("activeTiles.delete(clientId)");
     expect(js).toContain("tile.remove()");
     expect(js).toContain("syncLayout()");
-    expect(js).toContain('setTileState(tile, "not-found")');
     expect(js).toContain("Math.min(index * 180, 4000)");
+    // No retry/grace machinery: dead webcams never get a second budget.
+    expect(js).not.toContain("MAX_TILE_RETRIES");
+    expect(js).not.toContain("scheduleTileRetry");
+    expect(js).not.toContain("TILE_FAILURE_TIMEOUT_MS");
+  });
+
+  test("removes tiles immediately on error, offline, not-found, or disconnected", async () => {
+    const js = await publicAsset("webcams.js");
+    expect(js).toContain('const IMMEDIATE_REMOVAL_STATES = new Set(["error", "offline", "not-found", "disconnected"])');
+    expect(js).toContain("if (IMMEDIATE_REMOVAL_STATES.has(state)) {");
+    expect(js).toContain("removeTile(clientId, tile);");
+    expect(js).not.toContain("recoverableTileStates");
   });
 
   test("expands selected tile via popup only without competing array stream", async () => {
     const js = await publicAsset("webcams.js");
-    expect(js).toContain('const WEBCAMS_JS_VERSION = "1.4.0"');
+    expect(js).toContain('const WEBCAMS_JS_VERSION = "1.5.0"');
     expect(js).toContain("function stopAllTiles()");
     expect(js).toContain("function startTile(tile)");
     expect(js).toContain("function restoreAllTiles()");
@@ -37,6 +51,25 @@ describe("webcam tile failures", () => {
     expect(viewerJs).toContain('fromArray = params.get("fromArray") === "1"');
     expect(viewerJs).toContain("webcam_array_viewer_closed");
     expect(viewerJs).toContain("notifyArrayViewerClosed");
+  });
+
+  test("caches the last visible frame per tile and restores snapshots without reconnecting", async () => {
+    const js = await publicAsset("webcams.js");
+    expect(js).toContain("function captureTileSnapshot(clientId, tile)");
+    expect(js).toContain("tileSnapshots.set(clientId, canvas.toDataURL(\"image/jpeg\"");
+    expect(js).toContain("getElementById(\"frameCanvas\")");
+    expect(js).toContain("function showSnapshot(tile, dataUrl)");
+    expect(js).toContain("function hideSnapshot(tile)");
+    expect(js).toContain("is-cached");
+    // Snapshots are captured before the array pauses for the focused viewer.
+    expect(js).toMatch(/captureTileSnapshot\(cid, t\)[\s\S]{0,200}stopAllTiles\(\)/);
+    // Cached tiles stay on the snapshot until the operator clicks to resume.
+    expect(js).toContain("Cached frame · click to resume");
+    expect(js).toContain('if (!tile.classList.contains("is-cached")) return;');
+    const css = await publicAsset("main.css");
+    expect(css).toContain(".tile-snapshot{");
+    expect(css).toContain(".tile-countdown{");
+    expect(css).toContain(".webcam-tile.is-cached iframe{display:none}");
   });
 
   test("recovers from stalls and prefers jpeg in embedded array tiles", async () => {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"overlord-client/cmd/agent/config"
 	rt "overlord-client/cmd/agent/runtime"
@@ -746,5 +747,62 @@ func TestHandleFileUploadHTTP_SizeMismatch(t *testing.T) {
 	result := requireLastCommandResult(t, writer.msgs)
 	if result.OK {
 		t.Fatalf("expected OK=false for size mismatch")
+	}
+}
+
+func TestHandleFileUploadHTTP_CancelMidTransfer(t *testing.T) {
+	block := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1048576")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write(bytes.Repeat([]byte("x"), 64*1024))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		<-block
+	}))
+	defer ts.Close()
+	defer close(block)
+
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "uploaded-http-cancel.bin")
+	tmpPath := destPath + ".httpuploading"
+
+	writer := &testWriter{}
+	env := &rt.Env{
+		Conn: writer,
+		Cfg:  config.Config{TLSInsecureSkipVerify: true},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- HandleFileUploadHTTP(ctx, env, "cmd-http-upload-cancel", destPath, ts.URL+"/file", 1024*1024)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("HandleFileUploadHTTP returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("HandleFileUploadHTTP did not return after cancel")
+	}
+
+	result := requireLastCommandResult(t, writer.msgs)
+	if result.OK {
+		t.Fatalf("expected cancelled upload to fail")
+	}
+	if result.Message != "cancelled" {
+		t.Fatalf("expected cancelled message, got %q", result.Message)
+	}
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Fatalf("expected temp upload file cleaned up, stat err=%v", err)
+	}
+	if _, err := os.Stat(destPath); !os.IsNotExist(err) {
+		t.Fatalf("expected final dest not created, stat err=%v", err)
 	}
 }

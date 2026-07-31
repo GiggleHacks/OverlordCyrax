@@ -17,7 +17,7 @@ Docker is the easiest way to run it.
 This fork tracks [vxaboveground/Overlord](https://github.com/vxaboveground/Overlord) (currently synced at upstream **2.6.0**) and adds a large custom layer on top. Highlights:
 
 **Interface & viewing**
-- **Dashboard 2.0** — retro MDI desktop: draggable, 8-way resizable windows (Remote Desktop / Webcam / Process Manager), saved + factory layouts, and **desktop shortcut icons** you can drag into any dead space
+- **Dashboard 2.0** — retro MDI desktop: draggable, 8-way resizable windows (Remote Desktop / Webcam / Process Manager 2.0 / File Manager 2.0), two custom layouts (click apply · right-click save/lock) + factory reset that keeps them
 - **Unified viewer** — webcam / desktop / split / PiP / Dashboard 2.0 modes with a shared shell
 - **Webcam array** — bulk tile viewer (up to 12 fitted tiles) with stall auto-recovery
 - **PiP webcam overlay** inside the remote desktop panel
@@ -25,7 +25,7 @@ This fork tracks [vxaboveground/Overlord](https://github.com/vxaboveground/Overl
 
 **Tools & pages**
 - **Process Manager 2.0** — compact process manager built for Dashboard 2.0 panes (tree, icons, kill/suspend context menu, hide-known-safe filter that shows only unknown/suspicious executables — the agent is always protected, Select All with BSOD-safe exclusions, Win98-style batch kill progress bar with pac-man), original untouched
-- **Side action panel** on viewer/remote-desktop pages with pinnable shortcuts
+- **Side action panel** on viewer/remote-desktop pages
 - **Win98 Classic File Explorer** alongside the modern file browser
 - **Soundboard** (+ dark variant)
 - **Trolling suite** — Change Wallpaper (retry-after-reconnect), Remote Execute, Open URL, agent troll handlers

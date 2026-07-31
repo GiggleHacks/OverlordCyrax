@@ -2057,6 +2057,9 @@ body.viewer-has-webcam-bar .viewer-toolbar-cam:not([hidden]) { display: flex; }
 .d2-version { color: #9aa3d4; font-variant-numeric: tabular-nums; }
 .d2-chrome-right { display: inline-flex; align-items: center; gap: 6px; }
 .d2-chrome-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 1px solid #4a5388;
   background: linear-gradient(180deg, #252b4e 0%, #171c34 100%);
   color: #b8c0ef;
@@ -2227,67 +2230,35 @@ body.viewer-has-webcam-bar .viewer-toolbar-cam:not([hidden]) { display: flex; }
 .d2-window.is-maximized .d2-edge-se,
 .d2-window.is-minimized .d2-edge-se { background: none; }
 
-/* ── Dashboard 2.0 desktop shortcut icons ─────────────────── */
-.d2-icon {
-  position: absolute;
-  z-index: 2;
-  width: 78px;
-  height: 76px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 6px 4px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  user-select: none;
-  touch-action: none;
-  transition: background-color 120ms ease, border-color 120ms ease;
-}
-.d2-icon:hover,
-.d2-icon:focus-visible {
-  background: rgba(56, 189, 248, 0.1);
-  border-color: rgba(56, 189, 248, 0.28);
-  outline: none;
-}
-.d2-icon.is-dragging {
-  z-index: 50;
-  background: rgba(56, 189, 248, 0.14);
-  border-color: rgba(56, 189, 248, 0.45);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-  cursor: grabbing;
-}
-.d2-icon-img {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  font-size: 17px;
-  background: #0a0e1a;
-  border: 1px solid #1c2440;
-  border-radius: 9px;
-  box-shadow: inset 1px 1px 0 rgba(140, 155, 220, 0.12);
-  pointer-events: none;
-}
-.d2-icon-label {
-  max-width: 100%;
-  font-size: 10px;
-  line-height: 1.2;
-  color: #aab3c8;
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.d2-icon:hover .d2-icon-label { color: #dbe4ff; }
 body.d2-interacting,
 body.d2-interacting * { cursor: inherit; }
 body.d2-interacting iframe { pointer-events: none !important; }
 .d2-cam-btns { gap: 4px !important; }
+.d2-cam-status {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid #4a5388;
+  background: linear-gradient(180deg, #232a4c 0%, #161c36 100%);
+  color: #9aa3d8;
+  white-space: nowrap;
+  user-select: none;
+}
+.d2-cam-status[data-status="streaming"] {
+  border-color: rgba(60, 180, 120, 0.65);
+  color: #8ef0c0;
+}
+.d2-cam-status[data-status="stalled"],
+.d2-cam-status[data-status="error"],
+.d2-cam-status[data-status="offline"] {
+  border-color: rgba(200, 160, 70, 0.65);
+  color: #ffd890;
+}
 .d2-cam-btn {
   min-width: 44px !important;
   width: auto !important;
@@ -2347,6 +2318,63 @@ body.d2-webcam-missing .d2-window[data-d2-id="webcam"] .d2-title i {
 .d2-chrome-btn.is-saved {
   color: #8ef0c0;
   border-color: rgba(60, 180, 120, 0.55);
+}
+.d2-chrome-btn.is-empty {
+  color: #7a84b0;
+  opacity: 0.72;
+}
+.d2-chrome-btn.is-active-slot {
+  color: #eaf0ff;
+  border-color: #6f7bc4;
+  box-shadow: 0 0 0 1px rgba(110, 130, 220, 0.35);
+}
+.d2-chrome-btn.is-locked {
+  border-color: rgba(250, 204, 21, 0.45);
+  color: #f5e6a8;
+}
+.d2-slot-lock {
+  font-size: 9px;
+  color: #facc15;
+  line-height: 1;
+}
+.d2-slot-menu {
+  position: fixed;
+  z-index: 10050;
+  min-width: 148px;
+  padding: 4px;
+  background: linear-gradient(180deg, #1c2244 0%, #12172e 100%);
+  border: 1px solid #4a5388;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(200, 210, 255, 0.1);
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11px;
+}
+.d2-slot-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: #d7dcff;
+  font: inherit;
+  letter-spacing: 0.04em;
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.d2-slot-menu-item:hover:not(:disabled) {
+  background: rgba(90, 110, 200, 0.28);
+  color: #fff;
+}
+.d2-slot-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.d2-slot-menu-item i {
+  width: 12px;
+  text-align: center;
+  color: #9aa3d4;
+  font-size: 10px;
 }
 body.viewer-dashboard2-active .viewer-mode-nav button[data-mode="dashboard2"].is-active {
   color: #eaf0ff;
@@ -2566,151 +2594,6 @@ body.processes-embedded .proc-list-placeholder {
   font-size: 11px !important;
   color: #6b7598 !important;
 }
-
-/* Side panel shortcut pins */
-.sp-pins {
-  margin-top: auto;
-  border-top: 1px solid #1a2433;
-  padding: 8px 6px 10px;
-  flex-shrink: 0;
-  background: rgba(8, 12, 20, 0.9);
-}
-.sp-pins-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  margin-bottom: 6px;
-  padding: 0 4px;
-}
-.sp-pins-title {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-.sp-pins-create {
-  border: 1px solid #294352;
-  background: #0b1620;
-  color: #9fc8d7;
-  font: inherit;
-  font-size: 10px;
-  padding: 3px 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 4px;
-}
-.sp-pins-create:hover { border-color: #22d3ee; color: #e2f8ff; }
-.sp-pins-list { display: flex; flex-direction: column; gap: 3px; }
-.sp-pins-empty { font-size: 10px; color: #475569; padding: 4px; }
-.sp-pin {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.sp-pin-btn {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid #1e293b;
-  background: #0f172a;
-  color: #cbd5e1;
-  font: inherit;
-  font-size: 11px;
-  padding: 5px 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border-radius: 5px;
-  text-align: left;
-}
-.sp-pin-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sp-pin-btn:hover { border-color: #334155; background: #152033; }
-.sp-pin-remove {
-  border: 0;
-  background: transparent;
-  color: #64748b;
-  width: 22px;
-  height: 22px;
-  cursor: pointer;
-  flex-shrink: 0;
-  border-radius: 4px;
-}
-.sp-pin-remove:hover { color: #fda4af; background: rgba(127, 29, 29, 0.25); }
-.side-panel.is-collapsed .sp-pins-title,
-.side-panel.is-collapsed .sp-pins-create span,
-.side-panel.is-collapsed .sp-pin-btn span,
-.side-panel.is-collapsed .sp-pins-empty,
-.side-panel.is-collapsed .sp-pin-remove { display: none; }
-.side-panel.is-collapsed .sp-pins { padding: 6px 4px; }
-.side-panel.is-collapsed .sp-pin-btn { justify-content: center; padding: 6px; }
-.sp-pin-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: rgba(2, 6, 14, 0.72);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-.sp-pin-modal {
-  width: min(420px, 100%);
-  max-height: min(70vh, 560px);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: #0f172a;
-  border: 1px solid #334155;
-  border-radius: 10px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
-}
-.sp-pin-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid #1e293b;
-  color: #e2e8f0;
-}
-.sp-pin-modal-close {
-  border: 0;
-  background: transparent;
-  color: #94a3b8;
-  cursor: pointer;
-}
-.sp-pin-modal-hint {
-  margin: 0;
-  padding: 8px 14px 4px;
-  font-size: 12px;
-  color: #64748b;
-}
-.sp-pin-modal-list {
-  overflow: auto;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.sp-pin-modal-item {
-  display: grid;
-  grid-template-columns: 18px 1fr auto;
-  gap: 10px;
-  align-items: center;
-  border: 1px solid #1e293b;
-  background: #0b1220;
-  color: #e2e8f0;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-.sp-pin-modal-item:hover { border-color: #38bdf8; background: #0f1a2c; }
-.sp-pin-modal-group { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; }
-
 
 .viewer-panel { min-width: 0; min-height: 0; background: #0a0e14; position: relative; }
 .viewer-panel iframe { display: block; width: 100%; height: 100%; border: 0; background: #0a0e14; }
@@ -3337,6 +3220,23 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
 /* Progress toast */
 .sp-toast-progress { flex-wrap: wrap; }
 .sp-progress-label { flex: 1; min-width: 120px; }
+.sp-progress-cancel {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255,255,255,.08);
+  color: rgba(226,232,240,.9);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sp-progress-cancel:hover {
+  background: rgba(239, 68, 68, .25);
+  color: #fecaca;
+}
 .sp-progress-meta { width: 100%; min-width: 0; }
 .sp-progress-detail {
   min-width: 0;
@@ -5176,6 +5076,9 @@ html:has(.webcam-tile-page) body{
   overflow:hidden;
 }
 .webcam-tile-page{height:100vh;height:100dvh;padding:24px;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden}.webcam-tile-page header{align-items:center;flex-shrink:0;margin-bottom:12px}.webcam-tile-page header button{margin-left:auto;background:#7f1d1d;color:#fff;border-radius:6px;padding:7px 10px}.webcam-tiles{flex:1;min-height:0;width:100%;height:100%;overflow:hidden}.webcam-tile{aspect-ratio:auto;min-height:0;height:100%}.webcam-tile.is-stopped{display:none}.tile-client{position:absolute;z-index:2;left:7px;bottom:6px;color:#a5f3fc;background:#020617aa;padding:3px 5px;border-radius:3px;font:9px "JetBrains Mono",monospace}.webcam-tile iframe{position:absolute;inset:0}.tile-expand{z-index:2}.tile-stop{z-index:3}
+.tile-countdown{position:absolute;z-index:2;left:50%;top:calc(50% + 24px);transform:translateX(-50%);color:#fbbf24;background:#020617cc;padding:2px 8px;border-radius:4px;font:11px "JetBrains Mono",monospace;pointer-events:none}
+.tile-snapshot{position:absolute;inset:0;z-index:1;width:100%;height:100%;object-fit:contain;background:#020617;cursor:pointer}
+.webcam-tile.is-cached iframe{display:none}
 @media (max-width: 700px){.webcam-tile-page{padding:12px}.webcam-tile-page header .divider-line,.webcam-tile-page header .page-title{display:none}}
 .webcam-embedded-controls .webcam-workspace>div:first-child{display:flex!important;padding:6px 8px;gap:6px;background:#080d14;border-bottom:1px solid #173849;flex-shrink:0}
 .webcam-embedded-controls #canvasContainer>div:first-child{display:none}

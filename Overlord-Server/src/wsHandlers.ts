@@ -276,7 +276,12 @@ export function handleScreenshotThumbnailResult(info: ClientInfo, payload: any):
 export function shouldRelayFrameToViewers(payload: unknown): boolean {
   if (!payload || typeof payload !== "object" || !("header" in payload)) return false;
   const header = payload.header;
-  if (!header || typeof header !== "object" || !("fps" in header)) return false;
+  if (!header || typeof header !== "object") return false;
+  // Older agents stamp webcam (and backstage) frames with fps: 0; those streams
+  // are continuous live feeds, not one-shot screenshots, so always relay them.
+  if ((header as Record<string, unknown>).webcam === true) return true;
+  if ((header as Record<string, unknown>).backstage === true) return true;
+  if (!("fps" in header)) return false;
   return Number(header.fps) > 0;
 }
 

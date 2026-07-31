@@ -760,10 +760,12 @@ const (
 )
 
 func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID string, destPath string, sourceURL string, expectedSize int64) error {
-	startedAt := time.Now()
 	lastProgressSent := time.Time{}
 	progressTransferred := int64(0)
 	progressAttempt := 0
+	speedWindowStarted := time.Now()
+	speedWindowBytes := int64(0)
+	windowedSpeed := int64(0)
 
 	sendProgress := func(status string, attempt int, transferred int64, message string, resolvedURL string, force bool) {
 		if transferred < 0 {
@@ -776,14 +778,23 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 		if !force && now.Sub(lastProgressSent) < 250*time.Millisecond {
 			return
 		}
+		delta := transferred - speedWindowBytes
+		if delta < 0 {
+			delta = 0
+			speedWindowBytes = transferred
+			speedWindowStarted = now
+		}
+		elapsedWindow := now.Sub(speedWindowStarted).Seconds()
+		if elapsedWindow >= 1.0 || (force && elapsedWindow > 0 && delta > 0) {
+			windowedSpeed = int64(float64(delta) / elapsedWindow)
+			speedWindowBytes = transferred
+			speedWindowStarted = now
+		} else if transferred == 0 {
+			windowedSpeed = 0
+		}
 		lastProgressSent = now
 		progressTransferred = transferred
 		progressAttempt = attempt
-		elapsed := now.Sub(startedAt).Seconds()
-		speed := int64(0)
-		if elapsed > 0 {
-			speed = int64(float64(transferred) / elapsed)
-		}
 		progress := wire.CommandProgress{
 			Type:                "command_progress",
 			CommandID:           cmdID,
@@ -794,7 +805,7 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 			Attempt:             attempt,
 			Transferred:         transferred,
 			Total:               expectedSize,
-			SpeedBytesPerSecond: speed,
+			SpeedBytesPerSecond: windowedSpeed,
 			Message:             message,
 		}
 		if err := wire.WriteMsg(ctx, env.Conn, progress); err != nil {
@@ -804,6 +815,9 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 	failResult := func(message string, resolvedURL string) error {
 		sendProgress("failed", progressAttempt, progressTransferred, message, resolvedURL, true)
 		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: message})
+	}
+	if err := ctx.Err(); err != nil {
+		return failResult("cancelled", "")
 	}
 
 	resolvedURL, err := resolveUploadPullURL(env, sourceURL)
@@ -996,6 +1010,11 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 		backoff = nextBackoff(backoff)
 	}
 
+	if err := ctx.Err(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return failResult("cancelled", resolvedURL)
+	}
 	if lastErr != nil {
 		_ = f.Close()
 		_ = os.Remove(tmpPath)
