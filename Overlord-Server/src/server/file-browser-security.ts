@@ -14,6 +14,29 @@ function safeString(value: unknown, maxLength: number, allowEmpty = false): valu
     && !CONTROL_CHARS.test(value);
 }
 
+const UPLOAD_PULL_PATH_RE = /^\/api\/file\/upload\/pull\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Allow relative pull paths and absolute http(s) URLs that still target only
+ * this app's one-time upload-pull endpoint. Absolute forms are required for
+ * agents < 2.3.8 that cannot rewrite host-less paths.
+ */
+export function isSafeUploadPullUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2048) return false;
+  if (CONTROL_CHARS.test(value)) return false;
+  const trimmed = value.trim();
+  if (UPLOAD_PULL_PATH_RE.test(trimmed)) return true;
+  try {
+    const parsed = new URL(trimmed);
+    const scheme = parsed.protocol.toLowerCase();
+    if (scheme !== "http:" && scheme !== "https:") return false;
+    if (!parsed.hostname) return false;
+    return UPLOAD_PULL_PATH_RE.test(parsed.pathname) && !parsed.hash;
+  } catch {
+    return false;
+  }
+}
+
 export function isSafeFileBrowserPath(value: unknown, allowEmpty = false): value is string {
   return safeString(value, FILE_BROWSER_MAX_PATH, allowEmpty);
 }
@@ -76,9 +99,19 @@ export function validateFileBrowserCommandPayload(
       return pathOk() && HASH_ALGORITHMS.has(algorithm) ? { ...payload, algorithm } : null;
     }
     case "file_upload_http":
-      if (!pathOk() || typeof payload.url !== "string"
+      if (!pathOk() || typeof payload.url !== "string" || !isSafeUploadPullUrl(payload.url)) return null;
+      if (!Number.isSafeInteger(Number(payload.total)) || Number(payload.total) < 0) return null;
+      return payload;
+    case "file_upload_desktop":
+      if (!safeString(payload.fileName, 255) || /[\\/]/.test(payload.fileName as string)
+          || payload.fileName === "." || payload.fileName === ".."
+          || typeof payload.url !== "string"
           || !/^\/api\/file\/upload\/pull\/[0-9a-f-]{36}$/i.test(payload.url)) return null;
       if (!Number.isSafeInteger(Number(payload.total)) || Number(payload.total) < 0) return null;
+      if ((payload.x === undefined) !== (payload.y === undefined)) return null;
+      if (payload.x !== undefined && (!Number.isSafeInteger(Number(payload.x)) || Math.abs(Number(payload.x)) > 1_000_000)) return null;
+      if (payload.y !== undefined && (!Number.isSafeInteger(Number(payload.y)) || Math.abs(Number(payload.y)) > 1_000_000)) return null;
+      if (payload.display !== undefined && (!Number.isSafeInteger(Number(payload.display)) || Number(payload.display) < 0 || Number(payload.display) > 128)) return null;
       return payload;
     default:
       return null;

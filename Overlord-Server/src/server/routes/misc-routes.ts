@@ -334,8 +334,27 @@ function sanitizeSharedUiSettings(scope: string, raw: unknown): Record<string, u
   assignIfDefined(out, "clipboardSync", pickBoolean(input.clipboardSync));
 
   if (scope === "remote_desktop") {
-    assignIfDefined(out, "resolution", pickString(input.resolution, ["720", "1080", "1440", "-1"]));
-    assignIfDefined(out, "targetFps", pickString(input.targetFps, ["30", "60", "90", "120", "144", "165", "240"]));
+    assignIfDefined(out, "resolution", pickString(input.resolution, ["480", "720", "1080", "1440", "2160", "-1"]));
+    assignIfDefined(out, "targetFps", pickString(input.targetFps, ["15", "30", "60", "90", "120", "144", "165", "240"]));
+    assignIfDefined(
+      out,
+      "streamProfile",
+      pickString(input.streamProfile, [
+        "auto",
+        "480:15",
+        "720:15",
+        "480:30",
+        "480:60",
+        "720:30",
+        "720:60",
+        "1080:30",
+        "1080:60",
+        "1440:30",
+        "1440:60",
+        "2160:30",
+        "2160:60",
+      ]),
+    );
     assignIfDefined(out, "cursor", pickBoolean(input.cursor));
     assignIfDefined(out, "duplication", pickBoolean(input.duplication));
     assignIfDefined(out, "audio", pickBoolean(input.audio));
@@ -344,7 +363,7 @@ function sanitizeSharedUiSettings(scope: string, raw: unknown): Record<string, u
     assignIfDefined(out, "recordMode", pickString(input.recordMode, ["normal", "compact"]));
     assignIfDefined(out, "recordFps", pickString(input.recordFps, ["", "3", "5", "10", "15", "30", "60"]));
   } else if (scope === "backstage") {
-    assignIfDefined(out, "resolution", pickString(input.resolution, ["720", "1080", "1440", "-1"]));
+    assignIfDefined(out, "resolution", pickString(input.resolution, ["480", "720", "1080", "1440", "2160", "-1"]));
     assignIfDefined(out, "dxgi", pickBoolean(input.dxgi));
     assignIfDefined(out, "uia", pickBoolean(input.uia));
     assignIfDefined(out, "printWindowFallback", pickBoolean(input.printWindowFallback));

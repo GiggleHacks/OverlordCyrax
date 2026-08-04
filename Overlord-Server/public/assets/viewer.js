@@ -1,15 +1,21 @@
 import { initSidePanel } from "./side-panel.js";
-import { initPipOverlay } from "./pip-overlay.js";
 import { initDashboard2Mdi, DASHBOARD2_MDI_VERSION } from "./dashboard2-mdi.js";
+import { countryToFlag } from "./viewUtils.js";
 
 /** viewer.js — unified remote viewer shell */
-export const VIEWER_JS_VERSION = "1.5.0";
+export const VIEWER_JS_VERSION = "1.7.0";
 
 const params = new URLSearchParams(location.search);
 const clientId = params.get("clientId") || "";
-const allowedModes = new Set(["webcam", "desktop", "split", "pip", "dashboard2"]);
-// Legacy "dock" / "space" URLs map to split (one clear side-by-side layout).
-const rawMode = params.get("mode") === "dock" ? "split" : params.get("mode");
+const allowedModes = new Set(["webcam", "desktop", "split", "dashboard2"]);
+// Legacy "dock" / "space" URLs map to split; legacy "pip" maps to desktop (PiP removed).
+const rawModeParam = params.get("mode");
+const rawMode =
+  rawModeParam === "dock" || rawModeParam === "space"
+    ? "split"
+    : rawModeParam === "pip"
+      ? "desktop"
+      : rawModeParam;
 let mode = allowedModes.has(rawMode) ? rawMode : "dashboard2";
 
 /* Side action panel */
@@ -18,8 +24,6 @@ initSidePanel(clientId, sidePanelRoot);
 const panels = document.getElementById("viewerPanels");
 const webcam = document.getElementById("viewerWebcam");
 const desktop = document.getElementById("viewerDesktop");
-const pipWebcam = document.getElementById("viewerPipWebcam");
-const pipOverlayEl = document.getElementById("viewerPipOverlay");
 const desktopPanel = document.getElementById("viewerDesktopPanel");
 const webcamPanel = document.getElementById("viewerWebcamPanel");
 const dashboard2Root = document.getElementById("viewerDashboard2");
@@ -35,7 +39,13 @@ const d2CamSettings = document.querySelector("[data-d2-cam-settings]");
 const d2CamStatus = document.querySelector("[data-d2-cam-status]");
 const d2WebcamEmpty = document.querySelector("[data-d2-webcam-empty]");
 const idLabel = document.getElementById("viewerClientId");
+const agentVersionEl = document.getElementById("viewerAgentVersion");
+const countryEl = document.getElementById("viewerCountry");
+const countryFlagEl = document.getElementById("viewerCountryFlag");
+const countryCodeEl = document.getElementById("viewerCountryCode");
 const capability = document.getElementById("viewerCapability");
+
+document.body.classList.remove("viewer-pip-active");
 const webcamBar = document.getElementById("viewerWebcamBar");
 const camStart = document.getElementById("viewerCamStart");
 const camStop = document.getElementById("viewerCamStop");
@@ -53,13 +63,84 @@ const camH264 = document.getElementById("viewerCamH264");
 idLabel.textContent = clientId.slice(0, 12) || "unknown";
 idLabel.title = `viewer.js v${VIEWER_JS_VERSION} · dashboard2-mdi v${DASHBOARD2_MDI_VERSION}`;
 
+let cachedServerVersion = "";
+let cachedAgentVersion = "";
+
+function normalizeVersionLabel(version) {
+  return String(version || "").trim().replace(/^v/i, "");
+}
+
+function setAgentVersionBadge(version, { outdated = false } = {}) {
+  if (!agentVersionEl) return;
+  const normalized = normalizeVersionLabel(version);
+  if (!normalized) {
+    agentVersionEl.textContent = "v?";
+    agentVersionEl.classList.add("is-unknown");
+    agentVersionEl.classList.remove("is-outdated");
+    agentVersionEl.title = "Client agent build version unknown";
+    return;
+  }
+  cachedAgentVersion = normalized;
+  agentVersionEl.textContent = `v${normalized}`;
+  agentVersionEl.classList.remove("is-unknown");
+  agentVersionEl.classList.toggle("is-outdated", outdated);
+  agentVersionEl.title = outdated
+    ? `Client agent v${normalized} (outdated vs server v${cachedServerVersion || "?"})`
+    : `Client agent build v${normalized}`;
+}
+
+async function refreshViewerAgentVersion() {
+  if (!clientId || !agentVersionEl) return;
+  try {
+    if (!cachedServerVersion) {
+      try {
+        const verRes = await fetch("/api/version", { credentials: "include" });
+        if (verRes.ok) {
+          const verPayload = await verRes.json().catch(() => ({}));
+          cachedServerVersion = normalizeVersionLabel(verPayload?.version);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const params = new URLSearchParams({
+      id: clientId,
+      pageSize: "1",
+      status: "all",
+      enrollmentFilter: "approved",
+    });
+    const res = await fetch(`/api/clients?${params.toString()}`, { credentials: "include" });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    const item = Array.isArray(data?.items) ? data.items.find((c) => c?.id === clientId) || data.items[0] : null;
+    const version = normalizeVersionLabel(item?.version);
+    if (!version) {
+      if (!cachedAgentVersion) setAgentVersionBadge("");
+      return;
+    }
+    const outdated = Boolean(
+      cachedServerVersion && version && cachedServerVersion !== version,
+    );
+    setAgentVersionBadge(version, { outdated });
+  } catch {
+    if (!cachedAgentVersion) setAgentVersionBadge("");
+  }
+}
+
+setAgentVersionBadge("");
+void refreshViewerAgentVersion();
+setInterval(() => void refreshViewerAgentVersion(), 60_000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void refreshViewerAgentVersion();
+});
+
 const dashboard2 = initDashboard2Mdi({
   root: dashboard2Root,
 });
 
 const transition = params.get("transition") || "";
 const fromArray = params.get("fromArray") === "1";
-// Webcam-only mode keeps in-frame controls; split/pip use the parent bar (no embedded chrome).
+// Webcam-only mode keeps in-frame controls; split uses the parent bar (no embedded chrome).
 const webcamUrlFull = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1&controls=1${transition ? "&transition=1" : ""}`;
 const webcamUrlBar = `/webcam?clientId=${encodeURIComponent(clientId)}&embedded=1${transition ? "&transition=1" : ""}`;
 // D2: full-bleed video; Start/Stop/Settings live on the MDI titlebar (not over the feed).
@@ -102,10 +183,26 @@ function unloadFrame(frame) {
 }
 
 function activeWebcamFrame() {
-  if (mode === "pip") return pipWebcam;
   if (mode === "dashboard2") return d2Webcam;
   if (mode === "split" || mode === "webcam") return webcam;
   return null;
+}
+
+function applyClientCountry(countryRaw) {
+  if (!countryEl || !countryFlagEl || !countryCodeEl) return;
+  const code = String(countryRaw || "").trim().toUpperCase();
+  const valid = /^[A-Z]{2}$/.test(code) && code !== "ZZ";
+  if (!valid) {
+    countryEl.hidden = true;
+    countryFlagEl.innerHTML = "";
+    countryCodeEl.textContent = "";
+    countryEl.removeAttribute("title");
+    return;
+  }
+  countryFlagEl.innerHTML = countryToFlag(code);
+  countryCodeEl.textContent = code;
+  countryEl.title = `Country: ${code}`;
+  countryEl.hidden = false;
 }
 
 function postToWebcam(payload) {
@@ -130,7 +227,7 @@ function setWebcamBarVisible(visible) {
 }
 
 function webcamNeedsParentBar(m) {
-  return m === "split" || m === "pip";
+  return m === "split";
 }
 
 let d2HasCamera = null;
@@ -145,7 +242,8 @@ function setD2NoCamera(noCam) {
 }
 
 function syncD2CamButtons(status) {
-  const streaming = status === "streaming" || status === "starting" || status === "stalled" || status === "connecting";
+  // connecting alone is not an active stream — allow Start while the socket comes up.
+  const streaming = status === "streaming" || status === "starting" || status === "stalled";
   const noCam = d2HasCamera === false;
   if (d2CamStart) d2CamStart.disabled = noCam || streaming;
   if (d2CamStop) d2CamStop.disabled = noCam || (!streaming && status !== "stopping");
@@ -236,7 +334,8 @@ function updateCamStatusUi(status, fps, label) {
     };
     let text = "";
     if (key === "streaming") {
-      text = Number.isFinite(fpsNum) && fpsNum > 0 ? `${Math.round(fpsNum)} FPS` : "Live";
+      // Only claim Live/FPS when we have a real frame rate; otherwise show Starting.
+      text = Number.isFinite(fpsNum) && fpsNum > 0 ? `${Math.round(fpsNum)} FPS` : "Starting…";
     } else if (key !== "idle") {
       text = (typeof label === "string" && label.trim()) ? label.trim() : (d2Labels[key] || "");
     }
@@ -339,9 +438,6 @@ function setSideCollapsed(collapsed) {
       localStorage.setItem(SIDE_COLLAPSED_KEY, sideCollapsed ? "1" : "0");
     }
   } catch {}
-  if (typeof pip !== "undefined" && mode === "pip") {
-    requestAnimationFrame(() => pip.restoreLayout());
-  }
 }
 
 function applySideCollapseForMode(m) {
@@ -371,28 +467,21 @@ function loadSidePanelWidth() {
   return sideCollapsed ? SIDE_RAIL : sideExpandedWidth;
 }
 
-const pip = initPipOverlay({
-  root: pipOverlayEl,
-  host: desktopPanel,
-  iframe: pipWebcam,
-  onClose: () => {
-    unloadFrame(pipWebcam);
-    document.body.classList.remove("viewer-pip-active");
-    updateCamStatusUi("idle", "--");
-    // Stay on desktop when floating cam is closed — never jump to split.
-    if (mode === "pip") setMode("desktop");
-  },
-});
-
 sideCollapseBtn?.addEventListener("click", () => setSideCollapsed(!sideCollapsed));
 loadSidePanelWidth();
 
 function setMode(nextMode) {
   const prev = mode;
-  const requested = nextMode === "dock" ? "split" : nextMode;
+  const requested =
+    nextMode === "dock" || nextMode === "space"
+      ? "split"
+      : nextMode === "pip"
+        ? "desktop"
+        : nextMode;
   mode = allowedModes.has(requested) ? requested : "dashboard2";
   panels.dataset.mode = mode;
   document.body.classList.toggle("viewer-dashboard2-active", mode === "dashboard2");
+  document.body.classList.remove("viewer-pip-active");
   if (prev !== mode) {
     // Keep a custom split ratio when re-entering split; only clear other modes.
     if (mode !== "split") {
@@ -417,8 +506,7 @@ function setMode(nextMode) {
 
   const needsDashboard2 = mode === "dashboard2";
   const needsWebcam = mode === "webcam" || mode === "split";
-  const needsDesktop = mode === "desktop" || mode === "split" || mode === "pip";
-  const needsPip = mode === "pip";
+  const needsDesktop = mode === "desktop" || mode === "split";
   const showBar = webcamNeedsParentBar(mode);
 
   if (needsDashboard2) {
@@ -449,23 +537,8 @@ function setMode(nextMode) {
     unloadFrame(desktop);
   }
 
-  document.body.classList.toggle("viewer-pip-active", needsPip);
-
-  if (needsPip) {
-    ensureFrame(pipWebcam, webcamUrlBar);
-    pip.show();
-    // Desktop panel is the host — keep it full-size (no inset) so PiP can float over RD.
-    clearDesktopInset();
-    requestAnimationFrame(() => {
-      pip.restoreLayout();
-      requestAnimationFrame(() => pip.restoreLayout());
-    });
-  } else {
-    pip.hide();
-    unloadFrame(pipWebcam);
-    if (mode === "desktop") restoreDesktopInset();
-    else clearDesktopInset();
-  }
+  if (mode === "desktop") restoreDesktopInset();
+  else clearDesktopInset();
 
   if (mode === "split") {
     applySplitColumns();
@@ -712,6 +785,7 @@ async function refreshCapability() {
     const response = await fetch(`/api/clients?page=1&pageSize=1&id=${encodeURIComponent(clientId)}`, { credentials: "include" });
     const data = await response.json();
     const client = (data.items || []).find((item) => item.id === clientId);
+    if (client) applyClientCountry(client.country);
     if (!client || client.online === false) {
       capability.innerHTML = '<i class="fa-solid fa-plug-circle-xmark"></i> Client offline';
       capability.classList.remove("is-available");
@@ -742,7 +816,7 @@ async function refreshCapability() {
 
 setMode(mode);
 refreshCapability();
-setInterval(refreshCapability, 10000);
+setInterval(refreshCapability, 3000);
 
 const divider = document.getElementById("viewerDivider");
 const sideResize = document.querySelector("[data-side-resize]");
@@ -760,7 +834,7 @@ function clearDesktopInset() {
 }
 
 function restoreDesktopInset() {
-  if (!desktopPanel || (mode !== "pip" && mode !== "desktop")) {
+  if (!desktopPanel || mode !== "desktop") {
     clearDesktopInset();
     return;
   }
@@ -880,7 +954,6 @@ document.addEventListener("pointermove", (e) => {
     try {
       localStorage.setItem(SIDE_WIDTH_KEY, String(next));
     } catch {}
-    if (mode === "pip") requestAnimationFrame(() => pip.restoreLayout());
     return;
   }
   if (desktopDragging) {
@@ -923,5 +996,4 @@ document.addEventListener("mouseup", endPanelDrags);
 window.addEventListener("resize", () => {
   if (mode === "split") applySplitColumns();
   if (mode === "desktop") restoreDesktopInset();
-  if (mode === "pip") requestAnimationFrame(() => pip.restoreLayout());
 });

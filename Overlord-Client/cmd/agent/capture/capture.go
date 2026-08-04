@@ -445,16 +445,28 @@ func captureAllDisplaysAndSend(ctx context.Context, env *rt.Env) error {
 	}
 
 	quality := desktopJPEGQuality()
-	frame, _, err := buildFrame(canvas, 0, quality)
+	frame, err := buildInitialDesktopThumbnail(canvas, quality)
 	canvasW, canvasH := canvas.Rect.Dx(), canvas.Rect.Dy()
 	PutRGBA(canvas)
 	canvas = nil
 	if err != nil {
 		return err
 	}
-	frame.Header.FPS = 1
 	log.Printf("capture: all-displays initial frame %dx%d (%d monitors)", canvasW, canvasH, n)
 	return wire.WriteMsg(ctx, env.Conn, frame)
+}
+
+func buildInitialDesktopThumbnail(img *image.RGBA, quality int) (wire.Frame, error) {
+	jpegBytes, err := encodeJPEG(img, quality)
+	return wire.Frame{
+		Type: "frame",
+		Header: wire.FrameHeader{
+			Monitor: 0,
+			FPS:     1,
+			Format:  "jpeg",
+		},
+		Data: jpegBytes,
+	}, err
 }
 
 func supportsCapture() bool {
@@ -518,14 +530,13 @@ const desktopHardwareH264FallbackCooldown = 30 * time.Second
 var consecutiveCaptureFails atomic.Int64
 
 var (
-	fpsWindowStart atomic.Int64
-	fpsCount       atomic.Int64
-	fpsLatest      atomic.Int64
-	lastFrameLog   atomic.Int64
-	metricsOnce    sync.Once
-	metricsEnabled bool
-	lastKeyframe   atomic.Int64
-	fullNextFrames atomic.Int64
+	desktopFPSCounter   frameRateCounter
+	backstageFPSCounter frameRateCounter
+	lastFrameLog        atomic.Int64
+	metricsOnce         sync.Once
+	metricsEnabled      bool
+	lastKeyframe        atomic.Int64
+	fullNextFrames      atomic.Int64
 
 	desktopRecoveryAfterBackstageStart atomic.Bool
 	statFrames                         atomic.Int64
@@ -564,6 +575,12 @@ var (
 	backstageLastKeyframe atomic.Int64
 )
 
+type frameRateCounter struct {
+	windowStart atomic.Int64
+	count       atomic.Int64
+	latest      atomic.Int64
+}
+
 type prevImage struct {
 	w   int
 	h   int
@@ -592,28 +609,37 @@ func logCodecSupport() {
 	})
 }
 
-func frameFPS(now time.Time) int {
-	start := fpsWindowStart.Load()
+func (c *frameRateCounter) fps(now time.Time) int {
+	start := c.windowStart.Load()
 	if start == 0 {
-		if fpsWindowStart.CompareAndSwap(0, now.UnixNano()) {
-			fpsCount.Store(1)
-			return int(fpsLatest.Load())
+		if c.windowStart.CompareAndSwap(0, now.UnixNano()) {
+			c.count.Store(1)
+			return int(c.latest.Load())
 		}
-		start = fpsWindowStart.Load()
+		start = c.windowStart.Load()
 	}
 
-	fpsCount.Add(1)
+	c.count.Add(1)
 	elapsed := time.Duration(now.UnixNano() - start)
 	if elapsed >= time.Second {
-		frames := fpsCount.Swap(0)
-		if frames > 0 {
-			fps := int(float64(frames) / elapsed.Seconds())
-			fpsLatest.Store(int64(fps))
+		frames := c.count.Swap(0)
+		if frames > 0 && elapsed > 0 {
+			// Round rather than truncate so 14.6 reports as 15.
+			fps := int(float64(frames)/elapsed.Seconds() + 0.5)
+			c.latest.Store(int64(fps))
 		}
-		fpsWindowStart.Store(now.UnixNano())
+		c.windowStart.Store(now.UnixNano())
 	}
 
-	return int(fpsLatest.Load())
+	return int(c.latest.Load())
+}
+
+func frameFPS(now time.Time) int {
+	return desktopFPSCounter.fps(now)
+}
+
+func backstageFrameFPS(now time.Time) int {
+	return backstageFPSCounter.fps(now)
 }
 
 func shouldLogFrame(now time.Time) bool {
@@ -665,12 +691,22 @@ func consumeFullFrame() bool {
 }
 
 func ResetPrev() {
-	prevMu.Lock()
-	prevFrame = nil
-	prevMu.Unlock()
+	clearDesktopPreviousFrame()
 	lastKeyframe.Store(0)
 	requestFullFrames(2)
 	resetH264Encoder()
+}
+
+func clearDesktopPreviousFrame() {
+	prevMu.Lock()
+	prevFrame = nil
+	prevMu.Unlock()
+}
+
+func CleanupDesktopStream() {
+	ResetDesktopCapture()
+	ResetPrev()
+	resetHEVCEncoder()
 }
 
 func ResetPrevbackstage() {
@@ -1880,7 +1916,7 @@ func captureAndSendVirtual(ctx context.Context, env *rt.Env) error {
 	}
 
 	now := time.Now()
-	fps := frameFPS(now)
+	fps := backstageFrameFPS(now)
 	if fps <= 0 {
 		fps = 1
 	}
@@ -1931,7 +1967,7 @@ func captureAndSendVirtual(ctx context.Context, env *rt.Env) error {
 
 func virtualSendCompletedFrame(ctx context.Context, env *rt.Env, frame wire.Frame, t0 time.Time, captureDur, encodeDur time.Duration) error {
 	now := time.Now()
-	fps := frameFPS(now)
+	fps := backstageFrameFPS(now)
 	if fps <= 0 {
 		fps = 1
 	}
@@ -2030,7 +2066,7 @@ func captureAndSendbackstage(ctx context.Context, env *rt.Env) error {
 	}
 
 	now := time.Now()
-	fps := frameFPS(now)
+	fps := backstageFrameFPS(now)
 	if fps <= 0 {
 		fps = 1
 	}

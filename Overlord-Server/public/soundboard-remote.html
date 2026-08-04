@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sound Board</title>
+    <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
+    <link rel="stylesheet" href="/vendor/jetbrains-mono/400.css" />
+    <style>
+      :root {
+        --bg: #06080f;
+        --panel: #0b0e18;
+        --line: #2a3358;
+        --line-hi: #4b5fbf;
+        --text: #c5cde0;
+        --text-hi: #e8ecff;
+        --muted: #7a84ad;
+        --cyan: #7ee0ff;
+        --green: #6ee7b7;
+        --amber: #fcd34d;
+        --red: #fca5a5;
+        --pink: #f9a8d4;
+        --btn: linear-gradient(180deg, #252b4e 0%, #171c34 100%);
+        --btn-hi: linear-gradient(180deg, #30375f 0%, #1d2340 100%);
+        --title: linear-gradient(180deg, #3a3f78 0%, #262b55 48%, #1c2144 100%);
+        --chrome: linear-gradient(180deg, #2a2f5a 0%, #1a1f3d 55%, #141830 100%);
+        --mono: "JetBrains Mono", Consolas, "Cascadia Mono", monospace;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        display: flex;
+        flex-direction: column;
+        background:
+          radial-gradient(ellipse at 20% 0%, rgba(40, 60, 120, 0.16), transparent 55%),
+          linear-gradient(180deg, #0a0c14 0%, #06080f 48%, #05070c 100%);
+        color: var(--text);
+        font: 11px/1.4 var(--mono);
+      }
+
+      .sb-chrome {
+        flex-shrink: 0;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 0 10px;
+        background: var(--chrome);
+        border-bottom: 1px solid #3d4578;
+        box-shadow: inset 0 1px 0 rgba(180, 190, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+        color: #d7dcff;
+        letter-spacing: 0.06em;
+        user-select: none;
+      }
+      .sb-brand { color: var(--cyan); font-weight: 700; letter-spacing: 0.14em; }
+      .sb-sep { color: #5b6494; }
+      .sb-title { color: var(--text-hi); }
+      .sb-id { color: var(--muted); font-variant-numeric: tabular-nums; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      .sb-main {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 8px;
+      }
+
+      .sb-panel {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: 2px 2px 0 rgba(0,0,0,.45), inset 1px 1px 0 rgba(140,155,220,.12);
+      }
+      .sb-panel-h {
+        height: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 0 8px;
+        background: var(--title);
+        border-bottom: 1px solid #12162a;
+        color: var(--text-hi);
+        letter-spacing: 0.04em;
+      }
+      .sb-panel-h i { color: var(--cyan); }
+      .sb-panel-b { padding: 8px; }
+
+      .link-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .link-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #475569;
+        box-shadow: 0 0 0 2px rgba(71, 85, 105, 0.35);
+        flex-shrink: 0;
+      }
+      .link-dot.strong { background: #22c55e; box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35); }
+      .link-dot.ok { background: #84cc16; box-shadow: 0 0 0 2px rgba(132, 204, 22, 0.35); }
+      .link-dot.weak { background: #eab308; box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.35); }
+      .link-dot.bad { background: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.35); }
+      .link-dot.off { background: #64748b; box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.35); }
+      .link-meta { flex: 1; min-width: 0; }
+      .link-label { color: var(--text-hi); font-weight: 600; }
+      .link-detail { color: var(--muted); margin-top: 2px; }
+      .btn-tiny {
+        border: 1px solid #4a5388;
+        background: var(--btn);
+        color: #b8c0ef;
+        font: inherit;
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        padding: 4px 8px;
+        cursor: pointer;
+        box-shadow: inset 0 1px 0 rgba(200, 210, 255, 0.12);
+      }
+      .btn-tiny:hover { color: #eaf0ff; border-color: #6f7bc4; background: var(--btn-hi); }
+      .btn-tiny:disabled { opacity: 0.45; cursor: not-allowed; }
+
+      .vol-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px;
+        align-items: center;
+      }
+      .vol-slider-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .vol-slider-wrap input[type="range"] {
+        flex: 1;
+        min-width: 0;
+        accent-color: #7ee0ff;
+        height: 4px;
+      }
+      .vol-val {
+        width: 40px;
+        text-align: right;
+        color: var(--cyan);
+        font-variant-numeric: tabular-nums;
+      }
+      .btn {
+        border: 1px solid #4a5388;
+        background: var(--btn);
+        color: #d5dbff;
+        font: inherit;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        padding: 6px 10px;
+        cursor: pointer;
+        box-shadow: inset 0 1px 0 rgba(200, 210, 255, 0.12);
+        white-space: nowrap;
+      }
+      .btn:hover { border-color: #6f7bc4; color: #fff; background: var(--btn-hi); }
+      .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .btn-max { border-color: #92610a; color: #fde68a; }
+      .btn-max:hover { border-color: #d97706; }
+      .btn-stop { border-color: #7f1d1d; color: #fecaca; }
+      .btn-stop:hover { border-color: #ef4444; }
+      .btn-play {
+        border-color: #9d174d;
+        background: linear-gradient(180deg, #9d174d 0%, #831843 100%);
+        color: #fce7f3;
+      }
+      .btn-play:hover:not(:disabled) { border-color: #f472b6; }
+      .btn-upload {
+        border-color: #166534;
+        background: linear-gradient(180deg, #166534 0%, #14532d 100%);
+        color: #dcfce7;
+      }
+      .btn-upload:hover:not(:disabled) { border-color: #4ade80; }
+      .btn-preview { border-color: #0e7490; color: #a5f3fc; }
+      .btn-del { border-color: #7f1d1d; color: #fca5a5; padding: 6px 8px; }
+      .sound-row.is-on-client { box-shadow: inset 3px 0 0 #22c55e; }
+      label.btn { display: inline-flex; align-items: center; gap: 6px; }
+      input[type="file"] { display: none; }
+
+      .activity {
+        border: 1px solid var(--line);
+        background: #05070d;
+        padding: 8px;
+        min-height: 72px;
+      }
+      .activity-phase {
+        color: var(--text-hi);
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        margin-bottom: 4px;
+      }
+      .activity-phase.busy { color: var(--amber); }
+      .activity-phase.ok { color: var(--green); }
+      .activity-phase.err { color: var(--red); }
+      .activity-detail { color: var(--muted); margin-bottom: 8px; min-height: 14px; }
+      .bar {
+        height: 8px;
+        border: 1px solid #1e293b;
+        background: #0a0f1c;
+        overflow: hidden;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #3b82f6, #7ee0ff);
+        transition: width 0.15s ease;
+      }
+      .bar-meta {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 4px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .sounds {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .sounds .sb-panel-b {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 0;
+      }
+      .sound-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+        border-bottom: 1px solid #151a2c;
+      }
+      .sound-row:last-child { border-bottom: 0; }
+      .sound-row.is-active { background: rgba(59, 91, 191, 0.12); }
+      .sound-name {
+        color: var(--text-hi);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .sound-meta { color: var(--muted); margin-top: 2px; font-size: 10px; }
+      .sound-acts { display: flex; gap: 4px; flex-shrink: 0; }
+      .empty {
+        padding: 24px 12px;
+        text-align: center;
+        color: var(--muted);
+      }
+      .muted-note { color: var(--amber); margin-top: 6px; display: none; }
+      .muted-note.on { display: block; }
+      .toolbar {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .spacer { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <header class="sb-chrome">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <span class="sb-brand">OVERLORD</span>
+        <span class="sb-sep">//</span>
+        <span class="sb-title">Sound Board</span>
+      </div>
+      <span id="client-id" class="sb-id"></span>
+    </header>
+
+    <main class="sb-main">
+      <section class="sb-panel">
+        <div class="sb-panel-h"><span><i class="fa-solid fa-signal"></i> CONNECTION</span></div>
+        <div class="sb-panel-b">
+          <div class="link-row">
+            <span id="link-dot" class="link-dot off"></span>
+            <div class="link-meta">
+              <div id="link-label" class="link-label">Checking…</div>
+              <div id="link-detail" class="link-detail">Pinging client</div>
+            </div>
+            <button type="button" id="link-refresh" class="btn-tiny">Recheck</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="sb-panel">
+        <div class="sb-panel-h"><span><i class="fa-solid fa-volume-high"></i> VOLUME</span></div>
+        <div class="sb-panel-b">
+          <div class="vol-row">
+            <div class="vol-slider-wrap">
+              <input id="volume-slider" type="range" min="0" max="100" value="50" disabled />
+              <span id="volume-value" class="vol-val">—</span>
+            </div>
+            <button type="button" id="volume-max" class="btn btn-max">Max</button>
+            <button type="button" id="volume-refresh" class="btn">Read</button>
+          </div>
+          <div id="volume-muted" class="muted-note">Client is muted — Max will unmute</div>
+        </div>
+      </section>
+
+      <section class="sb-panel">
+        <div class="sb-panel-h"><span><i class="fa-solid fa-list-check"></i> ACTIVITY</span></div>
+        <div class="sb-panel-b">
+          <div class="activity">
+            <div id="activity-phase" class="activity-phase">Idle</div>
+            <div id="activity-detail" class="activity-detail">Ready. Upload a sound to the PC, then press Play.</div>
+            <div class="bar"><i id="progress-bar"></i></div>
+            <div class="bar-meta">
+              <span id="progress-label">—</span>
+              <span id="progress-pct">0%</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sb-panel sounds">
+        <div class="sb-panel-h">
+          <span><i class="fa-solid fa-music"></i> SOUNDS</span>
+          <div class="toolbar">
+            <button type="button" id="stop-client" class="btn btn-stop">Stop</button>
+            <label class="btn">
+              <i class="fa-solid fa-plus"></i> Add
+              <input id="upload-input" type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" />
+            </label>
+          </div>
+        </div>
+        <div class="sb-panel-b">
+          <div id="sound-grid"></div>
+          <div id="empty-hint" class="empty" style="display:none">No sounds yet. Click Add (mp3/wav, max 30s), then Upload to PC, then Play.</div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/assets/soundboard-remote.js"></script>
+  </body>
+</html>

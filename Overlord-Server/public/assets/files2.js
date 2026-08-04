@@ -9,7 +9,13 @@ import {
   shouldShowParentDirectory,
 } from "./filebrowser-utils.js";
 
-export const FILES2_JS_VERSION = "1.0.0";
+export const FILES2_JS_VERSION = "1.0.1";
+
+const WS_UPLOAD_MAX_TOTAL = 8 * 1024 * 1024;
+const WS_UPLOAD_CHUNK_SIZE = 512 * 1024;
+const WS_UPLOAD_CONCURRENCY = 4;
+const WS_UPLOAD_ACK_TIMEOUT_MS = 90 * 1000;
+const HTTP_AGENT_PULL_TIMEOUT_MS = 90 * 1000;
 
 const SOUND_ASSET = "/assets/filebrowser-classic";
 const parts = window.location.pathname.split("/").filter(Boolean);
@@ -70,6 +76,8 @@ let homeBaseOverride = null;
 let pendingPlaceFallback = null;
 let expectingFallbackPath = null;
 let pendingCommands = new Map();
+/** @type {Map<string, { resolve: Function, reject: Function, timeoutId: any, transferId?: string }>} */
+let pendingUploadAcks = new Map();
 let soundsEnabled = true;
 let soundManifest = null;
 const audioCache = {};
@@ -174,6 +182,33 @@ function handleCommandResult(msg) {
   }
 }
 
+function handleCommandError(msg) {
+  const error = msg?.error || msg?.message || "command error";
+  // Server rejects do not include commandId; fail active HTTP upload waiters only.
+  for (const [id, tracked] of [...pendingCommands.entries()]) {
+    if (!String(id).startsWith("upload-http-")) continue;
+    if (tracked.timeoutId) clearTimeout(tracked.timeoutId);
+    pendingCommands.delete(id);
+    try {
+      tracked.reject?.(new Error(error));
+    } catch {}
+  }
+}
+
+function handleFileUploadResult(msg) {
+  const key = msg.transferId
+    ? `id:${msg.transferId}:${msg.offset ?? 0}`
+    : msg.path
+      ? `path:${msg.path}:${msg.offset ?? 0}`
+      : "";
+  const tracked = key ? pendingUploadAcks.get(key) : null;
+  if (!tracked) return;
+  if (tracked.timeoutId) clearTimeout(tracked.timeoutId);
+  pendingUploadAcks.delete(key);
+  if (msg.ok) tracked.resolve?.(msg);
+  else tracked.reject?.(new Error(msg.error || "upload chunk failed"));
+}
+
 function connect() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(`${protocol}//${window.location.host}/api/clients/${clientId}/files/ws`);
@@ -222,6 +257,12 @@ function handleMessage(msg) {
       break;
     case "command_result":
       handleCommandResult(msg);
+      break;
+    case "command_error":
+      handleCommandError(msg);
+      break;
+    case "file_upload_result":
+      handleFileUploadResult(msg);
       break;
     default:
       break;
@@ -751,6 +792,145 @@ async function downloadSelected() {
   hideXfer();
 }
 
+async function uploadFileViaWsChunks(file, path) {
+  const total = file.size;
+  const transferId = `ws-up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const localAcks = new Map();
+
+  const cleanupAcks = (err) => {
+    for (const [key, pending] of localAcks.entries()) {
+      clearTimeout(pending.timeoutId);
+      pendingUploadAcks.delete(key);
+      try {
+        pending.reject(err);
+      } catch {}
+    }
+    localAcks.clear();
+  };
+
+  const pumpChunk = async (offset, data) => {
+    const key = `id:${transferId}:${offset}`;
+    const ackPromise = new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        localAcks.delete(key);
+        pendingUploadAcks.delete(key);
+        reject(new Error(`upload chunk timeout (offset ${offset})`));
+      }, WS_UPLOAD_ACK_TIMEOUT_MS);
+      const entry = { resolve, reject, timeoutId, transferId };
+      localAcks.set(key, entry);
+      pendingUploadAcks.set(key, entry);
+    });
+    send({
+      type: "file_upload",
+      path,
+      data,
+      offset,
+      total,
+      transferId,
+    });
+    if (total > 0) {
+      showXfer(`Uploading ${file.name}`, Math.round(((offset + data.length) / total) * 100));
+    }
+    try {
+      const result = await ackPromise;
+      localAcks.delete(key);
+      return result;
+    } catch (err) {
+      localAcks.delete(key);
+      throw err;
+    }
+  };
+
+  try {
+    if (total === 0) {
+      await pumpChunk(0, new Uint8Array(0));
+      return;
+    }
+
+    const inFlight = new Map();
+    let nextOffset = 0;
+    while (nextOffset < total || inFlight.size > 0) {
+      while (inFlight.size < WS_UPLOAD_CONCURRENCY && nextOffset < total) {
+        const start = nextOffset;
+        const end = Math.min(start + WS_UPLOAD_CHUNK_SIZE, total);
+        const buf = new Uint8Array(await file.slice(start, end).arrayBuffer());
+        nextOffset = end;
+        const tracked = pumpChunk(start, buf).then(() => {
+          inFlight.delete(start);
+        });
+        inFlight.set(start, tracked);
+      }
+      if (inFlight.size > 0) {
+        await Promise.race(inFlight.values());
+      }
+    }
+  } catch (err) {
+    cleanupAcks(err instanceof Error ? err : new Error(String(err)));
+    throw err;
+  }
+}
+
+async function uploadFileViaHttpPull(file, path) {
+  const requestRes = await fetch("/api/file/upload/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ clientId, path, fileName: file.name }),
+  });
+  if (!requestRes.ok) throw new Error((await requestRes.text()) || "upload request failed");
+  const data = await requestRes.json();
+  const uploadUrl =
+    typeof data?.uploadUrl === "string"
+      ? data.uploadUrl
+      : data?.uploadId
+        ? `/api/file/upload/${encodeURIComponent(data.uploadId)}`
+        : "";
+  if (!uploadUrl) throw new Error("no upload url");
+
+  const staged = await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", uploadUrl, true);
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) showXfer(`Uploading ${file.name}`, Math.round((ev.loaded / ev.total) * 50));
+    };
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
+        return;
+      }
+      try {
+        resolve(xhr.responseText ? JSON.parse(xhr.responseText) : {});
+      } catch {
+        reject(new Error("bad staging response"));
+      }
+    };
+    xhr.onerror = () => reject(new Error("network error"));
+    xhr.send(file);
+  });
+
+  if (!staged?.pullUrl && !(staged?.agentNotified && staged?.agentCommandId)) {
+    throw new Error("upload staging failed");
+  }
+
+  let commandId;
+  if (staged.agentNotified && typeof staged.agentCommandId === "string") {
+    commandId = staged.agentCommandId;
+  } else {
+    commandId = `upload-http-${Date.now()}`;
+    send({
+      type: "command",
+      commandType: "file_upload_http",
+      id: commandId,
+      payload: { path, url: staged.pullUrl, total: file.size },
+    });
+  }
+  showXfer(`Saving ${file.name} on remote…`, 75);
+  await waitCommand(commandId, HTTP_AGENT_PULL_TIMEOUT_MS);
+}
+
 async function uploadFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
@@ -759,64 +939,21 @@ async function uploadFiles(fileList) {
     setMsg(`Uploading ${file.name}…`);
     showXfer(`Uploading ${file.name}`, 0);
     try {
-      const requestRes = await fetch("/api/file/upload/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ clientId, path, fileName: file.name }),
-      });
-      if (!requestRes.ok) throw new Error((await requestRes.text()) || "upload request failed");
-      const data = await requestRes.json();
-      const uploadUrl =
-        typeof data?.uploadUrl === "string"
-          ? data.uploadUrl
-          : data?.uploadId
-            ? `/api/file/upload/${encodeURIComponent(data.uploadId)}`
-            : "";
-      if (!uploadUrl) throw new Error("no upload url");
-
-      const staged = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", uploadUrl, true);
-        xhr.withCredentials = true;
-        xhr.responseType = "text";
-        xhr.setRequestHeader("Content-Type", "application/octet-stream");
-        xhr.upload.onprogress = (ev) => {
-          if (ev.lengthComputable) showXfer(`Uploading ${file.name}`, Math.round((ev.loaded / ev.total) * 50));
-        };
-        xhr.onload = () => {
-          if (xhr.status < 200 || xhr.status >= 300) {
-            reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
-            return;
-          }
-          try {
-            resolve(xhr.responseText ? JSON.parse(xhr.responseText) : {});
-          } catch {
-            reject(new Error("bad staging response"));
-          }
-        };
-        xhr.onerror = () => reject(new Error("network error"));
-        xhr.send(file);
-      });
-
-      if (!staged?.pullUrl && !(staged?.agentNotified && staged?.agentCommandId)) {
-        throw new Error("upload staging failed");
-      }
-
-      let commandId;
-      if (staged.agentNotified && typeof staged.agentCommandId === "string") {
-        commandId = staged.agentCommandId;
+      // Small files: push over the existing viewer/agent WS path. This works on
+      // old agents without HTTP pull URL rewrite/reachability.
+      if (file.size <= WS_UPLOAD_MAX_TOTAL) {
+        await uploadFileViaWsChunks(file, path);
       } else {
-        commandId = `upload-http-${Date.now()}`;
-        send({
-          type: "command",
-          commandType: "file_upload_http",
-          id: commandId,
-          payload: { path, url: staged.pullUrl, total: file.size },
-        });
+        try {
+          await uploadFileViaHttpPull(file, path);
+        } catch (httpErr) {
+          // Large files cannot use WS (server hard limit 8MB). Surface pull errors clearly.
+          const msg = httpErr instanceof Error ? httpErr.message : String(httpErr || "upload failed");
+          throw new Error(
+            `${msg}\n\nLarge file requires HTTP pull. Set OVERLORD_EXTERNAL_URL to an agent-reachable https origin, or rebuild agent ≥ 2.3.8.`,
+          );
+        }
       }
-      showXfer(`Saving ${file.name} on remote…`, 75);
-      await waitCommand(commandId);
       showXfer(`Uploaded ${file.name}`, 100);
       playSound("upload");
       setMsg(`Uploaded ${file.name}`);

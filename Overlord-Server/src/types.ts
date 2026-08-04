@@ -16,6 +16,10 @@ export type ClientInfo = {
   ws: any;
   lastPingSent?: number;
   lastPingNonce?: number;
+  /** In-flight server→agent pings keyed by nonce. */
+  pendingPings?: Map<number, number>;
+  /** Recent RTT samples for EMA smoothing. */
+  pingSamples?: number[];
   lastPongAt?: number;
   online?: boolean;
   hwid?: string;

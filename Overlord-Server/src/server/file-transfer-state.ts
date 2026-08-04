@@ -70,6 +70,8 @@ export type UploadPull = {
   expiresAt: number;
   timeout: ReturnType<typeof setTimeout>;
   deleteFile: boolean;
+  /** Optional short-lived secret for shell/script pullers (not the global agent token). */
+  pullSecret?: string;
   state?: StreamingPullState;
   expectedTotal?: number;
   userId?: number;
@@ -251,6 +253,7 @@ export function createUploadPull(opts: {
   fileName: string;
   size: number;
   ttlMs?: number;
+  pullSecret?: string;
 }): string {
   const pullId = uuidv4();
   const ttl = opts.ttlMs ?? getFileTransferLimits().uploadPullTtlMs;
@@ -268,6 +271,55 @@ export function createUploadPull(opts: {
     expiresAt,
     timeout: pullTimeout,
     deleteFile: false,
+    pullSecret: opts.pullSecret,
   });
   return pullId;
+}
+
+/** Extend pull map TTL without changing the pull id (keeps staged bytes reachable). */
+export function refreshUploadPullTtl(pullId: string, ttlMs?: number): boolean {
+  const pull = uploadPulls.get(pullId);
+  if (!pull) return false;
+  const ttl = ttlMs ?? getFileTransferLimits().uploadPullTtlMs;
+  clearTimeout(pull.timeout);
+  pull.expiresAt = Date.now() + ttl;
+  pull.timeout = setTimeout(() => {
+    uploadPulls.delete(pullId);
+  }, ttl);
+  return true;
+}
+
+/** Re-register a pull under the same id if the map entry expired but the file remains. */
+export function ensureUploadPull(opts: {
+  pullId: string;
+  clientId: string;
+  filePath: string;
+  fileName: string;
+  size: number;
+  ttlMs?: number;
+  pullSecret?: string;
+}): boolean {
+  const existing = uploadPulls.get(opts.pullId);
+  if (existing) {
+    if (opts.pullSecret && !existing.pullSecret) existing.pullSecret = opts.pullSecret;
+    return refreshUploadPullTtl(opts.pullId, opts.ttlMs);
+  }
+  const ttl = opts.ttlMs ?? getFileTransferLimits().uploadPullTtlMs;
+  const expiresAt = Date.now() + ttl;
+  const pullTimeout = setTimeout(() => {
+    uploadPulls.delete(opts.pullId);
+  }, ttl);
+  uploadPulls.set(opts.pullId, {
+    id: opts.pullId,
+    clientId: opts.clientId,
+    path: opts.filePath,
+    fileName: opts.fileName,
+    tmpPath: opts.filePath,
+    size: opts.size,
+    expiresAt,
+    timeout: pullTimeout,
+    deleteFile: false,
+    pullSecret: opts.pullSecret,
+  });
+  return true;
 }

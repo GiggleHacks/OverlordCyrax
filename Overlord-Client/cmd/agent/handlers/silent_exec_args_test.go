@@ -4,6 +4,27 @@ import (
 	"testing"
 )
 
+func TestExtractSilentExecArgs_StringAndArray(t *testing.T) {
+	fromString := extractSilentExecArgs(`--flag "hello world"`)
+	if len(fromString) != 2 || fromString[0] != "--flag" || fromString[1] != "hello world" {
+		t.Fatalf("string args = %v", fromString)
+	}
+
+	fromSlice := extractSilentExecArgs([]string{"a", "b c"})
+	if len(fromSlice) != 2 || fromSlice[0] != "a" || fromSlice[1] != "b c" {
+		t.Fatalf("[]string args = %v", fromSlice)
+	}
+
+	fromAny := extractSilentExecArgs([]interface{}{"x", 12})
+	if len(fromAny) != 2 || fromAny[0] != "x" || fromAny[1] != "12" {
+		t.Fatalf("[]interface{} args = %v", fromAny)
+	}
+
+	if len(extractSilentExecArgs(nil)) != 0 {
+		t.Fatalf("nil should yield empty args")
+	}
+}
+
 func TestParseCommandArgs_EmptyInput(t *testing.T) {
 	result := parseCommandArgs("")
 	if len(result) != 0 {

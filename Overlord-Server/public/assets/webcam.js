@@ -2,7 +2,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 import { checkFeatureAccess } from "./feature-gate.js";
 import { WhepClient } from "./whep.js";
 import { P2PClient } from "./webrtc-p2p.js";
-import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
+import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./generated/shared-ui-settings.js";
 import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 
 const WEBCAM_JS_VERSION = "1.3.0";
@@ -116,6 +116,7 @@ const WEBCAM_JS_VERSION = "1.3.0";
   const MAX_STALL_RESTARTS = 3;
   const STALL_COUNTDOWN_SEC = 3;
   const MAX_START_RETRIES = embedded ? 3 : 3;
+  let webcamReconnectDelay = 1500;
 
   /* ── Remote system audio while viewing webcam ── */
   const AUDIO_SAMPLE_RATE = 16000;
@@ -989,8 +990,12 @@ const WEBCAM_JS_VERSION = "1.3.0";
       whepPath,
       videoEl: webrtcVideo,
       onState: (s) => {
-        if (s === "connected") setStreamState("streaming", "Streaming (WebRTC Relayed)");
-        else if (s === "failed" || s === "disconnected") setWebrtcViewActive(false);
+        if (s === "connected") {
+          if (desiredStreaming && !hasRenderedFrame) {
+            setStreamState("starting", "Connecting WebRTC Relayed · waiting for first frame");
+            armFirstFrameWatch();
+          }
+        } else if (s === "failed" || s === "disconnected") setWebrtcViewActive(false);
       },
     });
     try {
@@ -1012,8 +1017,12 @@ const WEBCAM_JS_VERSION = "1.3.0";
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(encodeMsgpack(msg));
       },
       onState: (s) => {
-        if (s === "connected") setStreamState("streaming", "Streaming (WebRTC P2P)");
-        else if (s === "failed" || s === "disconnected") setWebrtcViewActive(false);
+        if (s === "connected") {
+          if (desiredStreaming && !hasRenderedFrame) {
+            setStreamState("starting", "Connecting WebRTC P2P · waiting for first frame");
+            armFirstFrameWatch();
+          }
+        } else if (s === "failed" || s === "disconnected") setWebrtcViewActive(false);
       },
     });
     try {
@@ -1067,11 +1076,16 @@ const WEBCAM_JS_VERSION = "1.3.0";
     }
     if (msg.type === "status") {
       if (msg.status === "offline") {
-        desiredStreaming = false;
+        // Keep desiredStreaming so brief blips auto-resume on reconnect.
         clearStallRecovery();
         stallRestartCount = 0;
         startRetryCount = 0;
         setStreamState("offline", "Client offline");
+      } else if (msg.status === "streaming") {
+        if (desiredStreaming && !hasRenderedFrame) {
+          setStreamState("starting", "Connected · waiting for first frame");
+          armFirstFrameWatch();
+        }
       } else if (msg.status === "starting") {
         if (desiredStreaming && streamState !== "streaming" && !stallRecoveryInProgress) {
           setStreamState("starting", "Opening camera · waiting for response");
@@ -1095,6 +1109,7 @@ const WEBCAM_JS_VERSION = "1.3.0";
     setStreamState("connecting", "Connecting");
 
     ws.onopen = () => {
+      webcamReconnectDelay = 1500;
       suppressSelectRestart = true;
       requestCameraList();
       if (savedCameraIndex !== null && savedCameraIndex !== undefined) {
@@ -1132,7 +1147,9 @@ const WEBCAM_JS_VERSION = "1.3.0";
       } else {
         setStreamState("disconnected", "Disconnected");
       }
-      setTimeout(connect, 1500);
+      const delay = webcamReconnectDelay;
+      webcamReconnectDelay = Math.min(Math.floor(webcamReconnectDelay * 1.5), 8000);
+      setTimeout(connect, delay);
     };
 
     ws.onerror = () => {

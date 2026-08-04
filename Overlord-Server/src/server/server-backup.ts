@@ -52,7 +52,7 @@ export type ServerBackupPaths = {
 };
 
 const DATA_FILES = ["config.json", "save.json", "vapid-keys.json"] as const;
-const DATA_DIRECTORIES = ["file-share", "deploy", "winre", "rd-recordings", "macos-sdk-uploads"] as const;
+const DATA_DIRECTORIES = ["file-share", "deploy", "winre", "rd-recordings", "macos-sdk-uploads", "soundboard"] as const;
 
 function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");

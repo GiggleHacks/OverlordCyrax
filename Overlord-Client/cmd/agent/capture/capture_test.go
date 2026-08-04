@@ -23,6 +23,53 @@ type recordingWriter struct {
 	types []websocket.MessageType
 }
 
+func TestClearDesktopPreviousFrameReleasesStitchedBaseline(t *testing.T) {
+	marker := &prevImage{w: 3840, h: 2160, pix: make([]byte, 16)}
+	prevMu.Lock()
+	saved := prevFrame
+	prevFrame = marker
+	prevMu.Unlock()
+	t.Cleanup(func() {
+		prevMu.Lock()
+		prevFrame = saved
+		prevMu.Unlock()
+	})
+
+	clearDesktopPreviousFrame()
+	prevMu.Lock()
+	defer prevMu.Unlock()
+	if prevFrame != nil {
+		t.Fatal("desktop previous frame remained retained")
+	}
+}
+
+func TestInitialDesktopThumbnailIsJPEGAndDoesNotReplaceBaseline(t *testing.T) {
+	marker := &prevImage{w: 1, h: 1, pix: []byte{0x42}}
+	prevMu.Lock()
+	saved := prevFrame
+	prevFrame = marker
+	prevMu.Unlock()
+	t.Cleanup(func() {
+		prevMu.Lock()
+		prevFrame = saved
+		prevMu.Unlock()
+	})
+
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	frame, err := buildInitialDesktopThumbnail(img, 80)
+	if err != nil {
+		t.Fatalf("build initial thumbnail: %v", err)
+	}
+	if frame.Header.Format != "jpeg" || frame.Header.FPS != 1 || len(frame.Data) == 0 {
+		t.Fatalf("unexpected initial frame header=%+v bytes=%d", frame.Header, len(frame.Data))
+	}
+	prevMu.Lock()
+	defer prevMu.Unlock()
+	if prevFrame != marker {
+		t.Fatal("initial thumbnail replaced the live-stream delta baseline")
+	}
+}
+
 func TestEncodeBlocksBackstageAdvancesOnlyBackstageHistory(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	for i := range img.Pix {
@@ -314,6 +361,27 @@ func TestFrameFPS(t *testing.T) {
 	t.Logf("Calculated FPS: %d", fps)
 }
 
+func TestDesktopAndBackstageFPSCountersAreIndependent(t *testing.T) {
+	var desktop frameRateCounter
+	var backstage frameRateCounter
+	start := time.Unix(100, 0)
+
+	desktop.fps(start)
+	backstage.fps(start)
+	for i := 1; i <= 59; i++ {
+		desktop.fps(start.Add(time.Duration(i) * time.Second / 60))
+	}
+	desktopFPS := desktop.fps(start.Add(time.Second))
+	backstageFPS := backstage.fps(start.Add(time.Second))
+
+	if desktopFPS < 55 || desktopFPS > 65 {
+		t.Fatalf("expected desktop counter near 60 fps, got %d", desktopFPS)
+	}
+	if backstageFPS != 2 {
+		t.Fatalf("expected backstage counter to contain only its two samples, got %d fps", backstageFPS)
+	}
+}
+
 func TestJPEGQuality(t *testing.T) {
 	quality := desktopJPEGQuality()
 	if quality < 1 || quality > 100 {
@@ -520,6 +588,60 @@ func TestSetFrameFlowTargetFPSEnvOverride(t *testing.T) {
 	SetFrameFlowTargetFPS(240)
 	if got := activeFrameSlotLimit(); got != 12 {
 		t.Fatalf("expected env slot limit 12, got %d", got)
+	}
+}
+
+func TestStoppingDesktopPreservesBackstageFrameFlow(t *testing.T) {
+	t.Setenv("OVERLORD_DESKTOP_IN_FLIGHT_FRAMES", "")
+	frameStreamsMu.Lock()
+	frameStreams = make(map[string]int)
+	frameStreamsMu.Unlock()
+	ResetFrameSlots()
+	t.Cleanup(func() {
+		StopFrameFlowStream("desktop")
+		StopFrameFlowStream("backstage")
+	})
+
+	StartFrameFlowStream("desktop", 60)
+	StartFrameFlowStream("backstage", 60)
+	if got := activeFrameSlotLimit(); got != 8 {
+		t.Fatalf("expected combined 120 fps slot limit 8, got %d", got)
+	}
+	inFlightFrames.Store(2)
+	frameAckSeen.Store(true)
+
+	StopFrameFlowStream("desktop")
+	if got := activeFrameSlotLimit(); got != 4 {
+		t.Fatalf("expected remaining backstage 60 fps slot limit 4, got %d", got)
+	}
+	if got := inFlightFrames.Load(); got != 2 {
+		t.Fatalf("desktop stop reset %d backstage in-flight frames", got)
+	}
+	if !frameAckSeen.Load() {
+		t.Fatal("desktop stop disabled ACK flow control while backstage remained active")
+	}
+
+	StopFrameFlowStream("backstage")
+	if got := inFlightFrames.Load(); got != 0 {
+		t.Fatalf("last stream stop left %d in-flight frames", got)
+	}
+	if frameAckSeen.Load() {
+		t.Fatal("last stream stop did not reset ACK flow state")
+	}
+}
+
+func TestInactiveStreamTargetDoesNotChangeActiveFrameFlow(t *testing.T) {
+	t.Setenv("OVERLORD_DESKTOP_IN_FLIGHT_FRAMES", "")
+	frameStreamsMu.Lock()
+	frameStreams = make(map[string]int)
+	frameStreamsMu.Unlock()
+	ResetFrameSlots()
+	t.Cleanup(func() { StopFrameFlowStream("backstage") })
+
+	StartFrameFlowStream("backstage", 60)
+	UpdateFrameFlowStream("desktop", 240)
+	if got := activeFrameSlotLimit(); got != 4 {
+		t.Fatalf("inactive desktop target changed backstage slot limit to %d", got)
 	}
 }
 

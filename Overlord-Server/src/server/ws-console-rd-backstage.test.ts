@@ -21,6 +21,8 @@ import {
   handleDesktopCursor,
   handleDesktopEncoderCapabilities,
   requestRemoteDesktopKeyframeAfterScreenshot,
+  scheduleRdStopAfterLastViewer,
+  cancelPendingRdStop,
 } from "./ws-console-rd-backstage";
 
 type MockWs = {
@@ -80,6 +82,7 @@ function agentCommands(ws: MockWs) {
 
 afterEach(() => {
   for (const clientId of clientIdsToCleanup) {
+    cancelPendingRdStop(clientId);
     for (const session of sessionManager.getRdSessionsForClient(clientId)) {
       sessionManager.deleteRdSession(session.id);
     }
@@ -291,6 +294,63 @@ describe("remote desktop viewer control", () => {
     expect(commands.filter((msg) => msg.commandType === "desktop_start")).toHaveLength(1);
     expect(commands.filter((msg) => msg.commandType === "desktop_request_keyframe")).toHaveLength(0);
     expect(rdStreamingState.get(clientId)?.isStreaming).toBe(true);
+  });
+
+  test("acks joining viewer when desktop stream is already healthy", () => {
+    const clientId = `rd-join-${Date.now().toString(36)}`;
+    const { agentWs } = createClient(clientId);
+    const firstViewer = createMockWs({ clientId });
+    const secondViewer = createMockWs({ clientId });
+
+    handleRemoteDesktopViewerOpen(firstViewer as any);
+    handleRemoteDesktopViewerMessage(firstViewer as any, JSON.stringify({ type: "desktop_start" }));
+    const state = rdStreamingState.get(clientId)!;
+    state.lastFrameAt = Date.now();
+    state.codec = "h264";
+    agentWs.sent.length = 0;
+    secondViewer.sent.length = 0;
+
+    handleRemoteDesktopViewerOpen(secondViewer as any);
+    handleRemoteDesktopViewerMessage(secondViewer as any, JSON.stringify({ type: "desktop_start" }));
+
+    expect(agentCommands(agentWs).filter((msg) => msg.commandType === "desktop_start")).toHaveLength(0);
+    expect(agentCommands(agentWs).filter((msg) => msg.commandType === "desktop_request_keyframe")).toHaveLength(1);
+    const statuses = secondViewer.sent
+      .map((raw) => {
+        try {
+          if (typeof raw === "string") return JSON.parse(raw);
+          const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
+          return msgpackDecode(bytes);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    expect(statuses.some((msg: any) => msg?.type === "status" && msg?.status === "streaming")).toBe(true);
+  });
+
+  test("cancels scheduled last-viewer stop when a new desktop_start arrives", async () => {
+    const clientId = `rd-grace-${Date.now().toString(36)}`;
+    const { agentWs } = createClient(clientId);
+    const viewer = createMockWs({ clientId });
+
+    handleRemoteDesktopViewerOpen(viewer as any);
+    handleRemoteDesktopViewerMessage(viewer as any, JSON.stringify({ type: "desktop_start" }));
+    expect(rdStreamingState.get(clientId)?.isStreaming).toBe(true);
+
+    sessionManager.deleteRdSession(viewer.data.sessionId!);
+    scheduleRdStopAfterLastViewer(clientId);
+    agentWs.sent.length = 0;
+
+    const rejoined = createMockWs({ clientId });
+    handleRemoteDesktopViewerOpen(rejoined as any);
+    handleRemoteDesktopViewerMessage(rejoined as any, JSON.stringify({ type: "desktop_start" }));
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(agentCommands(agentWs).filter((msg) => msg.commandType === "desktop_stop")).toHaveLength(0);
+    expect(rdStreamingState.get(clientId)?.isStreaming).toBe(true);
+    cancelPendingRdStop(clientId);
   });
 
   test("forwards and clamps the desktop bitrate setting", () => {

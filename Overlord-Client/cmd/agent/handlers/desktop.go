@@ -30,10 +30,12 @@ func GetPersistedDisplay() int {
 
 func DesktopStart(ctx context.Context, env *rt.Env) error {
 	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
+	defer capture.CleanupDesktopStream()
 	fps := activeDesktopTargetFPS()
 	interval := time.Second / time.Duration(fps)
 	capture.SetDesktopH264TargetFPS(fps)
-	capture.SetFrameFlowTargetFPS(fps)
+	capture.StartFrameFlowStream("desktop", fps)
+	defer capture.StopFrameFlowStream("desktop")
 	log.Printf("desktop: starting stream (target fps %d)", fps)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -48,7 +50,7 @@ func DesktopStart(ctx context.Context, env *rt.Env) error {
 			if fps != currentFPS {
 				currentFPS = fps
 				capture.SetDesktopH264TargetFPS(fps)
-				capture.SetFrameFlowTargetFPS(fps)
+				capture.UpdateFrameFlowStream("desktop", fps)
 				ticker.Reset(time.Second / time.Duration(fps))
 				log.Printf("desktop: target fps changed to %d", fps)
 			}
@@ -67,7 +69,7 @@ func activeDesktopTargetFPS() int {
 	if fps := int(desktopTargetFPS.Load()); fps > 0 {
 		return fps
 	}
-	_, fps := streamInterval("OVERLORD_DESKTOP_MAX_FPS", 120)
+	_, fps := streamInterval("OVERLORD_DESKTOP_MAX_FPS", 15)
 	return SetDesktopTargetFPS(fps)
 }
 
@@ -75,7 +77,7 @@ func SetDesktopTargetFPS(fps int) int {
 	fps = clampDesktopTargetFPS(fps)
 	desktopTargetFPS.Store(int64(fps))
 	capture.SetDesktopH264TargetFPS(fps)
-	capture.SetFrameFlowTargetFPS(fps)
+	capture.UpdateFrameFlowStream("desktop", fps)
 	return fps
 }
 

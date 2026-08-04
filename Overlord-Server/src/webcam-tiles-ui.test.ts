@@ -87,7 +87,8 @@ describe("webcam tile failures", () => {
     expect(js).toContain("const arrayTile = embedded && !showControls");
     expect(js).toContain("const requestedFps = arrayTile ? 15");
     expect(js).toContain("const maxHeight = arrayTile ? 360");
-    expect(js).toContain('fallbackToJpeg("decoder_backpressure")');
+    expect(js).toContain('fallbackToJpeg("decoder_error")');
+    expect(js).toContain('fallbackToJpeg("decoder_unavailable")');
   });
 
   test("grid layout scores fitted video area so wide screens never get strip layouts", async () => {

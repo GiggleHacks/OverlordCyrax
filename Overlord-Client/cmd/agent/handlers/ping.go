@@ -17,12 +17,10 @@ func HandlePing(ctx context.Context, env *runtime.Env, envelope map[string]inter
 	env.SetLastPong(time.Now().UnixMilli())
 
 	pong := wire.Pong{Type: "pong", TS: ts}
-	go func() {
-		defer recoverAndLog("pong sender", nil)
-		if err := wire.WriteMsg(ctx, env.Conn, pong); err != nil {
-			log.Printf("ping: failed to send pong: %v", err)
-		}
-	}()
-
+	// Send inline on the control-priority path so RTT is not inflated by media frames.
+	if err := wire.WriteControlMsg(ctx, env.Conn, pong); err != nil {
+		log.Printf("ping: failed to send pong: %v", err)
+		return err
+	}
 	return nil
 }

