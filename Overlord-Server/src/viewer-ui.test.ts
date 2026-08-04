@@ -4,12 +4,12 @@ import { readFile } from "node:fs/promises";
 const publicFile = (name: string) => readFile(new URL(`../public/${name}`, import.meta.url), "utf8");
 
 describe("unified viewer UI", () => {
-  test("provides webcam, desktop, split, pip, and dashboard2 modes", async () => {
+  test("provides webcam, desktop, split, and dashboard2 modes", async () => {
     const html = await publicFile("viewer.html");
     expect(html).toContain('data-mode="webcam"');
     expect(html).toContain('data-mode="desktop"');
     expect(html).toContain('data-mode="split"');
-    expect(html).toContain('data-mode="pip"');
+    expect(html).not.toContain('data-mode="pip"');
     expect(html).toContain('data-mode="dashboard2"');
     expect(html).toContain("Dashboard 2.0");
     expect(html).not.toContain('data-mode="dock"');
@@ -112,7 +112,7 @@ describe("unified viewer UI", () => {
     expect(viewerJs).toContain("setSideCollapsed");
     expect(viewerJs).toContain("applySplitColumns");
     expect(viewerJs).toContain("webcamNeedsParentBar");
-    expect(viewerJs).toContain('nextMode === "dock" ? "split"');
+    expect(viewerJs).toMatch(/nextMode === "dock".*"split"|=== "dock" \|\| nextMode === "space"/);
     const css = await publicFile("assets/main.css");
     expect(css).toContain(".side-panel.is-collapsed");
     expect(css).toContain('.viewer-panels[data-mode="split"]');
@@ -128,29 +128,14 @@ describe("unified viewer UI", () => {
     expect(js).toContain("mode=dashboard2");
   });
 
-  test("hosts PiP webcam overlay inside the desktop video panel", async () => {
+  test("viewer desktop panel keeps side and desktop resize chrome", async () => {
     const html = await publicFile("viewer.html");
     expect(html).toContain('id="viewerDesktopPanel"');
-    expect(html).toContain('id="viewerPipOverlay"');
-    expect(html).toContain('id="viewerPipWebcam"');
-    expect(html).toContain('data-pip-resize');
-    expect(html).toContain('data-pip-pin');
-    expect(html).toContain('data-pip-snap="tl"');
-    expect(html).toContain('data-pip-snap="tr"');
-    expect(html).toContain('data-pip-snap="bl"');
-    expect(html).toContain('data-pip-snap="br"');
-    expect(html).toContain('data-pip-lock-badge');
     expect(html).toContain('data-side-resize');
     expect(html).toContain('data-desktop-resize');
-    const desktopIdx = html.indexOf('id="viewerDesktopPanel"');
-    const pipIdx = html.indexOf('id="viewerPipOverlay"');
-    const desktopClose = html.indexOf("</section>", desktopIdx);
-    expect(desktopIdx).toBeGreaterThan(-1);
-    expect(pipIdx).toBeGreaterThan(desktopIdx);
-    expect(pipIdx).toBeLessThan(desktopClose);
   });
 
-  test("ships shared pip overlay controller hosted on desktop panel", async () => {
+  test("ships shared pip overlay controller asset for reuse", async () => {
     const js = await publicFile("assets/pip-overlay.js");
     expect(js).toContain("export function initPipOverlay");
     expect(js).toContain("pointerdown");
@@ -160,34 +145,29 @@ describe("unified viewer UI", () => {
     expect(js).toContain("edge-bottom");
     expect(js).not.toContain("onDockSpace");
     const viewerJs = await publicFile("assets/viewer.js");
-    expect(viewerJs).toContain('from "./pip-overlay.js"');
     expect(viewerJs).toContain("webcamUrlBar");
     expect(viewerJs).toContain("embedded=1");
     expect(viewerJs).toContain('action: "start"');
-    expect(viewerJs).toContain("host: desktopPanel");
-    expect(viewerJs).toContain("viewer-pip-active");
     expect(viewerJs).toContain("overlord_side_panel_width_v1");
     expect(viewerJs).toContain("overlord_desktop_layout_v1");
+    // Viewer shell no longer mounts PiP mode; map legacy pip URLs to desktop.
+    expect(viewerJs).toMatch(/nextMode === "pip"[\s\S]*"desktop"/);
     const css = await publicFile("assets/main.css");
-    expect(css).toContain("body.viewer-pip-active .viewer-pip-overlay.is-visible");
-    expect(css).toContain("is-minimized");
     expect(css).toContain("pip-pill");
     expect(css).toContain("--pip-opacity");
   });
 
-  test("pip toolbar exposes minimize opacity and clear snap controls", async () => {
-    const html = await publicFile("viewer.html");
-    expect(html).toContain("data-pip-minimize");
-    expect(html).toContain("data-pip-opacity");
-    expect(html).toContain("data-pip-dock-bottom");
-    expect(html).toContain("data-pip-pill");
-    expect(html).toContain("data-pip-title");
-    expect(html).toContain("Move to top-left corner");
-    expect(html).not.toContain(">TL<");
-    expect(html).not.toContain("data-pip-dock-space");
+  test("pip overlay controller exposes minimize opacity and snap hooks", async () => {
+    const js = await publicFile("assets/pip-overlay.js");
+    expect(js).toContain("data-pip-minimize");
+    expect(js).toContain("data-pip-opacity");
+    expect(js).toContain("data-pip-dock-bottom");
+    expect(js).toContain("data-pip-pill");
+    expect(js).toContain("data-pip-title");
+    expect(js).not.toContain("data-pip-dock-space");
   });
 
-  test("exposes parent webcam Start/Stop/Settings bar for split and pip", async () => {
+  test("exposes parent webcam Start/Stop/Settings bar for split mode", async () => {
     const html = await publicFile("viewer.html");
     expect(html).toContain('id="viewerWebcamBar"');
     expect(html).toContain('id="viewerCamStart"');
@@ -199,8 +179,7 @@ describe("unified viewer UI", () => {
     expect(viewerJs).toContain("viewer-has-webcam-bar");
     expect(viewerJs).toContain("webcam_cmd");
     expect(viewerJs).toContain("webcamNeedsParentBar");
-    expect(viewerJs).toContain('m === "split" || m === "pip"');
-    expect(viewerJs).not.toContain('m === "split" || m === "pip" || m === "dashboard2"');
+    expect(viewerJs).toContain('return m === "split"');
     const webcamJs = await publicFile("assets/webcam.js");
     expect(webcamJs).toContain('data.type !== "webcam_cmd"');
     expect(webcamJs).toContain('action === "start"');
@@ -447,7 +426,7 @@ describe("unified viewer UI", () => {
     expect(bootstrap).toContain("/assets/files2.js");
     const js = await publicFile("assets/files2.js");
     expect(js).toContain("FILES2_JS_VERSION");
-    expect(js).toContain('"1.0.0"');
+    expect(js).toContain('"1.0.1"');
     expect(js).toContain('checkFeatureAccess("file_browser", clientId)');
     expect(js).toContain("/files/ws");
     expect(js).toContain("file_list");
