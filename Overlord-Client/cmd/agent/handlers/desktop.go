@@ -34,9 +34,11 @@ func DesktopStart(ctx context.Context, env *rt.Env) error {
 	interval := time.Second / time.Duration(fps)
 	capture.SetDesktopH264TargetFPS(fps)
 	capture.SetFrameFlowTargetFPS(fps)
+	capture.ResetFrameFPS()
 	log.Printf("desktop: starting stream (target fps %d)", fps)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	defer capture.ResetFrameFPS()
 	currentFPS := fps
 	for {
 		select {
@@ -67,7 +69,7 @@ func activeDesktopTargetFPS() int {
 	if fps := int(desktopTargetFPS.Load()); fps > 0 {
 		return fps
 	}
-	_, fps := streamInterval("OVERLORD_DESKTOP_MAX_FPS", 120)
+	_, fps := streamInterval("OVERLORD_DESKTOP_MAX_FPS", 15)
 	return SetDesktopTargetFPS(fps)
 }
 

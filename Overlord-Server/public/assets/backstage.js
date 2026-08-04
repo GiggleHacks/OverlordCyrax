@@ -149,7 +149,7 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
   let stallRestartCount = 0;
   let stallRecoveryTimer = null;
   let stallRecoveryInProgress = false;
-  const STALL_MS = 2000;
+  const STALL_MS = 10000;
   const MAX_STALL_RESTARTS = 3;
   const STALL_COUNTDOWN_SEC = 3;
   let frameDecodeBusy = false;
@@ -487,12 +487,12 @@ import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-s
     setStreamState("connecting", "Reconnecting");
     offlineTimer = setTimeout(() => {
       const now = performance.now();
-      if (!lastFrameAt || now - lastFrameAt > 3000) {
-        desiredStreaming = false;
+      // Keep desiredStreaming so brief agent blips auto-recover when frames resume.
+      if (!lastFrameAt || now - lastFrameAt > 8000) {
         clearStallRecovery();
         setStreamState("offline", "Client offline");
       }
-    }, 3000);
+    }, 8000);
   }
 
   function handleStatus(msg) {

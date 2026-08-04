@@ -114,6 +114,7 @@ const QUERY_CLIENT_PAGES: QueryClientPageDef[] = [
   { path: "/webcam",        file: "webcam.html",        feature: "webcam" },
   { path: "/backstage",     file: "backstage.html",     feature: "backstage" },
   { path: "/voice",         file: "voice.html",         feature: "voice" },
+  { path: "/soundboard-remote", file: "soundboard-remote.html" },
   { path: "/winre",         file: "winre.html",         permission: "clients:winre" },
 ];
 

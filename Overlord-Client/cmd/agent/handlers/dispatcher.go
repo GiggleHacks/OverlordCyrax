@@ -48,17 +48,29 @@ func (d *Dispatcher) Dispatch(ctx context.Context, envelope map[string]interface
 		return nil
 	case "command":
 		cmdType, _ := envelope["commandType"].(string)
-		if !wire.IsCommandType(cmdType) {
-			log.Printf("dispatcher: unknown command type=%s", cmdType)
-			return nil
-		}
+		cmdID, _ := envelope["id"].(string)
 		commandVersion := toInt(envelope["commandVersion"])
 		if commandVersion <= 0 {
 			commandVersion = 1
 		}
 		envelope["commandVersion"] = commandVersion
+		if !wire.IsCommandType(cmdType) {
+			log.Printf("dispatcher: unknown command type=%s id=%s", cmdType, cmdID)
+			// Always reply so server-side waiters (remote execute, wallpaper, etc.)
+			// do not hang until idle timeout with "waiting for client acknowledgement".
+			if d.Env == nil || d.Env.Conn == nil || cmdID == "" {
+				return nil
+			}
+			return wire.WriteControlMsg(ctx, d.Env.Conn, wire.CommandResult{
+				Type:           "command_result",
+				CommandID:      cmdID,
+				CommandVersion: commandVersion,
+				OK:             false,
+				Message:        fmt.Sprintf("unknown command: %s", cmdType),
+				ErrorCode:      "unknown_command",
+			})
+		}
 		if !wire.IsSupportedCommandVersion(cmdType, commandVersion) {
-			cmdID, _ := envelope["id"].(string)
 			command := wire.CommandType(cmdType)
 			supported := wire.CommandVersionSupport[command]
 			log.Printf(
@@ -71,7 +83,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, envelope map[string]interface
 			if d.Env == nil || d.Env.Conn == nil {
 				return nil
 			}
-			return wire.WriteMsg(ctx, d.Env.Conn, wire.CommandResult{
+			return wire.WriteControlMsg(ctx, d.Env.Conn, wire.CommandResult{
 				Type:              "command_result",
 				CommandID:         cmdID,
 				CommandType:       command,

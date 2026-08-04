@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const defaultMaxInFlightFrames int64 = 2
+const defaultMaxInFlightFrames int64 = 4
 
 var (
 	inFlightFrames atomic.Int64
@@ -26,7 +26,7 @@ func AcquireFrameSlot() bool {
 		cur := inFlightFrames.Load()
 		if cur >= activeFrameSlotLimit() {
 			lastAck := lastAckNano.Load()
-			if lastAck > 0 && time.Since(time.Unix(0, lastAck)) > time.Second {
+			if lastAck > 0 && time.Since(time.Unix(0, lastAck)) > 3*time.Second {
 				inFlightFrames.Store(0)
 				continue
 			}
@@ -61,6 +61,10 @@ func SetFrameFlowTargetFPS(fps int) {
 	case fps >= 120:
 		limit = 8
 	case fps >= 60:
+		limit = 6
+	case fps >= 30:
+		limit = 5
+	case fps >= 15:
 		limit = 4
 	}
 	if env := strings.TrimSpace(os.Getenv("OVERLORD_DESKTOP_IN_FLIGHT_FRAMES")); env != "" {

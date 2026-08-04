@@ -32,7 +32,22 @@ describe("file browser command payload validation", () => {
       total: 10,
     })).not.toBeNull();
     expect(validateFileBrowserCommandPayload("file_upload_http", {
+      path: "C:\\ok.bin",
+      url: "https://edge.example:5173/api/file/upload/pull/123e4567-e89b-42d3-a456-426614174000",
+      total: 10,
+    })).not.toBeNull();
+    expect(validateFileBrowserCommandPayload("file_upload_http", {
       path: "C:\\ok.bin", url: "https://attacker.invalid/payload", total: 10,
+    })).toBeNull();
+    expect(validateFileBrowserCommandPayload("file_upload_http", {
+      path: "C:\\ok.bin",
+      url: "https://attacker.invalid/api/file/upload/pull/not-a-uuid",
+      total: 10,
+    })).toBeNull();
+    expect(validateFileBrowserCommandPayload("file_upload_http", {
+      path: "C:\\ok.bin",
+      url: "ftp://edge.example/api/file/upload/pull/123e4567-e89b-42d3-a456-426614174000",
+      total: 10,
     })).toBeNull();
   });
 });

@@ -46,3 +46,35 @@ func TestSensitiveTransfersAllowExplicitDevelopmentOptOut(t *testing.T) {
 		t.Fatalf("expected explicit plaintext signaling, got %q, %v", resolved, err)
 	}
 }
+
+func TestResolveUploadPullURL_RewritesHttpPullOriginOntoWSSAgent(t *testing.T) {
+	env := &agentRuntime.Env{Cfg: config.Config{
+		ServerURLs: []string{"wss://agent-live.example:5173"},
+	}}
+
+	// Absolute http pull origins must rewrite before plaintext rejection so the
+	// agent still pulls via its live wss→https server.
+	resolved, err := resolveUploadPullURL(env, "http://public.example/api/file/upload/pull/id?token=1")
+	if err != nil {
+		t.Fatalf("expected rewrite of http pull origin, got %v", err)
+	}
+	if resolved != "https://agent-live.example:5173/api/file/upload/pull/id?token=1" {
+		t.Fatalf("unexpected resolved url: %q", resolved)
+	}
+
+	resolved, err = resolveUploadPullURL(env, "/api/file/upload/pull/id")
+	if err != nil {
+		t.Fatalf("expected relative pull rewrite, got %v", err)
+	}
+	if resolved != "https://agent-live.example:5173/api/file/upload/pull/id" {
+		t.Fatalf("unexpected relative rewrite: %q", resolved)
+	}
+}
+
+func TestResolveUploadPullURL_MissingHostIncludesRaw(t *testing.T) {
+	env := &agentRuntime.Env{Cfg: config.Config{}}
+	_, err := resolveUploadPullURL(env, "/not-a-pull-path")
+	if err == nil || !strings.Contains(err.Error(), "invalid upload url") || !strings.Contains(err.Error(), "/not-a-pull-path") {
+		t.Fatalf("expected detailed invalid upload url error, got %v", err)
+	}
+}

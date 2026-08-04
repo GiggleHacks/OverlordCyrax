@@ -151,10 +151,35 @@ describe("wsHandlers ping/pong", () => {
       lastSeen: now,
       lastPingSent: now - 10,
       lastPingNonce: 2222,
+      pendingPings: new Map([[2222, now - 10]]),
     } as any;
 
     handlePong(info, { type: "pong", ts: 3333 } as any);
     expect(info.lastPingNonce).toBe(2222);
+    expect(info.pendingPings.has(2222)).toBe(true);
+  });
+
+  test("handlePong matches multi-inflight nonces and smooths rtt", () => {
+    metrics.reset();
+    const now = Date.now();
+    const info = {
+      id: "client-3b",
+      role: "client",
+      ws: { sent: [], send() {} },
+      lastSeen: now,
+      lastPingSent: now - 5,
+      lastPingNonce: 9002,
+      pendingPings: new Map([
+        [9001, now - 40],
+        [9002, now - 5],
+      ]),
+    } as any;
+
+    handlePong(info, { type: "pong", ts: 9001 } as any);
+    expect(info.pendingPings.has(9001)).toBe(false);
+    expect(info.pendingPings.has(9002)).toBe(true);
+    expect(info.pingMs).toBeGreaterThanOrEqual(0);
+    expect(info.pingMs).toBeLessThan(1000);
   });
 
   test("handlePong clears matching nonce even when pong is late", () => {

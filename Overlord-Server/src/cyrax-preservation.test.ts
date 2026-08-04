@@ -8,22 +8,25 @@ const read = (path: string) => readFile(join(root, path), "utf8");
 describe("Cyrax feature preservation", () => {
   test("server registers custom command routes", async () => {
     const source = await read("src/main-server.ts");
-    for (const handler of ["handleWallpaperRoutes", "handleDeployRoutes", "handleWinRERoutes"]) {
+    for (const handler of ["handleWallpaperRoutes", "handleSoundboardRoutes", "handleDeployRoutes", "handleWinRERoutes"]) {
       expect(source).toContain(handler);
     }
   });
 
   test("custom viewer and media pages remain routed", async () => {
     const routes = await read("src/server/routes/page-routes.ts");
-    for (const page of ["viewer.html", "webcams.html", "soundboard.html"]) {
+    for (const page of ["viewer.html", "webcams.html", "soundboard.html", "soundboard-remote.html"]) {
       expect(routes).toContain(page);
     }
   });
 
   test("custom browser assets remain available", async () => {
-    for (const asset of ["side-panel.js", "viewer.js", "webcams.js", "sounds.js"]) {
+    for (const asset of ["side-panel.js", "viewer.js", "webcams.js", "sounds.js", "soundboard-remote.js"]) {
       expect((await read(`public/assets/${asset}`)).length).toBeGreaterThan(100);
     }
+    const sidePanel = await read("public/assets/side-panel.js");
+    expect(sidePanel).toContain("Sound Board");
+    expect(sidePanel).toContain("soundboard-remote");
   });
 
   test("upstream privacy and virtual controls remain present", async () => {

@@ -24,6 +24,8 @@ import {
   type PendingHttpDownload,
   type StreamingPullState,
 } from "../file-transfer-state";
+import { selectUploadPullUrl } from "../client-version";
+import { buildPullEndpoints } from "../upload-pull-url";
 
 type RequestIpProvider = {
   requestIP: (req: Request) => { address?: string } | null | undefined;
@@ -460,7 +462,13 @@ export async function handleFileDownloadRoutes(
     uploadIntents.delete(uploadId);
     clearTimeout(intent.timeout);
 
-    const pullUrl = `/api/file/upload/pull/${encodeURIComponent(pullId)}`;
+    const pullEndpoints = buildPullEndpoints(req, pullId);
+    const targetClient = clientManager.getClient(intent.clientId);
+    const pullUrl = selectUploadPullUrl({
+      clientVersion: targetClient?.version,
+      pullPath: pullEndpoints.path,
+      pullOrigin: pullEndpoints.originUrl,
+    });
 
     let stagedSize = 0;
     let fileHandle: Awaited<ReturnType<typeof fs.open>> | null = null;
@@ -563,17 +571,16 @@ export async function handleFileDownloadRoutes(
       size: stagedSize,
       path: intent.path,
       pullUrl,
+      pullPath: pullEndpoints.path,
+      pullOrigin: pullEndpoints.originUrl,
+      endpointSource: pullEndpoints.source,
+      clientVersion: targetClient?.version || null,
       agentCommandId: null,
       agentNotified: false,
     });
   }
 
   if (req.method === "GET" && url.pathname.startsWith("/api/file/upload/pull/")) {
-    const agentToken = getConfig().auth.agentToken;
-    if (!isAuthorizedAgentRequest(req, url, agentToken)) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
     let pullId = "";
     try {
       pullId = decodeURIComponent(url.pathname.slice("/api/file/upload/pull/".length));
@@ -587,6 +594,16 @@ export async function handleFileDownloadRoutes(
     const pull = uploadPulls.get(pullId);
     if (!pull || pull.expiresAt < Date.now()) {
       return new Response("Not found", { status: 404 });
+    }
+
+    const agentToken = getConfig().auth.agentToken;
+    const authHeader = req.headers.get("authorization") || "";
+    const bearerMatch = /^Bearer\s+(\S+)/i.exec(authHeader);
+    const bearer = bearerMatch?.[1] || "";
+    const pullSecretOk = Boolean(pull.pullSecret && bearer && bearer === pull.pullSecret);
+    const agentOk = isAuthorizedAgentRequest(req, url, agentToken);
+    if (!agentOk && !pullSecretOk) {
+      return new Response("Unauthorized", { status: 401 });
     }
 
     const requesterClientId = req.headers.get("x-overlord-client-id") || "";

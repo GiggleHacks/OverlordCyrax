@@ -14,7 +14,7 @@ import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 import { initSidePanel } from "./side-panel.js";
 import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.js";
 
-const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
+const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
@@ -161,6 +161,11 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
   let renderCount = 0;
   let renderWindowStart = performance.now();
   let lastFrameAt = 0;
+  let streamStartedAt = 0;
+  let hasRenderedFrame = false;
+  let firstFrameTimer = null;
+  let startRetryCount = 0;
+  let intentionalRestart = false;
   let desiredStreaming = true;
   let viewerScale = 65;
   let streamState = "connecting";
@@ -172,9 +177,13 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
   let stallRestartCount = 0;
   let stallRecoveryTimer = null;
   let stallRecoveryInProgress = false;
-  const STALL_MS = 2000;
+  const STALL_MS = 10000;
   const MAX_STALL_RESTARTS = 3;
+  const MAX_START_RETRIES = 3;
   const STALL_COUNTDOWN_SEC = 3;
+  const STALL_KEYFRAME_ATTEMPTS = 2;
+  const FIRST_FRAME_MS = embedded ? 8000 : 6000;
+  let stallKeyframeAttempts = 0;
   let frameWidth = 0;
   let frameHeight = 0;
   let latencyAvg = null;
@@ -507,8 +516,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
   }
 
   let savedDisplay = null;
-  let savedStreamProfile = "auto";
-  const DEFAULT_STREAM_PROFILE = "auto";
+  let savedStreamProfile = "480:15";
+  const DEFAULT_STREAM_PROFILE = "480:15";
   const DEFAULT_MANUAL_PROFILE = { maxHeight: 480, fps: 15 };
 
   function setSelectValue(select, value) {
@@ -533,7 +542,12 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
         ? `${settings.resolution}:${settings.targetFps}`
         : savedStreamProfile);
     setSelectValue(streamProfileSelect, savedStreamProfile);
-    setSelectValue(bitrateSelect, settings.bitrateMbps);
+    // Missing/invalid saved bitrate → 5 Mbps default. Explicit 0 keeps Auto.
+    if (settings.bitrateMbps === undefined || settings.bitrateMbps === null || !Number.isFinite(Number(settings.bitrateMbps))) {
+      setSelectValue(bitrateSelect, 5);
+    } else {
+      setSelectValue(bitrateSelect, settings.bitrateMbps);
+    }
     setSelectValue(webrtcMode, settings.transportPreferenceVersion === CANVAS_TRANSPORT_PREF_VERSION ? settings.webrtcMode : "off");
     setSelectValue(audioTransport, settings.audioTransport);
     setSelectValue(recordMode, settings.recordMode);
@@ -562,7 +576,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     const profile = selectedStreamProfile();
     return {
       display: Number(displaySelect?.value || 0),
-      streamProfile: streamProfileSelect?.value || "auto",
+      streamProfile: streamProfileSelect?.value || "480:15",
       // Keep the legacy fields so backstage and older remote-desktop builds that
       // share these preferences continue to receive equivalent settings.
       resolution: String(profile.maxHeight),
@@ -615,10 +629,26 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
 
   setStreamState("connecting", "Connecting");
 
+  function resetFpsCounters() {
+    renderCount = 0;
+    renderWindowStart = performance.now();
+    diagnostics.currentViewerFps = null;
+    diagnostics.currentAgentFps = null;
+    if (agentFps) agentFps.textContent = "--";
+    if (viewerFps) viewerFps.textContent = "--";
+  }
+
+  function updateAgentFpsDisplay(agentValue) {
+    if (agentValue === undefined || agentValue === null || !agentFps) return;
+    const fps = Math.round(Number(agentValue));
+    if (!Number.isFinite(fps)) return;
+    agentFps.textContent = String(fps);
+    diagnostics.currentAgentFps = fps;
+  }
+
   function updateFpsDisplay(agentValue) {
-    if (agentValue !== undefined && agentValue !== null && agentFps) {
-      agentFps.textContent = String(agentValue);
-      diagnostics.currentAgentFps = Number(agentValue) || null;
+    if (agentValue !== undefined && agentValue !== null) {
+      updateAgentFpsDisplay(agentValue);
     }
     const now = performance.now();
     renderCount += 1;
@@ -672,11 +702,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
       canvasContainer.dataset.streamState = state;
     }
 
-    if (state === "idle" || state === "offline" || state === "disconnected" || state === "error") {
-      if (agentFps) agentFps.textContent = "--";
-      if (viewerFps) viewerFps.textContent = "--";
-      renderCount = 0;
-      renderWindowStart = performance.now();
+    if (state === "idle" || state === "offline" || state === "disconnected" || state === "error" || state === "starting") {
+      resetFpsCounters();
     }
 
     updateControls();
@@ -1291,9 +1318,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     diagnostics.codec = String(stats.format || diagnostics.codec || "");
     diagnostics.width = finite(stats.width) || diagnostics.width;
     diagnostics.height = finite(stats.height) || diagnostics.height;
-    if (agentFps && diagnostics.currentAgentFps != null) {
-      agentFps.textContent = String(Math.round(diagnostics.currentAgentFps));
-    }
+    updateAgentFpsDisplay(diagnostics.currentAgentFps);
     sampleCanvasAdaptiveQuality();
     renderDiagnostics();
   }
@@ -1313,31 +1338,83 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     stallRecoveryInProgress = false;
   }
 
+  function clearFirstFrameWatch() {
+    if (firstFrameTimer) {
+      clearTimeout(firstFrameTimer);
+      firstFrameTimer = null;
+    }
+  }
+
+  function armFirstFrameWatch() {
+    clearFirstFrameWatch();
+    firstFrameTimer = setTimeout(() => {
+      firstFrameTimer = null;
+      if (!desiredStreaming || hasRenderedFrame) return;
+      if (stallRecoveryInProgress) return;
+      if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
+      beginStallRecovery("start");
+    }, FIRST_FRAME_MS);
+  }
+
   function scheduleOffline(reason) {
     clearOfflineTimer();
     clearStallRecovery();
     setStreamState("connecting", "Reconnecting");
     offlineTimer = setTimeout(() => {
       const now = performance.now();
-      if (!lastFrameAt || now - lastFrameAt > 3000) {
+      // Keep desiredStreaming so brief agent blips auto-recover when frames resume.
+      if (!lastFrameAt || now - lastFrameAt > 8000) {
         if (elevationPending) return;
-        desiredStreaming = false;
         clearStallRecovery();
         setStreamState("offline", "Client offline");
       }
-    }, 3000);
+    }, 8000);
   }
 
-  function beginStallRecovery() {
+  function beginStallRecovery(kind = "stall") {
     if (stallRecoveryInProgress || !desiredStreaming) return;
     if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
     if (elevationPending) return;
-    if (stallRestartCount >= MAX_STALL_RESTARTS) {
-      setStreamState("error", "No frames · retries exhausted");
+
+    const isStart = kind === "start";
+    // Prefer keyframe recovery before a full stop/start cycle (stall path only).
+    if (!isStart && stallKeyframeAttempts < STALL_KEYFRAME_ATTEMPTS) {
+      stallKeyframeAttempts += 1;
+      setStreamState("stalled", `Requesting keyframe · ${stallKeyframeAttempts}/${STALL_KEYFRAME_ATTEMPTS}`);
+      try {
+        sendCmd("desktop_request_keyframe", { reason: "viewer_stall" });
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    // On first-frame timeout, try one keyframe before stop/start.
+    if (isStart && stallKeyframeAttempts < 1) {
+      stallKeyframeAttempts += 1;
+      setStreamState("starting", "Waiting for first frame · requesting keyframe");
+      try {
+        sendCmd("desktop_request_keyframe", { reason: "viewer_start_timeout" });
+      } catch {
+        // ignore
+      }
+      armFirstFrameWatch();
+      return;
+    }
+
+    const count = isStart ? startRetryCount : stallRestartCount;
+    const max = isStart ? MAX_START_RETRIES : MAX_STALL_RESTARTS;
+    if (count >= max) {
+      setStreamState("error", isStart
+        ? "Unable to start stream · try Stop then Start"
+        : "No frames · retries exhausted");
       return;
     }
     stallRecoveryInProgress = true;
-    stallRestartCount += 1;
+    if (isStart) startRetryCount += 1;
+    else stallRestartCount += 1;
+    stallKeyframeAttempts = 0;
+    const attempt = isStart ? startRetryCount : stallRestartCount;
     let remaining = STALL_COUNTDOWN_SEC;
     const tick = () => {
       if (!desiredStreaming || streamState === "offline" || streamState === "disconnected") {
@@ -1351,14 +1428,16 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
         return;
       }
       stallRecoveryTimer = null;
-      setStreamState("starting", `Restarting stream · attempt ${stallRestartCount}/${MAX_STALL_RESTARTS}`);
+      setStreamState("starting", `Restarting stream · attempt ${attempt}/${max}`);
+      intentionalRestart = true;
       stopDesktopStream({ userInitiated: false });
       stallRecoveryTimer = setTimeout(() => {
         stallRecoveryTimer = null;
         stallRecoveryInProgress = false;
+        intentionalRestart = false;
         if (!desiredStreaming) return;
         if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
-        startDesktopStream({ resetFrameClock: true });
+        startDesktopStream({ reason: "recovery", confirmFirewall: false });
       }, 300);
     };
     tick();
@@ -1400,21 +1479,37 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     if (msg.status === "starting") {
       clearOfflineTimer();
       if (desiredStreaming && streamState !== "streaming") {
-      setStreamState("starting", "Opening display · waiting for first frame");
+        setStreamState("starting", "Opening display · waiting for first frame");
+        armFirstFrameWatch();
+      }
+      return;
+    }
+    if (msg.status === "streaming") {
+      clearOfflineTimer();
+      if (desiredStreaming && streamState !== "streaming" && !hasRenderedFrame) {
+        setStreamState("starting", "Connected · waiting for first frame");
+        armFirstFrameWatch();
       }
       return;
     }
     if (msg.status === "stopped") {
       clearOfflineTimer();
-      // Ignore stop acks during stall recovery or while the user still wants the stream.
-      if (stallRecoveryInProgress || desiredStreaming) return;
+      // Ignore stop acks during intentional recovery restart or multi-viewer handoff.
+      if (stallRecoveryInProgress || intentionalRestart) return;
+      if (desiredStreaming && !hasRenderedFrame) {
+        // Agent stopped while we still want video and never got frames — recover.
+        armFirstFrameWatch();
+        return;
+      }
+      if (desiredStreaming) return;
       lastFrameAt = 0;
+      hasRenderedFrame = false;
+      clearFirstFrameWatch();
       setStreamState("idle", "Stopped");
       return;
     }
     if (msg.status === "online") {
       clearOfflineTimer();
-      const mode = getWebrtcMode();
       if (elevationPending) {
         elevationPending = false;
         desiredStreaming = true;
@@ -1422,26 +1517,12 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
       if (desiredStreaming) {
         const shouldRequestStart = !["starting", "streaming", "stalled"].includes(streamState) && !stallRecoveryInProgress;
         if (shouldRequestStart) {
-          setStreamState("starting", "Reconnecting");
-        }
-        if (displaySelect && displaySelect.value !== undefined) {
-          sendCmd("desktop_select_display", {
-            display: parseInt(displaySelect.value, 10) || 0,
-          });
-        }
-        pushInputToggles();
-        pushCaptureToggles();
-        if (qualitySlider) pushQuality(qualitySlider.value);
-        pushStreamProfile();
-        if (shouldRequestStart) {
-          if (mode === "relayed") {
-            sendCmd("desktop_start", { webrtc: true });
-          } else if (mode === "p2p") {
-            sendCmd("desktop_start", { canvasFlowControl: false });
-            startP2P();
-          } else {
-            sendCmd("desktop_start", { canvasFlowControl: true });
-          }
+          startDesktopStream({ reason: "online", confirmFirewall: false });
+        } else {
+          pushInputToggles();
+          pushCaptureToggles();
+          if (qualitySlider) pushQuality(qualitySlider.value);
+          pushStreamProfile();
         }
       } else {
         setStreamState("idle", "Stopped");
@@ -1592,7 +1673,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
   function onWebrtcState(label, s) {
     console.debug(`webrtc[${label}]: state`, s);
     if (s === "connected") {
-      setStreamState("streaming", `Streaming (${label})`);
+      if (desiredStreaming && !hasRenderedFrame) {
+        setStreamState("starting", `Connecting ${label} · waiting for first frame`);
+        armFirstFrameWatch();
+      }
     } else if (s === "failed" || s === "disconnected") {
       setWebrtcViewActive(false);
     }
@@ -1625,11 +1709,9 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
       if (elapsed >= 1000) {
         const fps = Math.round((webrtcFpsCount * 1000) / elapsed);
         diagnostics.currentViewerFps = fps;
-        updateFpsDisplay();
+        if (viewerFps) viewerFps.textContent = String(fps);
         webrtcFpsCount = 0;
         webrtcFpsWindowStart = now;
-      } else {
-        updateFpsDisplay();
       }
       webrtcRvfcHandle = webrtcVideo.requestVideoFrameCallback(tick);
     };
@@ -2074,11 +2156,14 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     return isWindows && !clientIsAdmin;
   }
 
-  function startDesktopStream() {
+  function startDesktopStream(options = {}) {
+    const reason = options.reason || "user";
+    const confirmFirewall = options.confirmFirewall !== false;
     const mode = getWebrtcMode();
-    rdDebug("start click", {
+    rdDebug("start stream", {
+      reason,
       mode,
-      wsReadyState: ws.readyState,
+      wsReadyState: ws?.readyState,
       streamState,
       desiredStreaming,
       display: displaySelect?.value ?? "",
@@ -2089,7 +2174,12 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
       clientOs,
       clientIsAdmin,
     });
-    if (needsWebrtcFirewallWarning(mode)) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      desiredStreaming = true;
+      setStreamState("connecting", "Connecting");
+      return;
+    }
+    if (confirmFirewall && needsWebrtcFirewallWarning(mode)) {
       if (!confirm("This agent is not elevated. Starting WebRTC will trigger a Windows Defender Firewall prompt on the target machine.\n\nContinue?")) {
         return;
       }
@@ -2100,21 +2190,33 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
         display: parseInt(displaySelect.value, 10) || 0,
       });
     }
+    pushInputToggles();
+    pushCaptureToggles();
     if (qualitySlider) {
       pushQuality(qualitySlider.value);
     }
-    if (prefersH264 && !useSoftwareH264()) {
+    // Only force DXGI on explicit user start / codec path — not every auto-resume.
+    if (reason === "user" && prefersH264 && !useSoftwareH264()) {
       ensureDuplicationForH264();
     }
     pushStreamProfile();
     pushBitrate();
     desiredStreaming = true;
     lastFrameAt = 0;
+    streamStartedAt = performance.now();
+    hasRenderedFrame = false;
     lastViewerKeyframeRequestAt = 0;
     diagnostics.coalescedFrames = 0;
     firstFrameLogged = false;
     resetH264SessionState();
-    setStreamState("starting", "Starting stream");
+    resetFpsCounters();
+    const startLabel = reason === "user" || reason === "ws-open"
+      ? "Starting stream · waiting for first frame"
+      : reason === "recovery"
+        ? "Restarting stream · waiting for first frame"
+        : "Resuming stream · waiting for first frame";
+    setStreamState("starting", startLabel);
+    armFirstFrameWatch();
     if (mode === "relayed") {
       // Server replies with `webrtc_ready { whepPath }`; startWhep happens then.
       sendCmd("desktop_start", { webrtc: true });
@@ -2140,13 +2242,19 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     if (userInitiated) {
       desiredStreaming = false;
       clearStallRecovery();
+      clearFirstFrameWatch();
       stallRestartCount = 0;
+      startRetryCount = 0;
+      intentionalRestart = false;
       discardPlaybackBuffers();
     }
     adaptiveProfileRunning = false;
     adaptiveQuality.stop();
     lastFrameAt = 0;
-    setStreamState("stopping", "Stopping stream");
+    hasRenderedFrame = false;
+    streamStartedAt = 0;
+    setStreamState(userInitiated ? "stopping" : streamState === "starting" ? "starting" : "stopping",
+      userInitiated ? "Stopping stream" : "Restarting stream");
     disablePrivacyIfActive();
     sendCmd("desktop_stop", {});
     disconnectAudio();
@@ -2157,20 +2265,25 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
   function restartDesktopStream() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (streamState === "idle") {
-      startDesktopStream();
+      startDesktopStream({ reason: "user", confirmFirewall: true });
       return;
     }
     if (isRecording()) stopRecording();
-    desiredStreaming = false;
+    intentionalRestart = true;
     adaptiveProfileRunning = false;
     adaptiveQuality.stop();
     lastFrameAt = 0;
+    hasRenderedFrame = false;
+    clearFirstFrameWatch();
     setStreamState("starting", "Restarting stream");
     disablePrivacyIfActive();
     sendCmd("desktop_stop", {});
     disconnectAudio();
     stopAllWebrtc();
-    setTimeout(startDesktopStream, 150);
+    setTimeout(() => {
+      intentionalRestart = false;
+      startDesktopStream({ reason: "recovery", confirmFirewall: false });
+    }, 150);
   }
 
   function switchFullscreenTransport() {
@@ -2186,8 +2299,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
 
   startBtn.addEventListener("click", () => {
     clearStallRecovery();
+    clearFirstFrameWatch();
     stallRestartCount = 0;
-    startDesktopStream();
+    startRetryCount = 0;
+    startDesktopStream({ reason: "user", confirmFirewall: true });
   });
   stopBtn.addEventListener("click", () => stopDesktopStream({ userInitiated: true }));
   rdStateKeyframeBtn?.addEventListener("click", requestManualKeyframe);
@@ -2480,9 +2595,13 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     const now = performance.now();
     const frameGapMs = lastFrameAt ? now - lastFrameAt : 0;
     lastFrameAt = now;
+    hasRenderedFrame = true;
     clearOfflineTimer();
     clearStallRecovery();
+    clearFirstFrameWatch();
     stallRestartCount = 0;
+    startRetryCount = 0;
+    stallKeyframeAttempts = 0;
     if (
       desiredStreaming &&
       frameGapMs >= VIEWER_FRAME_GAP_KEYFRAME_MS &&
@@ -3229,30 +3348,9 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
       readyState: ws.readyState,
       clientId,
     });
-    if (qualitySlider) {
-      pushQuality(qualitySlider.value);
-    }
-    pushBitrate();
-    pushInputToggles();
-    pushCaptureToggles();
     clearOfflineTimer();
     if (desiredStreaming) {
-      setStreamState("starting", "Resuming stream");
-      if (displaySelect && displaySelect.value !== undefined) {
-        sendCmd("desktop_select_display", {
-          display: parseInt(displaySelect.value, 10) || 0,
-        });
-      }
-      pushStreamProfile();
-      const mode = getWebrtcMode();
-      if (mode === "relayed") {
-        sendCmd("desktop_start", { webrtc: true });
-      } else if (mode === "p2p") {
-        sendCmd("desktop_start", { canvasFlowControl: false });
-        startP2P();
-      } else {
-        sendCmd("desktop_start", { canvasFlowControl: true });
-      }
+      startDesktopStream({ reason: "ws-open", confirmFirewall: false });
     } else {
       setStreamState("idle", "Stopped");
     }
@@ -3303,8 +3401,20 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
     frameWatchTimer = setInterval(() => {
       const now = performance.now();
       if (desiredStreaming) {
+        if (stallRecoveryInProgress) return;
+        // Never received a first frame after start — first-frame watch handles primary recovery;
+        // this is a backstop if the timer was cleared without frames.
+        if (!hasRenderedFrame && streamStartedAt && now - streamStartedAt > FIRST_FRAME_MS + 2000) {
+          if (startRetryCount >= MAX_START_RETRIES) {
+            if (streamState !== "error") {
+              setStreamState("error", "Unable to start stream · try Stop then Start");
+            }
+            return;
+          }
+          beginStallRecovery("start");
+          return;
+        }
         if (lastFrameAt && now - lastFrameAt > STALL_MS) {
-          if (stallRecoveryInProgress) return;
           if (stallRestartCount >= MAX_STALL_RESTARTS) {
             if (streamState !== "error") {
               setStreamState("error", "No frames · retries exhausted");
@@ -3314,9 +3424,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.4";
           if (streamState !== "stalled") {
             setStreamState("stalled", "No frames");
           }
-          beginStallRecovery();
-        } else if (!lastFrameAt && streamState === "starting") {
-          setStreamState("starting", "Starting stream");
+          beginStallRecovery("stall");
         }
       } else if (streamState !== "offline" && streamState !== "disconnected" && streamState !== "error") {
         if (lastFrameAt && now - lastFrameAt < STALL_MS) {

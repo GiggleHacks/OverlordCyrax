@@ -27,16 +27,16 @@ describe("dashboard sound effects", () => {
     }
   });
 
-  test("plays sample when a client comes online", async () => {
+  test("keeps client-online sample available but does not auto-play on connect", async () => {
     const notifyClient = await publicAsset("notify-client.js");
     const sounds = await publicAsset("sounds.js");
 
-    expect(notifyClient).toContain('payload.event === "client_online"');
-    expect(notifyClient).toContain("isClientOnlineSoundEnabled()");
-    expect(notifyClient).toContain('playSoundEffect("clientOnline")');
+    expect(notifyClient).toContain('payload.event === "client_purgatory"');
+    expect(notifyClient).not.toContain('playSoundEffect("clientOnline")');
     expect(sounds).toContain("clientOnline:");
     expect(sounds).toContain("isClientOnlineSoundEnabled");
     expect(sounds).toContain("client-online.wav");
+    expect(sounds).toContain('prefEnabled(CLIENT_ONLINE_PREF_KEY, false)');
   });
 
   test("settings exposes sound category toggles and previews", async () => {

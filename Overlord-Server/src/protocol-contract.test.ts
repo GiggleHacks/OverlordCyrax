@@ -17,7 +17,7 @@ import {
 describe("generated wire protocol contract", () => {
   test("publishes the complete command catalog", () => {
     expect(WIRE_PROTOCOL_VERSION).toBe(1);
-    expect(COMMAND_TYPES.length).toBe(146);
+    expect(COMMAND_TYPES.length).toBe(149);
     expect(new Set(COMMAND_TYPES).size).toBe(COMMAND_TYPES.length);
     expect(isCommandType("desktop_start")).toBe(true);
     expect(isCommandType("virtual_window_list")).toBe(true);

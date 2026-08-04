@@ -500,9 +500,13 @@ func TestCaptureAndSend_CancelledContext(t *testing.T) {
 func TestSetFrameFlowTargetFPSScalesHighFPS(t *testing.T) {
 	t.Setenv("OVERLORD_DESKTOP_IN_FLIGHT_FRAMES", "")
 	ResetFrameSlots()
-	SetFrameFlowTargetFPS(60)
+	SetFrameFlowTargetFPS(15)
 	if got := activeFrameSlotLimit(); got != 4 {
-		t.Fatalf("expected 60 fps slot limit 4, got %d", got)
+		t.Fatalf("expected 15 fps slot limit 4, got %d", got)
+	}
+	SetFrameFlowTargetFPS(60)
+	if got := activeFrameSlotLimit(); got != 6 {
+		t.Fatalf("expected 60 fps slot limit 6, got %d", got)
 	}
 	SetFrameFlowTargetFPS(120)
 	if got := activeFrameSlotLimit(); got != 8 {

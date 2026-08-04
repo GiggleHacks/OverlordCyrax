@@ -2873,45 +2873,50 @@ async function uploadFile(file) {
   addTransferToUI(transfer);
 
   try {
-    if (PREFER_HTTP_UPLOAD_PULL) {
-      await uploadFileViaHttpPull(file, path, transfer);
-    } else if (file.size <= WS_UPLOAD_MAX_TOTAL) {
-      await uploadFileViaWsChunks(file, path, transfer);
+    // Prefer WS for small files: works on legacy agents without HTTP pull rewrite.
+    if (file.size <= WS_UPLOAD_MAX_TOTAL) {
+      try {
+        await uploadFileViaWsChunks(file, path, transfer);
+      } catch (wsErr) {
+        if (transfer.cancelled || !PREFER_HTTP_UPLOAD_PULL) throw wsErr;
+        console.warn("[filebrowser] ws upload failed, falling back to http pull", wsErr);
+        notifyToast("WebSocket upload failed; retrying through HTTP...", "warning", 3500);
+        transfer.sent = 0;
+        transfer.receivedBytes = 0;
+        transfer.receivedChunks = 0;
+        transfer.expectedChunks = 0;
+        transfer.completed = false;
+        transfer.ackedOffsets.clear();
+        transfer.pendingAcks.forEach((pending) => {
+          clearTimeout(pending.timeoutId);
+          try { pending.reject(new Error("switching upload method")); } catch {}
+        });
+        transfer.pendingAcks.clear();
+        transfer.progress = 0;
+        updateTransferProgress(transfer.id, 0, 0, transfer.total);
+        await uploadFileViaHttpPull(file, path, transfer);
+      }
     } else {
       await uploadFileViaHttpPull(file, path, transfer);
     }
     finishUpload(transfer);
   } catch (err) {
-    const canFallbackToWs = PREFER_HTTP_UPLOAD_PULL && file.size <= WS_UPLOAD_MAX_TOTAL && !transfer.cancelled;
-    if (canFallbackToWs) {
-      console.warn("[filebrowser] http upload failed, falling back to ws chunks", err);
-      notifyToast("HTTP upload failed; retrying through WebSocket...", "warning", 3500);
-      transfer.sent = 0;
-      transfer.receivedBytes = 0;
-      transfer.receivedChunks = 0;
-      transfer.expectedChunks = 0;
-      transfer.completed = false;
-      transfer.ackedOffsets.clear();
-      transfer.pendingAcks.forEach((pending) => {
-        clearTimeout(pending.timeoutId);
-        try { pending.reject(new Error("switching upload method")); } catch {}
-      });
-      transfer.pendingAcks.clear();
-      transfer.progress = 0;
-      updateTransferProgress(transfer.id, 0, 0, transfer.total);
-      try {
-        await uploadFileViaWsChunks(file, path, transfer);
-        finishUpload(transfer);
-        return;
-      } catch (fallbackErr) {
-        err = fallbackErr;
-      }
-    }
     console.error("Upload error:", err);
     removeTransfer(transferId);
     fileUploads.delete(path);
     fileUploadsById.delete(transferId);
-    alert(`Upload failed: ${err.message}`);
+    const rawMsg = err instanceof Error ? err.message : String(err || "upload failed");
+    const looksPullUrl =
+      /invalid upload url/i.test(rawMsg) ||
+      /upload fetch failed/i.test(rawMsg) ||
+      /plaintext file transfers/i.test(rawMsg);
+    let msg = rawMsg;
+    if (looksPullUrl && file.size > WS_UPLOAD_MAX_TOTAL) {
+      msg = `${rawMsg}\n\nAgent could not pull the staged file over HTTP (common on agents < 2.3.8 with a relative/unreachable pull URL). Set OVERLORD_EXTERNAL_URL to an agent-reachable https origin, or rebuild the agent to ≥ 2.3.8. Files ≤ ${Math.round(WS_UPLOAD_MAX_TOTAL / 1024 / 1024)} MB can fall back to WebSocket upload automatically.`;
+    } else if (looksPullUrl) {
+      msg = `${rawMsg}\n\nHTTP pull failed and WebSocket fallback also failed. Check agent connectivity, or rebuild the agent to ≥ 2.3.8.`;
+    }
+    alert(`Upload failed: ${msg}`);
   }
 }
 

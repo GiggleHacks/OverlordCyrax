@@ -592,6 +592,13 @@ func logCodecSupport() {
 	})
 }
 
+// ResetFrameFPS clears the rolling capture FPS window (call on stream start/stop).
+func ResetFrameFPS() {
+	fpsWindowStart.Store(0)
+	fpsCount.Store(0)
+	fpsLatest.Store(0)
+}
+
 func frameFPS(now time.Time) int {
 	start := fpsWindowStart.Load()
 	if start == 0 {
@@ -606,8 +613,9 @@ func frameFPS(now time.Time) int {
 	elapsed := time.Duration(now.UnixNano() - start)
 	if elapsed >= time.Second {
 		frames := fpsCount.Swap(0)
-		if frames > 0 {
-			fps := int(float64(frames) / elapsed.Seconds())
+		if frames > 0 && elapsed > 0 {
+			// Round rather than truncate so 14.6 reports as 15.
+			fps := int(float64(frames)/elapsed.Seconds() + 0.5)
 			fpsLatest.Store(int64(fps))
 		}
 		fpsWindowStart.Store(now.UnixNano())

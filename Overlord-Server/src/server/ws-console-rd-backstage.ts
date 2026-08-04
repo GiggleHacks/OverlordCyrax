@@ -219,6 +219,79 @@ export const rdStreamingState = new Map<string, {
 }>();
 const rdInputPending = new Map<string, { clientId: string; sentAt: number; kind: string }>();
 const RD_INPUT_TTL_MS = 10_000;
+/** Delay last-viewer cleanup so Dashboard iframe reloads can claim the stream. */
+const LAST_VIEWER_STOP_GRACE_MS = 400;
+const pendingRdStopTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingWebcamStopTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+export function cancelPendingRdStop(clientId: string) {
+  const timer = pendingRdStopTimers.get(clientId);
+  if (!timer) return;
+  clearTimeout(timer);
+  pendingRdStopTimers.delete(clientId);
+}
+
+export function cancelPendingWebcamStop(clientId: string) {
+  const timer = pendingWebcamStopTimers.get(clientId);
+  if (!timer) return;
+  clearTimeout(timer);
+  pendingWebcamStopTimers.delete(clientId);
+}
+
+function stopRdStreamNow(clientId: string) {
+  cancelPendingRdStop(clientId);
+  const target = clientManager.getClient(clientId);
+  sendDesktopCommand(target, "desktop_stop", {});
+  sendDesktopCommand(target, "webrtc_stop", { kind: "desktop" });
+  stopRemoteDesktopRecording(clientId, "desktop stopped");
+  rdBackpressureKeyframeAt.delete(clientId);
+  rdKeyframeRequestedAt.delete(clientId);
+  const state = rdStreamingState.get(clientId) || defaultRdStreamingState();
+  state.isStreaming = false;
+  state.startedAt = 0;
+  state.lastFrameAt = 0;
+  rdStreamingState.set(clientId, state);
+  logger.debug(`[rd] stopped streaming for client ${clientId}`);
+}
+
+function stopWebcamStreamNow(clientId: string) {
+  cancelPendingWebcamStop(clientId);
+  const target = clientManager.getClient(clientId);
+  sendDesktopCommand(target, "webcam_stop", {});
+  sendDesktopCommand(target, "webrtc_stop", { kind: "webcam" });
+  const state = webcamStreamingState.get(clientId) || defaultWebcamStreamingState();
+  state.isStreaming = false;
+  state.startedAt = 0;
+  state.lastFrameAt = 0;
+  webcamStreamingState.set(clientId, state);
+  logger.debug(`[webcam] stopped streaming for client ${clientId}`);
+}
+
+/** Schedule agent stop after last RD viewer leaves (cancelled by a new start). */
+export function scheduleRdStopAfterLastViewer(clientId: string) {
+  cancelPendingRdStop(clientId);
+  if (sessionManager.hasRdSessionsForClient(clientId)) return;
+  const timer = setTimeout(() => {
+    pendingRdStopTimers.delete(clientId);
+    if (sessionManager.hasRdSessionsForClient(clientId)) return;
+    stopRdStreamNow(clientId);
+    rdStreamingState.delete(clientId);
+  }, LAST_VIEWER_STOP_GRACE_MS);
+  pendingRdStopTimers.set(clientId, timer);
+}
+
+/** Schedule agent stop after last webcam viewer leaves (cancelled by a new start). */
+export function scheduleWebcamStopAfterLastViewer(clientId: string) {
+  cancelPendingWebcamStop(clientId);
+  if (sessionManager.hasWebcamSessionsForClient(clientId)) return;
+  const timer = setTimeout(() => {
+    pendingWebcamStopTimers.delete(clientId);
+    if (sessionManager.hasWebcamSessionsForClient(clientId)) return;
+    stopWebcamStreamNow(clientId);
+    webcamStreamingState.delete(clientId);
+  }, LAST_VIEWER_STOP_GRACE_MS);
+  pendingWebcamStopTimers.set(clientId, timer);
+}
 
 function pruneRdInputPending(now = Date.now()) {
   for (const [id, pending] of rdInputPending.entries()) {
@@ -247,8 +320,19 @@ function defaultRdStreamingState() {
 }
 
 function clampDesktopFps(value: unknown): number {
-  const fps = Math.floor(Number(value) || 30);
+  const fps = Math.floor(Number(value) || 15);
   return Math.max(1, Math.min(240, fps));
+}
+
+function applyDesktopStreamProfile(target: any, state: ReturnType<typeof defaultRdStreamingState>) {
+  const maxHeight = Math.max(0, Math.floor(Number(state.maxHeight) || 480));
+  const fps = clampDesktopFps(state.maxFps);
+  sendDesktopCommand(target, "desktop_set_profile", { maxHeight, fps });
+  sendDesktopCommand(target, "desktop_set_fps", { fps });
+  sendDesktopCommand(target, "desktop_set_bitrate", {
+    bitrateMbps: state.bitrateMbps || 0,
+    adaptive: state.bitrateAdaptive,
+  });
 }
 
 function recordRdInput(commandId: string, clientId: string, kind: string) {
@@ -435,12 +519,21 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
         display: Number((payload as any).display) || 0,
       });
       break;
-    case "desktop_start":
+    case "desktop_start": {
+      cancelPendingRdStop(clientId);
       (ws.data as any).rdCanvasFlowControl = (payload as any).canvasFlowControl === true && (payload as any).webrtc !== true;
       (ws.data as any).rdCanvasBackpressure = false;
       releaseCanvasFrameAck(clientId);
       logger.debug(`[rd-debug] desktop_start requested client=${clientId} session=${ws.data.sessionId || ""} state=${JSON.stringify(state)} viewers=${sessionManager.getRdSessionsForClient(clientId).length} webrtc=${(payload as any).webrtc === true}`);
-      if (!state.isStreaming) {
+      const now = Date.now();
+      const lastFrameAgeMs = state.lastFrameAt ? now - state.lastFrameAt : Number.POSITIVE_INFINITY;
+      const startAgeMs = state.startedAt ? now - state.startedAt : Number.POSITIVE_INFINITY;
+      const staleWithoutFrames = state.isStreaming && state.lastFrameAt === 0 && startAgeMs >= 3000;
+      const stalled = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs >= 5000;
+      const needsStart = !state.isStreaming || staleWithoutFrames || stalled;
+      const framesFresh = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs <= 3000;
+
+      if (needsStart) {
         const targetOs = String(target.os || "").toLowerCase();
         if ((targetOs.includes("darwin") || targetOs.includes("mac")) && target.permissions) {
           const missing: string[] = [];
@@ -476,36 +569,38 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
             whepPath: `/api/webrtc/${streamPath}/whep`,
           });
         }
+        if (state.isStreaming) {
+          logger.info(`[rd-debug] desktop_start reasserting stale stream client=${clientId} lastFrameAgeMs=${Number.isFinite(lastFrameAgeMs) ? lastFrameAgeMs : -1} startAgeMs=${Number.isFinite(startAgeMs) ? startAgeMs : -1} state=${JSON.stringify(state)} viewers=${sessionManager.getRdSessionsForClient(clientId).length}`);
+        }
         safeSendViewer(ws, { type: "status", status: "starting" });
-        sendDesktopCommand(target, "desktop_set_fps", { fps: clampDesktopFps(state.maxFps) });
-        sendDesktopCommand(target, "desktop_set_bitrate", { bitrateMbps: state.bitrateMbps || 0, adaptive: state.bitrateAdaptive });
+        applyDesktopStreamProfile(target, state);
         sendDesktopCommand(target, "desktop_start", {});
         state.isStreaming = true;
-        state.startedAt = Date.now();
+        state.startedAt = now;
+        state.lastFrameAt = 0;
         rdStreamingState.set(clientId, state);
         logger.debug(`[rd-debug] desktop_start forwarded client=${clientId} nextState=${JSON.stringify(state)} webrtc=${(payload as any).webrtc === true}`);
       } else {
-        const lastFrameAgeMs = state.lastFrameAt ? Date.now() - state.lastFrameAt : Number.POSITIVE_INFINITY;
-        const startAgeMs = state.startedAt ? Date.now() - state.startedAt : Number.POSITIVE_INFINITY;
-        if (lastFrameAgeMs > 3000 && startAgeMs > 3000) {
-          logger.info(`[rd-debug] desktop_start reasserting stale stream client=${clientId} lastFrameAgeMs=${Number.isFinite(lastFrameAgeMs) ? lastFrameAgeMs : -1} state=${JSON.stringify(state)} viewers=${sessionManager.getRdSessionsForClient(clientId).length}`);
-          sendDesktopCommand(target, "desktop_set_fps", { fps: clampDesktopFps(state.maxFps) });
-          sendDesktopCommand(target, "desktop_set_bitrate", { bitrateMbps: state.bitrateMbps || 0, adaptive: state.bitrateAdaptive });
-          sendDesktopCommand(target, "desktop_start", {});
-          safeSendViewer(ws, { type: "status", status: "starting" });
-          state.isStreaming = true;
-          state.startedAt = Date.now();
-          rdStreamingState.set(clientId, state);
-        } else {
-          logger.debug(`[rd-debug] desktop_start already active client=${clientId} lastFrameAgeMs=${lastFrameAgeMs} startAgeMs=${startAgeMs} state=${JSON.stringify(state)} viewers=${sessionManager.getRdSessionsForClient(clientId).length}`);
-          if (String(state.codec || "").toLowerCase() === "h264") {
-            sendDesktopCommand(target, "desktop_request_keyframe", {
-              reason: "viewer_start_existing_stream",
-            });
-          }
+        logger.debug(`[rd-debug] desktop_start already active client=${clientId} lastFrameAgeMs=${lastFrameAgeMs} startAgeMs=${startAgeMs} state=${JSON.stringify(state)} viewers=${sessionManager.getRdSessionsForClient(clientId).length}`);
+        if ((payload as any).webrtc === true) {
+          const streamPath = webrtcStreamPathFor(clientId, "desktop");
+          safeSendViewer(ws, {
+            type: "webrtc_ready",
+            streamPath,
+            whepPath: `/api/webrtc/${streamPath}/whep`,
+          });
+        }
+        // Always ack the joining viewer so UI is not stuck on silent "already active".
+        safeSendViewer(ws, { type: "status", status: framesFresh ? "streaming" : "starting" });
+        const codec = String(state.codec || "").toLowerCase();
+        if (codec === "h264" || codec === "hevc") {
+          sendDesktopCommand(target, "desktop_request_keyframe", {
+            reason: "viewer_start_existing_stream",
+          });
         }
       }
       break;
+    }
     case "desktop_stop": {
       (ws.data as any).rdCanvasFlowControl = false;
       (ws.data as any).rdCanvasBackpressure = false;
@@ -514,21 +609,8 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
         .filter(s => s.id !== ws.data.sessionId);
       logger.debug(`[rd-debug] desktop_stop requested client=${clientId} session=${ws.data.sessionId || ""} otherViewers=${otherViewers.length} state=${JSON.stringify(state)}`);
       if (otherViewers.length === 0) {
-        rdBackpressureKeyframeAt.delete(clientId);
-        stopRemoteDesktopRecording(clientId, "desktop stopped");
-        sendDesktopCommand(target, "desktop_stop", {});
-        sendDesktopCommand(target, "webrtc_stop", { kind: "desktop" });
-        if (state.isStreaming) {
-          state.isStreaming = false;
-          state.startedAt = 0;
-          state.lastFrameAt = 0;
-          rdStreamingState.set(clientId, state);
-          logger.debug(`[rd] stopped streaming for client ${clientId}`);
-        } else {
-          rdStreamingState.set(clientId, { ...state, isStreaming: false, startedAt: 0, lastFrameAt: 0 });
-          logger.debug(`[rd] stop requested while not streaming for client ${clientId}`);
-        }
-        rdKeyframeRequestedAt.delete(clientId);
+        // Explicit user/viewer stop: immediate (no grace).
+        stopRdStreamNow(clientId);
       } else {
         logger.debug(`[rd] ignoring desktop_stop for client ${clientId} - ${otherViewers.length} other viewer(s) still active`);
       }
@@ -1192,9 +1274,13 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
       break;
     }
     case "webcam_start": {
+      cancelPendingWebcamStop(clientId);
       const now = Date.now();
-      const staleWithoutFrames = state.isStreaming && state.lastFrameAt === 0 && now - state.startedAt >= 3000;
-      const stalled = state.isStreaming && state.lastFrameAt > 0 && now - state.lastFrameAt >= 5000;
+      const lastFrameAgeMs = state.lastFrameAt ? now - state.lastFrameAt : Number.POSITIVE_INFINITY;
+      const startAgeMs = state.startedAt ? now - state.startedAt : Number.POSITIVE_INFINITY;
+      const staleWithoutFrames = state.isStreaming && state.lastFrameAt === 0 && startAgeMs >= 3000;
+      const stalled = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs >= 5000;
+      const framesFresh = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs <= 3000;
       if (!state.isStreaming || staleWithoutFrames || stalled) {
         sendDesktopCommand(target, "webcam_set_fps", { fps: state.fps, useMax: state.useMax });
         sendDesktopCommand(target, "webcam_set_quality", { quality: state.quality, codec: state.codec, maxHeight: state.maxHeight });
@@ -1222,6 +1308,16 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
         state.startedAt = now;
         state.lastFrameAt = 0;
         webcamStreamingState.set(clientId, state);
+      } else {
+        if ((payload as any).webrtc === true) {
+          const streamPath = webrtcStreamPathFor(clientId, "webcam");
+          safeSendViewer(ws, {
+            type: "webrtc_ready",
+            streamPath,
+            whepPath: `/api/webrtc/${streamPath}/whep`,
+          });
+        }
+        safeSendViewer(ws, { type: "status", status: framesFresh ? "streaming" : "starting" });
       }
       break;
     }
@@ -1241,10 +1337,8 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
       const otherWebcamViewers = sessionManager.getWebcamSessionsForClient(clientId)
         .filter(s => s.id !== ws.data.sessionId);
       if (otherWebcamViewers.length === 0) {
-        sendDesktopCommand(target, "webcam_stop", {});
-        sendDesktopCommand(target, "webrtc_stop", { kind: "webcam" });
-        state.isStreaming = false;
-        webcamStreamingState.set(clientId, state);
+        // Explicit viewer stop: immediate (no grace).
+        stopWebcamStreamNow(clientId);
       } else {
         logger.debug(`[webcam] ignoring webcam_stop for client ${clientId} - ${otherWebcamViewers.length} other viewer(s) still active`);
       }

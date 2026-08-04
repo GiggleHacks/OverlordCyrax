@@ -218,15 +218,15 @@ describe("unified viewer UI", () => {
   test("uses capability-driven desktop profiles with safe defaults", async () => {
     const html = await publicFile("remotedesktop.html");
     const js = await publicFile("assets/remotedesktop.js");
-    expect(html).toContain('<option value="auto" selected>Auto (480p→720p @ 15 FPS)</option>');
-    expect(html).toContain('<option value="480:15">15 FPS - 480p</option>');
+    expect(html).toContain('<option value="auto">Auto (480p→720p @ 15 FPS)</option>');
+    expect(html).toContain('<option value="480:15" selected>15 FPS - 480p</option>');
     expect(html).toContain('<option value="720:15">15 FPS - 720p</option>');
     expect(html).toContain('<option value="480:30">30 FPS - 480p</option>');
     expect(html).toContain('<option value="720:30">30 FPS - 720p</option>');
     expect(html).toContain('<option value="1080:60">60 FPS - 1080p</option>');
     expect(html).toContain('id="streamProfileDetail"');
     expect(js).toContain('sendCmd("desktop_encoder_capabilities"');
-    expect(js).toContain('streamProfileSelect?.value || "auto"');
+    expect(js).toContain('streamProfileSelect?.value || "480:15"');
     expect(js).toContain("manualExtraProfiles");
     expect(js).toContain("DEFAULT_EFFICIENT_PROFILES");
     expect(js).toContain("maxHeight: 480, fps: 15");
@@ -247,24 +247,39 @@ describe("unified viewer UI", () => {
     const rd = await publicFile("assets/remotedesktop.js");
     expect(rd).toContain("function beginStallRecovery");
     expect(rd).toContain("const MAX_STALL_RESTARTS = 3");
+    expect(rd).toContain("const MAX_START_RETRIES = 3");
+    expect(rd).toContain("function armFirstFrameWatch");
     expect(rd).toContain("Retrying in ${remaining}...");
     expect(rd).toContain("function startDesktopStream");
     expect(rd).toContain("No frames · retries exhausted");
+    expect(rd).toContain("waiting for first frame");
+    expect(rd).not.toContain('setStreamState("streaming", `Streaming (${label})`)');
 
     const cam = await publicFile("assets/webcam.js");
     expect(cam).toContain("function beginStallRecovery");
     expect(cam).toContain("const MAX_STALL_RESTARTS = 3");
     expect(cam).toContain("Retrying in ${remaining}...");
     expect(cam).toContain('offline: "bg-rose-900/40 text-rose-100 border-rose-700/70"');
+    expect(cam).toContain("waiting for first frame");
 
     const viewer = await publicFile("assets/viewer.js");
     expect(viewer).toContain('offline: "Client offline"');
     expect(viewer).toContain("client.online === false");
     expect(viewer).toContain("Client offline");
     expect(viewer).toContain("is-offline");
+    expect(viewer).toContain('status === "streaming" || status === "starting" || status === "stalled"');
+    expect(viewer).not.toContain('status === "streaming" || status === "starting" || status === "stalled" || status === "connecting"');
 
     const css = await publicFile("assets/main.css");
     expect(css).toContain(".viewer-capability.is-offline");
+  });
+
+  test("defaults remote desktop bitrate to 5 Mbps", async () => {
+    const html = await publicFile("remotedesktop.html");
+    expect(html).toContain('<option value="5" selected>5 Mbps</option>');
+    expect(html).toContain('<option value="0">Auto</option>');
+    const js = await publicFile("assets/remotedesktop.js");
+    expect(js).toContain("setSelectValue(bitrateSelect, 5)");
   });
 
   test("process manager supports embedded compact mode", async () => {

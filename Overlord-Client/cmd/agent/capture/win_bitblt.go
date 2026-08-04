@@ -539,7 +539,7 @@ func effectiveScale(srcW, srcH int) float64 {
 	s := captureScale()
 	maxH := int(maxResHeight.Load())
 	if maxH == 0 {
-		maxH = 1080
+		maxH = 480
 	} else if maxH < 0 {
 		storeLastScale(s)
 		return s

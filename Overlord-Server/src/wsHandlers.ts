@@ -67,6 +67,42 @@ function sanitizeJsonField(
 }
 
 const MAX_PING_RTT_MS = 15_000;
+const MAX_PENDING_PINGS = 8;
+const PING_SAMPLE_WINDOW = 5;
+const PING_EMA_ALPHA = 0.35;
+
+function ensurePendingPings(info: ClientInfo): Map<number, number> {
+  if (!info.pendingPings) {
+    info.pendingPings = new Map<number, number>();
+  }
+  return info.pendingPings;
+}
+
+function prunePendingPings(pending: Map<number, number>, now: number) {
+  for (const [nonce, sentAt] of pending) {
+    if (now - sentAt >= MAX_PING_RTT_MS) {
+      pending.delete(nonce);
+    }
+  }
+  while (pending.size > MAX_PENDING_PINGS) {
+    const oldest = pending.keys().next().value;
+    if (oldest === undefined) break;
+    pending.delete(oldest);
+  }
+}
+
+function smoothPingMs(info: ClientInfo, sample: number): number {
+  const samples = info.pingSamples || [];
+  samples.push(sample);
+  while (samples.length > PING_SAMPLE_WINDOW) {
+    samples.shift();
+  }
+  info.pingSamples = samples;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? sample;
+  const prev = typeof info.pingMs === "number" && Number.isFinite(info.pingMs) ? info.pingMs : median;
+  return Math.round(prev * (1 - PING_EMA_ALPHA) + median * PING_EMA_ALPHA);
+}
 
 export async function handleHello(
   info: ClientInfo,
@@ -194,6 +230,9 @@ export function sendPingRequest(
     return false;
   }
   const nonce = now + Math.floor(Math.random() * 1000);
+  const pending = ensurePendingPings(info);
+  prunePendingPings(pending, now);
+  pending.set(nonce, now);
   info.lastPingSent = now;
   info.lastPingNonce = nonce;
   //console.log(`[ping] send ping to client=${info.id} reason=${reason} nonce=${nonce}`);
@@ -210,27 +249,33 @@ export function handlePong(info: ClientInfo, payload: WireMessage) {
 
   const now = Date.now();
   const maxRttMs = MAX_PING_RTT_MS;
-  const expectedNonce = info.lastPingNonce;
-  if (expectedNonce === undefined) {
-    return;
-  }
-  if (ts !== expectedNonce) {
-    return;
-  }
-  if (!info.lastPingSent) {
-    return;
+  const pending = ensurePendingPings(info);
+  prunePendingPings(pending, now);
+
+  let sentAt = pending.get(ts);
+  if (sentAt === undefined) {
+    // Backward-compatible single-nonce path used by older in-memory clients.
+    if (info.lastPingNonce !== undefined && ts === info.lastPingNonce && info.lastPingSent) {
+      sentAt = info.lastPingSent;
+    } else {
+      return;
+    }
+  } else {
+    pending.delete(ts);
   }
 
-  const rtt = now - info.lastPingSent;
+  const rtt = now - sentAt;
   const nowTs = Date.now();
 
   info.lastSeen = nowTs;
   info.lastPongAt = nowTs;
   info.online = true;
-  info.lastPingNonce = undefined;
+  if (info.lastPingNonce === ts) {
+    info.lastPingNonce = undefined;
+  }
 
   if (rtt >= 0 && rtt < maxRttMs) {
-    info.pingMs = rtt;
+    info.pingMs = smoothPingMs(info, rtt);
     if (shouldSyncClientToDb(info.id, nowTs)) {
       queueClientDbUpdate({
         id: info.id,
@@ -328,19 +373,22 @@ export function handleFrame(info: ClientInfo, payload: unknown, relayToViewers =
     } catch {}
   }
 
+  const now = Date.now();
+  // Any successfully handled live frame (including h264/hevc) keeps presence fresh.
+  if (handledByViewerRelay || safeFormat) {
+    info.lastSeen = now;
+    info.online = true;
+    if (shouldSyncClientToDb(info.id, now)) {
+      queueClientDbUpdate({ id: info.id, lastSeen: now, online: 1, isAdmin: info.isAdmin });
+    }
+  }
   if (safeFormat) {
-    const now = Date.now();
     const thumbnailRequested = isThumbnailRequested(info.id);
     if (thumbnailRequested || !hasThumbnail(info.id)) {
       setLatestFrame(info.id, bytes, safeFormat);
       void requestThumbnailRegen(info.id).then((ok) => {
         if (ok) notifyThumbnailGenerated(info.id);
       });
-    }
-    info.lastSeen = now;
-    info.online = true;
-    if (shouldSyncClientToDb(info.id, now)) {
-      queueClientDbUpdate({ id: info.id, lastSeen: now, online: 1, isAdmin: info.isAdmin });
     }
   }
   return handledByViewerRelay || safeFormat !== "";

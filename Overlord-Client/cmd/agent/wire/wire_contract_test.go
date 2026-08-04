@@ -6,7 +6,7 @@ func TestGeneratedWireContract(t *testing.T) {
 	if WireProtocolVersion != 1 {
 		t.Fatalf("unexpected wire protocol version: %d", WireProtocolVersion)
 	}
-	if len(CommandTypes) != 146 {
+	if len(CommandTypes) != 149 {
 		t.Fatalf("unexpected command count: %d", len(CommandTypes))
 	}
 	if len(CommandVersionSupport) != len(CommandTypes) {

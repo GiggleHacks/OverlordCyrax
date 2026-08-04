@@ -189,10 +189,10 @@
                   <select
                     id="streamProfileSelect"
                     class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
-                    title="Auto starts at 480p 15 FPS and upgrades to 720p 15 FPS when the connection is healthy"
+                    title="Default is fixed 480p @ 15 FPS. Auto can upgrade to 720p when healthy."
                   >
-                    <option value="auto" selected>Auto (480p→720p @ 15 FPS)</option>
-                    <option value="480:15">15 FPS - 480p</option>
+                    <option value="auto">Auto (480p→720p @ 15 FPS)</option>
+                    <option value="480:15" selected>15 FPS - 480p</option>
                     <option value="720:15">15 FPS - 720p</option>
                     <option value="480:30">30 FPS - 480p</option>
                     <option value="480:60">60 FPS - 480p</option>
@@ -210,8 +210,8 @@
                 <div class="flex items-center gap-2 mb-2">
                   <label class="text-sm text-slate-300 w-20" for="bitrateSelect">Bitrate</label>
                   <select id="bitrateSelect" class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100" title="Auto adapts bitrate from receiver feedback when the stream profile is also Auto">
-                    <option value="0" selected>Auto</option>
-                    <option value="5">5 Mbps</option>
+                    <option value="0">Auto</option>
+                    <option value="5" selected>5 Mbps</option>
                     <option value="10">10 Mbps</option>
                     <option value="15">15 Mbps</option>
                     <option value="20">20 Mbps</option>

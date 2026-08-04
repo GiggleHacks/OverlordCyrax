@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -315,6 +316,52 @@ func TestHandleCommand_UnknownCommand(t *testing.T) {
 	}
 
 	t.Logf("Unknown command handling sent %d messages", len(writer.msgs))
+}
+
+func TestDispatcher_UnknownCommandReplies(t *testing.T) {
+	writer := &testWriter{}
+	env := &rt.Env{
+		Conn: writer,
+		Cfg:  config.Config{},
+	}
+	d := NewDispatcher(env)
+
+	envelope := map[string]interface{}{
+		"type":        "command",
+		"commandType": "not_a_real_command_xyz",
+		"id":          "cmd-unknown-dispatch-1",
+		"payload":     map[string]interface{}{},
+	}
+	if err := d.Dispatch(context.Background(), envelope); err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for len(writer.msgs) < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("expected command_result for unknown command")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	var meta map[string]interface{}
+	if err := msgpack.Unmarshal(writer.msgs[0], &meta); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if meta["type"] != "command_result" {
+		t.Fatalf("expected command_result, got %v", meta["type"])
+	}
+	if meta["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", meta["ok"])
+	}
+	msg, _ := meta["message"].(string)
+	if !strings.Contains(strings.ToLower(msg), "unknown command") {
+		t.Fatalf("expected unknown command message, got %q", msg)
+	}
+	if meta["commandId"] != "cmd-unknown-dispatch-1" {
+		t.Fatalf("expected commandId preserved, got %v", meta["commandId"])
+	}
 }
 
 func TestHandleCommand_DisconnectTriggersReconnect(t *testing.T) {

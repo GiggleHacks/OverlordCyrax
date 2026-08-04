@@ -67,7 +67,7 @@ export function setSoundEffectsEnabled(value) {
 }
 
 export function isClientOnlineSoundEnabled() {
-  return prefEnabled(CLIENT_ONLINE_PREF_KEY, true);
+  return prefEnabled(CLIENT_ONLINE_PREF_KEY, false);
 }
 
 export function setClientOnlineSoundEnabled(value) {
