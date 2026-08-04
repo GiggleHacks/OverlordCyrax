@@ -4,6 +4,12 @@ import { createFileHexHashManager } from "./filebrowser-hex-hash.js";
 import { createFilePreviewModal } from "./filebrowser-preview-modal.js";
 import { createTransferPanel } from "./filebrowser-transfer-panel.js";
 import {
+  animateElement,
+  concealElement,
+  revealElement,
+  staggerChildren,
+} from "./motion.js";
+import {
   KNOWN_BINARY_EXTS,
   PREVIEW_IMAGE_EXTS,
   escapeHtml,
@@ -12,6 +18,7 @@ import {
   getHighlightLanguage,
   getParentPath,
   isPreviewable,
+  joinRemotePath,
   shouldShowParentDirectory,
 } from "./filebrowser-utils.js";
 import "./sounds.js";
@@ -52,9 +59,11 @@ const breadcrumbEl = document.getElementById("breadcrumb");
 const fileListEl = document.getElementById("file-list");
 const refreshBtn = document.getElementById("refresh-btn");
 const uploadBtn = document.getElementById("upload-btn");
+const uploadExecuteBtn = document.getElementById("upload-execute-btn");
 const mkdirBtn = document.getElementById("mkdir-btn");
 const searchBtn = document.getElementById("search-btn");
 const fileInput = document.getElementById("file-input");
+const executeFileInput = document.getElementById("execute-file-input");
 const contextMenu = document.getElementById("context-menu");
 const clientIdHeader = document.getElementById("client-id-header");
 const backBtn = document.getElementById("back-btn");
@@ -179,6 +188,7 @@ function updateStatus(state, text) {
 function enableControls(enabled) {
   refreshBtn.disabled = !enabled;
   uploadBtn.disabled = !enabled;
+  uploadExecuteBtn.disabled = !enabled;
   mkdirBtn.disabled = !enabled;
 }
 
@@ -1198,52 +1208,28 @@ function clearVirtualizedListMode() {
 
 function renderDirectoryStandard(entries, canGoUp, parentPath, disableAnimations) {
   clearVirtualizedListMode();
+  fileListEl.style.transition = "none";
+  fileListEl.style.opacity = "1";
+  fileListEl.style.transform = "translateX(0)";
+  fileListEl.innerHTML = "";
 
-  if (!disableAnimations) {
-    fileListEl.style.opacity = "0";
-    fileListEl.style.transform = "translateX(20px)";
+  if (canGoUp) fileListEl.appendChild(createParentRow(parentPath));
+
+  if (entries.length === 0 && !canGoUp) {
+    fileListEl.innerHTML =
+      '<div class="px-4 py-6 text-center text-slate-400"><i class="fa-solid fa-folder-open mr-2"></i>Empty directory</div>';
   } else {
-    fileListEl.style.transition = "none";
-    fileListEl.style.opacity = "1";
-    fileListEl.style.transform = "translateX(0)";
+    const fragment = document.createDocumentFragment();
+    entries.forEach((entry) => fragment.appendChild(createFileRow(entry)));
+    fileListEl.appendChild(fragment);
   }
 
-  const renderList = () => {
-    fileListEl.innerHTML = "";
-
-    if (canGoUp) {
-      fileListEl.appendChild(createParentRow(parentPath));
-    }
-
-    if (entries.length === 0 && !canGoUp) {
-      fileListEl.innerHTML =
-        '<div class="px-4 py-6 text-center text-slate-400"><i class="fa-solid fa-folder-open mr-2"></i>Empty directory</div>';
-      fileListEl.style.opacity = "1";
-      fileListEl.style.transform = "translateX(0)";
-      return;
-    }
-
-    entries.forEach((entry, index) => {
-      const row = createFileRow(entry);
-      if (!disableAnimations) {
-        row.style.animationDelay = `${index * 0.02}s`;
-        row.classList.add("card-animate");
-      }
-      fileListEl.appendChild(row);
-    });
-
-    if (!disableAnimations) {
-      fileListEl.style.transition =
-        "opacity 0.3s ease-out, transform 0.3s ease-out";
-      fileListEl.style.opacity = "1";
-      fileListEl.style.transform = "translateX(0)";
-    }
-  };
-
-  if (disableAnimations) {
-    renderList();
-  } else {
-    setTimeout(renderList, 150);
+  if (!disableAnimations) {
+    animateElement(fileListEl, [
+      { opacity: 0.35, transform: "translateX(8px)" },
+      { opacity: 1, transform: "translateX(0)" },
+    ], { duration: 190 });
+    staggerChildren(fileListEl, { limit: 14, interval: 18, duration: 190, offset: 5 });
   }
 }
 
@@ -2433,6 +2419,7 @@ function handleCommandResult(msg) {
 function showContextMenu(x, y, entry) {
   contextMenu.style.left = `${x}px`;
   contextMenu.style.top = `${y}px`;
+  contextMenu.style.transformOrigin = `${x > window.innerWidth / 2 ? "right" : "left"} top`;
   contextMenu.classList.add("show");
   contextMenu.dataset.path = entry.path;
   contextMenu.dataset.isDir = entry.isDir;
@@ -2469,22 +2456,27 @@ function hideContextMenu() {
 refreshBtn.onclick = () => listFiles(currentPath);
 
 uploadBtn.onclick = () => fileInput.click();
+uploadExecuteBtn.onclick = () => executeFileInput.click();
 
 fileInput.onchange = async (e) => {
   const files = Array.from(e.target.files);
   if (files.length === 0) return;
 
-  for (const file of files) {
-    await uploadFile(file);
-  }
-
+  await uploadMultipleFiles(files);
   fileInput.value = "";
-  listFiles(currentPath);
 };
 
-async function uploadMultipleFiles(files) {
+executeFileInput.onchange = async (e) => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+
+  await uploadMultipleFiles(files, { executeAfterUpload: true });
+  executeFileInput.value = "";
+};
+
+async function uploadMultipleFiles(files, options = {}) {
   for (const file of files) {
-    await uploadFile(file);
+    await uploadFile(file, options);
   }
   listFiles(currentPath);
 }
@@ -2495,6 +2487,7 @@ function hasFileDrag(event) {
 }
 
 let dropOverlayEl = null;
+let activeDropFolderRow = null;
 
 function ensureDropOverlay() {
   if (dropOverlayEl || !fileListPanel) return dropOverlayEl;
@@ -2517,7 +2510,7 @@ function ensureDropOverlay() {
   return overlay;
 }
 
-function setDropTargetActive(active) {
+function setDropTargetActive(active, destinationPath = currentPath, folderRow = null) {
   if (!fileListPanel) return;
   const overlay = ensureDropOverlay();
   if (overlay) {
@@ -2525,14 +2518,31 @@ function setDropTargetActive(active) {
     if (active) {
       const pathEl = overlay.querySelector(".drop-target-path");
       if (pathEl) {
-        pathEl.textContent = currentPath ? `into ${currentPath}` : "";
+        pathEl.textContent = destinationPath ? `into ${destinationPath}` : "";
       }
     }
+  }
+  if (activeDropFolderRow && activeDropFolderRow !== folderRow) {
+    activeDropFolderRow.classList.remove("ring-2", "ring-emerald-400", "bg-emerald-500/10");
+  }
+  activeDropFolderRow = active && folderRow ? folderRow : null;
+  if (activeDropFolderRow) {
+    activeDropFolderRow.classList.add("ring-2", "ring-emerald-400", "bg-emerald-500/10");
   }
   fileListPanel.classList.toggle("ring-2", active);
   fileListPanel.classList.toggle("ring-blue-500", active);
   fileListPanel.classList.toggle("ring-offset-2", active);
   fileListPanel.classList.toggle("ring-offset-slate-950", active);
+}
+
+function getDropDestination(event) {
+  const folderRow = event.target instanceof Element
+    ? event.target.closest('.file-item[data-is-dir="true"]')
+    : null;
+  if (folderRow && fileListPanel.contains(folderRow)) {
+    return { path: folderRow.dataset.path || currentPath, folderRow };
+  }
+  return { path: currentPath, folderRow: null };
 }
 
 function setupDragAndDropUpload() {
@@ -2543,14 +2553,16 @@ function setupDragAndDropUpload() {
     if (!hasFileDrag(e)) return;
     e.preventDefault();
     dragDepth += 1;
-    setDropTargetActive(true);
+    const destination = getDropDestination(e);
+    setDropTargetActive(true, destination.path, destination.folderRow);
   });
 
   fileListPanel.addEventListener("dragover", (e) => {
     if (!hasFileDrag(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
-    setDropTargetActive(true);
+    const destination = getDropDestination(e);
+    setDropTargetActive(true, destination.path, destination.folderRow);
   });
 
   fileListPanel.addEventListener("dragleave", (e) => {
@@ -2565,14 +2577,50 @@ function setupDragAndDropUpload() {
   fileListPanel.addEventListener("drop", async (e) => {
     if (!hasFileDrag(e)) return;
     e.preventDefault();
+    const destination = getDropDestination(e);
     dragDepth = 0;
     setDropTargetActive(false);
 
     const files = Array.from(e.dataTransfer?.files || []);
     if (files.length === 0) return;
 
-    notifyToast(`Uploading ${files.length} file(s)...`, "info", 3000);
-    await uploadMultipleFiles(files);
+    notifyToast(`Uploading ${files.length} file(s) into ${destination.path || "."}...`, "info", 3000);
+    await uploadMultipleFiles(files, { destinationPath: destination.path });
+  });
+}
+
+function setupUploadAndExecuteDropTarget() {
+  if (!uploadExecuteBtn) return;
+
+  const setActive = (active) => {
+    uploadExecuteBtn.classList.toggle("ring-4", active);
+    uploadExecuteBtn.classList.toggle("ring-amber-300/50", active);
+    uploadExecuteBtn.classList.toggle("scale-105", active);
+  };
+
+  uploadExecuteBtn.addEventListener("dragenter", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    setActive(true);
+  });
+  uploadExecuteBtn.addEventListener("dragover", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setActive(true);
+  });
+  uploadExecuteBtn.addEventListener("dragleave", (event) => {
+    if (!hasFileDrag(event)) return;
+    setActive(false);
+  });
+  uploadExecuteBtn.addEventListener("drop", async (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    setActive(false);
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (files.length === 0) return;
+    notifyToast(`Uploading and running ${files.length} file(s)...`, "info", 3000);
+    await uploadMultipleFiles(files, { executeAfterUpload: true });
   });
 }
 
@@ -2841,8 +2889,9 @@ async function uploadFileViaWsChunks(file, path, transfer) {
   }
 }
 
-async function uploadFile(file) {
-  const path = currentPath ? `${currentPath}/${file.name}` : file.name;
+async function uploadFile(file, options = {}) {
+  const destinationPath = options.destinationPath ?? currentPath;
+  const path = joinRemotePath(destinationPath, file.name);
   const transferId = `upload-${Date.now()}-${Math.random()}`;
 
   console.log("Uploading:", path);
@@ -2900,7 +2949,36 @@ async function uploadFile(file) {
       await uploadFileViaHttpPull(file, path, transfer);
     }
     finishUpload(transfer);
+    if (options.executeAfterUpload) executeFile(path, false);
+    return path;
   } catch (err) {
+    const canFallbackToWs = PREFER_HTTP_UPLOAD_PULL && file.size <= WS_UPLOAD_MAX_TOTAL && !transfer.cancelled;
+    if (canFallbackToWs) {
+      console.warn("[filebrowser] http upload failed, falling back to ws chunks", err);
+      notifyToast("HTTP upload failed; retrying through WebSocket...", "warning", 3500);
+      transfer.sent = 0;
+      transfer.receivedBytes = 0;
+      transfer.receivedChunks = 0;
+      transfer.expectedChunks = 0;
+      transfer.completed = false;
+      transfer.ackedOffsets.clear();
+      transfer.pendingAcks.forEach((pending) => {
+        clearTimeout(pending.timeoutId);
+        try { pending.reject(new Error("switching upload method")); } catch {}
+      });
+      transfer.pendingAcks.clear();
+      transfer.progress = 0;
+      updateTransferProgress(transfer.id, 0, 0, transfer.total);
+      try {
+        await uploadFileViaWsChunks(file, path, transfer);
+        finishUpload(transfer);
+        if (options.executeAfterUpload) executeFile(path, false);
+        return path;
+      } catch (fallbackErr) {
+        err = fallbackErr;
+      }
+    }
+
     console.error("Upload error:", err);
     removeTransfer(transferId);
     fileUploads.delete(path);
@@ -2917,6 +2995,7 @@ async function uploadFile(file) {
       msg = `${rawMsg}\n\nHTTP pull failed and WebSocket fallback also failed. Check agent connectivity, or rebuild the agent to ≥ 2.3.8.`;
     }
     alert(`Upload failed: ${msg}`);
+    return null;
   }
 }
 
@@ -2961,6 +3040,7 @@ document.addEventListener("click", (e) => {
 });
 
 setupDragAndDropUpload();
+setupUploadAndExecuteDropTarget();
 updateStatus("connecting", "Connecting...");
 updateBackButton();
 
@@ -3090,14 +3170,26 @@ const {
   requestFilePeek,
 } = fileHexHashManager;
 
-function setPreviewPaneVisible(visible) {
+function setPreviewPaneVisible(visible, animate = true) {
   if (!previewPaneHost) return;
   if (visible) {
-    previewPaneHost.classList.remove("hidden");
+    previewPaneHost.classList.remove("preview-pane-user-hidden");
+    if (animate) revealElement(previewPaneHost, { duration: 220, offset: 0, scale: 0.98 });
+    else previewPaneHost.classList.remove("hidden");
     previewPaneShowBtnHost?.classList.add("hidden");
   } else {
-    previewPaneHost.classList.add("hidden");
-    previewPaneShowBtnHost?.classList.remove("hidden");
+    if (animate) {
+      concealElement(previewPaneHost, { duration: 140, offset: 0, scale: 0.98 })
+        .then((concealed) => {
+          if (!concealed) return;
+          previewPaneHost.classList.add("preview-pane-user-hidden");
+          revealElement(previewPaneShowBtnHost, { duration: 160, offset: 4 });
+        });
+    } else {
+      previewPaneHost.classList.add("hidden");
+      previewPaneHost.classList.add("preview-pane-user-hidden");
+      previewPaneShowBtnHost?.classList.remove("hidden");
+    }
   }
   try { localStorage.setItem(PREVIEW_PANE_STATE_KEY, visible ? "1" : "0"); } catch {}
 }
@@ -3107,7 +3199,7 @@ previewPaneShowBtn?.addEventListener("click", () => setPreviewPaneVisible(true))
 (function initPreviewPaneVisibility() {
   let saved = "1";
   try { saved = localStorage.getItem(PREVIEW_PANE_STATE_KEY) || "1"; } catch {}
-  setPreviewPaneVisible(saved !== "0");
+  setPreviewPaneVisible(saved !== "0", false);
 })();
 
 function clearPreviewPane() {

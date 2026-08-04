@@ -2,7 +2,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 import { checkFeatureAccess } from "./feature-gate.js";
 import { WhepClient } from "./whep.js";
 import { P2PClient } from "./webrtc-p2p.js";
-import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./shared-ui-settings.js";
+import { createSharedUiSettingsSaver, loadSharedUiSettings } from "./generated/shared-ui-settings.js";
 import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 
 const WEBCAM_JS_VERSION = "1.3.0";

@@ -153,6 +153,7 @@ const (
 	CommandFileSearch CommandType = "file_search"
 	CommandFileThumb CommandType = "file_thumb"
 	CommandFileUpload CommandType = "file_upload"
+	CommandFileUploadDesktop CommandType = "file_upload_desktop"
 	CommandFileUploadHttp CommandType = "file_upload_http"
 	CommandFileWrite CommandType = "file_write"
 	CommandFileZip CommandType = "file_zip"
@@ -371,6 +372,7 @@ var CommandTypes = [...]CommandType{
 	CommandFileSearch,
 	CommandFileThumb,
 	CommandFileUpload,
+	CommandFileUploadDesktop,
 	CommandFileUploadHttp,
 	CommandFileWrite,
 	CommandFileZip,
@@ -528,6 +530,7 @@ var CommandVersionSupport = map[CommandType]CommandVersionRange{
 	CommandFileSearch: {Min: 1, Max: 1},
 	CommandFileThumb: {Min: 1, Max: 1},
 	CommandFileUpload: {Min: 1, Max: 1},
+	CommandFileUploadDesktop: {Min: 1, Max: 1},
 	CommandFileUploadHttp: {Min: 1, Max: 1},
 	CommandFileWrite: {Min: 1, Max: 1},
 	CommandFileZip: {Min: 1, Max: 1},

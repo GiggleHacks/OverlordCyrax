@@ -22,6 +22,18 @@ import {
 } from "./sounds.js";
 import { escapeHtml, formatBytes as formatSharedBytes, formatDate as formatSharedDate } from "./format.js";
 import { getCertificateTrustGuide } from "./cert-banner.js";
+import {
+  isEasterEggEnabled,
+  setEasterEggEnabled,
+  showEnabledEasterEgg,
+} from "./easter-egg.js";
+import {
+  animateElement,
+  animateTextChange,
+  concealElement,
+  emphasizeElement,
+  revealElement,
+} from "./motion.js";
 
 const PREF_REFRESH_KEY = "overlord_refresh_interval_seconds";
 const NAV_MODE_KEY = "sb_mode";
@@ -61,6 +73,8 @@ const prefSoundErrorInput = document.getElementById("pref-sound-error");
 const prefSoundClickInput = document.getElementById("pref-sound-click");
 const prefClientOnlineSoundInput = document.getElementById("pref-client-online-sound");
 const prefRefreshSecondsInput = document.getElementById("pref-refresh-seconds");
+const easterEggEnabledInput = document.getElementById("easter-egg-enabled");
+const easterEggStatus = document.getElementById("easter-egg-status");
 
 const inputArchiveUserForm = document.getElementById("input-archive-user-form");
 const inputArchiveMyEnabledInput = document.getElementById("input-archive-my-enabled");
@@ -204,6 +218,7 @@ function showMessage(text, type = "ok") {
   } else {
     messageEl.classList.add("text-emerald-200", "border-emerald-700", "bg-emerald-900/30");
   }
+  animateTextChange(messageEl);
 }
 
 function formatDate(timestamp) {
@@ -484,7 +499,11 @@ function applyTlsForm() {
 }
 
 tlsTrustHelpBtn?.addEventListener("click", () => {
-  tlsTrustInstructions?.classList.toggle("hidden");
+  if (tlsTrustInstructions?.classList.contains("hidden")) {
+    revealElement(tlsTrustInstructions, { duration: 200, offset: 5 });
+  } else {
+    concealElement(tlsTrustInstructions, { duration: 120, offset: -3 });
+  }
 });
 
 async function loadActiveTlsCertificate() {
@@ -695,6 +714,38 @@ function loadPrefs() {
   }
 }
 
+function initEasterEggPreference() {
+  if (!easterEggEnabledInput) return;
+  easterEggEnabledInput.checked = isEasterEggEnabled();
+  easterEggEnabledInput.addEventListener("change", async () => {
+    const enabled = easterEggEnabledInput.checked;
+    setEasterEggEnabled(enabled);
+    if (!easterEggStatus) return;
+
+    if (!enabled) {
+      easterEggStatus.textContent = "Disabled. The image will not be requested.";
+      easterEggStatus.className = "text-xs text-slate-500";
+      return;
+    }
+
+    easterEggEnabledInput.disabled = true;
+    easterEggStatus.textContent = "Loading the easter egg…";
+    easterEggStatus.className = "text-xs text-violet-300";
+    try {
+      await showEnabledEasterEgg({ force: true });
+      easterEggStatus.textContent = "Enabled and shown in the browser console.";
+      easterEggStatus.className = "text-xs text-emerald-400";
+    } catch (error) {
+      setEasterEggEnabled(false);
+      easterEggEnabledInput.checked = false;
+      easterEggStatus.textContent = `Could not load the easter egg: ${error.message}`;
+      easterEggStatus.className = "text-xs text-rose-400";
+    } finally {
+      easterEggEnabledInput.disabled = false;
+    }
+  });
+}
+
 async function loadCurrentUser() {
   const res = await fetch("/api/auth/me", { credentials: "include" });
   if (!res.ok) {
@@ -792,7 +843,7 @@ async function startMfaSetup() {
     if (mfaQrCode) mfaQrCode.innerHTML = data.qrSvg || "";
     if (mfaSecretText) mfaSecretText.textContent = data.secret || "";
     if (mfaOtpauthLink) mfaOtpauthLink.href = data.otpauthUrl || "#";
-    if (mfaSetupPanel) mfaSetupPanel.classList.remove("hidden");
+    revealElement(mfaSetupPanel, { duration: 240, offset: 8 });
     if (mfaEnableCodeInput) mfaEnableCodeInput.focus();
   } catch {
     showMfaMessage("Network error while starting MFA setup.", "error");
@@ -813,7 +864,7 @@ async function enableMfa() {
       showMfaMessage(data.error || "Failed to enable MFA.", "error");
       return;
     }
-    if (mfaSetupPanel) mfaSetupPanel.classList.add("hidden");
+    concealElement(mfaSetupPanel, { duration: 130, offset: -4 });
     if (mfaEnableCodeInput) mfaEnableCodeInput.value = "";
     showMfaMessage("MFA enabled.");
     await loadMfaStatus();
@@ -1414,9 +1465,18 @@ function initSettingsSidebar() {
   }
   if (sectionMap.size === 0) return;
 
+  let activeLink = null;
   function setActive(link) {
+    if (link === activeLink) return;
+    activeLink = link;
     links.forEach((l) => l.classList.remove("active"));
-    if (link) link.classList.add("active");
+    if (link) {
+      link.classList.add("active");
+      animateElement(link, [
+        { transform: "translateX(-2px)", opacity: 0.8 },
+        { transform: "translateX(0)", opacity: 1 },
+      ], { duration: 180 });
+    }
   }
 
   function isAtPageBottom() {
@@ -1439,6 +1499,7 @@ function initSettingsSidebar() {
     updateSettingsScrollOffset();
     _clickLockUntil = Date.now() + 1200;
     setActive(link);
+    emphasizeElement(target, "rgba(56, 189, 248, 0.18)");
     target.scrollIntoView({ behavior: "smooth", block: "start" });
     history.replaceState(null, "", `#${id}`);
   });
@@ -2983,6 +3044,7 @@ async function init() {
     await loadCurrentUser();
     applyPermissionVisibility();
     loadPrefs();
+    initEasterEggPreference();
     await loadMfaStatus();
 
     if (userHas("clients:build")) {
