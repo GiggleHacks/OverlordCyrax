@@ -804,6 +804,169 @@ describe("remote execute route jobs", () => {
     }
   });
 
+  test("lists running and ready jobs for a client", async () => {
+    const auth = await createAdminToken();
+    const clientId = `rex-list-${Date.now().toString(36)}`;
+    const otherId = `rex-list-other-${Date.now().toString(36)}`;
+    const deps = makeDeps({ execTimeoutMs: 2_000 });
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      os: "windows",
+      version: "2.6.11",
+      ws: {
+        send(raw: Uint8Array) {
+          const msg = decodeMessage(raw) as any;
+          queueMicrotask(() => {
+            if (msg.commandType === "file_upload_http") {
+              deps.pendingCommandReplies.get(msg.id)?.resolve({ ok: true });
+            } else if (msg.commandType === "silent_exec") {
+              deps.pendingCommandReplies.get(msg.id)?.resolve({ ok: true });
+            }
+          });
+        },
+      },
+    });
+    clientManager.addClient(otherId, {
+      id: otherId,
+      lastSeen: Date.now(),
+      role: "client",
+      os: "windows",
+      version: "2.6.11",
+      ws: {
+        send(raw: Uint8Array) {
+          const msg = decodeMessage(raw) as any;
+          queueMicrotask(() => {
+            if (msg.commandType === "file_upload_http") {
+              deps.pendingCommandReplies.get(msg.id)?.resolve({ ok: true });
+            }
+          });
+        },
+      },
+    });
+
+    try {
+      const emptyUrl = new URL(
+        `https://operator.example/api/clients/${encodeURIComponent(clientId)}/remote-execute`,
+      );
+      const emptyRes = await handleRemoteExecuteRoutes(
+        new Request(emptyUrl, { headers: { Authorization: `Bearer ${auth.token}` } }),
+        emptyUrl,
+        mockServer,
+        deps as any,
+      );
+      expect(emptyRes).not.toBeNull();
+      expect(emptyRes!.status).toBe(200);
+      const emptyBody = await emptyRes!.json();
+      expect(emptyBody.ok).toBe(true);
+      expect(emptyBody.jobs).toEqual([]);
+
+      const { req, url } = makePostRequest(clientId, auth.token, makePayload("a.bin"), {
+        mode: "upload_only",
+      });
+      const postRes = await handleRemoteExecuteRoutes(req, url, mockServer, deps as any);
+      const started = (await postRes!.json()) as any;
+      await waitForStatus(clientId, started.jobId, auth.token, "ready", deps);
+
+      const { req: secondReq, url: secondUrl } = makePostRequest(
+        clientId,
+        auth.token,
+        makePayload("c.bin"),
+        { mode: "upload_only" },
+      );
+      const secondPost = await handleRemoteExecuteRoutes(secondReq, secondUrl, mockServer, deps as any);
+      const secondStarted = (await secondPost!.json()) as any;
+      await waitForStatus(clientId, secondStarted.jobId, auth.token, "ready", deps);
+
+      const { req: otherReq, url: otherUrl } = makePostRequest(
+        otherId,
+        auth.token,
+        makePayload("b.bin"),
+        { mode: "upload_only" },
+      );
+      await handleRemoteExecuteRoutes(otherReq, otherUrl, mockServer, deps as any);
+
+      const listRes = await handleRemoteExecuteRoutes(
+        new Request(emptyUrl, { headers: { Authorization: `Bearer ${auth.token}` } }),
+        emptyUrl,
+        mockServer,
+        deps as any,
+      );
+      const listBody = await listRes!.json();
+      expect(listBody.ok).toBe(true);
+      expect(Array.isArray(listBody.jobs)).toBe(true);
+      expect(listBody.jobs.length).toBe(2);
+      const ids = listBody.jobs.map((j: any) => j.jobId).sort();
+      expect(ids).toEqual([started.jobId, secondStarted.jobId].sort());
+      expect(listBody.jobs.every((j: any) => j.status === "ready" && j.canExecute)).toBe(true);
+    } finally {
+      clientManager.deleteClient(clientId);
+      clientManager.deleteClient(otherId);
+      expect(deleteUser(auth.userId).success).toBe(true);
+    }
+  });
+
+  test("upload_and_run exec failure keeps job ready when transfer completed", async () => {
+    const auth = await createAdminToken();
+    const clientId = `rex-keep-ready-${Date.now().toString(36)}`;
+    const deps = makeDeps({ execTimeoutMs: 2_000, scriptTimeoutMs: 500 });
+
+    clientManager.addClient(clientId, {
+      id: clientId,
+      lastSeen: Date.now(),
+      role: "client",
+      os: "windows",
+      version: "2.6.11",
+      ws: {
+        send(raw: Uint8Array) {
+          const msg = decodeMessage(raw) as any;
+          queueMicrotask(() => {
+            if (msg.commandType === "file_upload_http") {
+              deps.pendingCommandReplies.get(msg.id)?.resolve({ ok: true });
+            } else if (msg.commandType === "silent_exec") {
+              deps.pendingCommandReplies.get(msg.id)?.resolve({
+                ok: false,
+                message: "access denied launching payload",
+                code: "execute_failed",
+              });
+            }
+          });
+        },
+      },
+    });
+
+    try {
+      const { req, url } = makePostRequest(clientId, auth.token, makePayload(), {
+        mode: "upload_and_run",
+      });
+      const postRes = await handleRemoteExecuteRoutes(req, url, mockServer, deps as any);
+      const started = (await postRes!.json()) as any;
+      const ready = await waitForStatus(clientId, started.jobId, auth.token, "ready", deps);
+      expect(ready.canExecute).toBe(true);
+      expect(ready.lastError?.code).toBe("execute_failed");
+      expect(String(ready.lastError?.message || "")).toMatch(/access denied/i);
+
+      const listUrl = new URL(
+        `https://operator.example/api/clients/${encodeURIComponent(clientId)}/remote-execute`,
+      );
+      const listRes = await handleRemoteExecuteRoutes(
+        new Request(listUrl, { headers: { Authorization: `Bearer ${auth.token}` } }),
+        listUrl,
+        mockServer,
+        deps as any,
+      );
+      const listBody = await listRes!.json();
+      expect(listBody.jobs.some((j: any) => j.jobId === started.jobId && j.status === "ready")).toBe(
+        true,
+      );
+    } finally {
+      clientManager.deleteClient(clientId);
+      expect(deleteUser(auth.userId).success).toBe(true);
+    }
+  });
+
   test("launch script includes delay and path checks", () => {
     const win = buildRemoteExecuteLaunchScript("C:\\Temp\\a.exe", ["--x"], true, "windows");
     expect(win.type).toBe("powershell");

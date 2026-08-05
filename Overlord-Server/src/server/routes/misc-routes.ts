@@ -343,16 +343,7 @@ function sanitizeSharedUiSettings(scope: string, raw: unknown): Record<string, u
         "auto",
         "480:15",
         "720:15",
-        "480:30",
-        "480:60",
-        "720:30",
-        "720:60",
-        "1080:30",
-        "1080:60",
-        "1440:30",
-        "1440:60",
-        "2160:30",
-        "2160:60",
+        "1080:15",
       ]),
     );
     assignIfDefined(out, "cursor", pickBoolean(input.cursor));

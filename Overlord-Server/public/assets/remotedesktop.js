@@ -4,7 +4,10 @@ import { WhepClient } from "./whep.js";
 import { P2PClient } from "./webrtc-p2p.js";
 import {
   AdaptiveDesktopQuality,
+  ALLOWED_STREAM_PROFILE_KEYS,
   DEFAULT_EFFICIENT_PROFILES,
+  filterAllowedStreamProfiles,
+  isAllowedManualStreamProfile,
   normalizeAdaptiveProfiles,
 } from "./rd-adaptive-quality.js";
 import { createKeyboardCapture } from "./keyboard-capture.js";
@@ -14,7 +17,7 @@ import { isVideoDecoderBackpressured } from "./video-decode-backpressure.js";
 import { initSidePanel } from "./side-panel.js";
 import { createVoiceListenSession, showMicConfirmDialog } from "./voice-listen.js";
 
-const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
+const REMOTE_DESKTOP_JS_VERSION = "1.1.0";
 
 (async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
@@ -115,7 +118,6 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
   const remoteCursor = document.getElementById("remoteCursor");
   const remoteCursorImage = document.getElementById("remoteCursorImage");
   const ctx = canvas.getContext("2d");
-  const agentFps = document.getElementById("agentFps");
   const viewerFps = document.getElementById("viewerFps");
   const inputLatency = document.getElementById("inputLatency");
   const networkStats = document.getElementById("networkStats");
@@ -167,13 +169,20 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
   let pendingRecordingDownloadId = "";
   let renderCount = 0;
   let renderWindowStart = performance.now();
+  /** Last WS frame packet arrival (network liveness). */
   let lastFrameAt = 0;
+  /** Last successful canvas/video present (picture liveness). */
+  let lastPresentedAt = 0;
   let streamStartedAt = 0;
   let hasRenderedFrame = false;
   let firstFrameTimer = null;
   let startRetryCount = 0;
   let intentionalRestart = false;
   let desiredStreaming = true;
+  let decodeStallRecoveryArmed = false;
+  let canvasDecodePressureSince = 0;
+  let stallRecoveryBackoffMs = 300;
+  let lastFpsPresentAt = 0;
   let viewerScale = 65;
   let streamState = "connecting";
   let streamStatusLabel = "Connecting";
@@ -185,11 +194,17 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
   let stallRecoveryTimer = null;
   let stallRecoveryInProgress = false;
   const STALL_MS = 10000;
+  /** Packets arriving but nothing presented — decode/path freeze, not full stop/start yet. */
+  const DECODE_STALL_MS = 5000;
+  const FPS_DECAY_MS = 1250;
+  const DECODE_PRESSURE_WATCHDOG_MS = 8000;
   const MAX_STALL_RESTARTS = 3;
   const MAX_START_RETRIES = 3;
   const STALL_COUNTDOWN_SEC = 3;
   const STALL_KEYFRAME_ATTEMPTS = 2;
   const FIRST_FRAME_MS = embedded ? 8000 : 6000;
+  const STALL_RESTART_GAP_BASE_MS = 300;
+  const STALL_RESTART_GAP_MAX_MS = 4000;
   let stallKeyframeAttempts = 0;
   let frameWidth = 0;
   let frameHeight = 0;
@@ -528,6 +543,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
   const DEFAULT_STREAM_PROFILE = "480:15";
   const DEFAULT_MANUAL_PROFILE = { maxHeight: 480, fps: 15 };
 
+  function isAllowedStreamProfileKey(value) {
+    return ALLOWED_STREAM_PROFILE_KEYS.includes(String(value || ""));
+  }
+
   function setSelectValue(select, value) {
     if (!select || value === undefined || value === null) return false;
     const normalized = String(value);
@@ -545,10 +564,11 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
   function applySharedSettings(settings) {
     if (!settings || typeof settings !== "object") return;
     savedDisplay = Number.isFinite(Number(settings.display)) ? Number(settings.display) : savedDisplay;
-    savedStreamProfile = settings.streamProfile ||
+    const rawProfile = settings.streamProfile ||
       ((settings.resolution !== undefined && settings.targetFps !== undefined)
         ? `${settings.resolution}:${settings.targetFps}`
         : savedStreamProfile);
+    savedStreamProfile = isAllowedStreamProfileKey(rawProfile) ? String(rawProfile) : DEFAULT_STREAM_PROFILE;
     setSelectValue(streamProfileSelect, savedStreamProfile);
     // Missing/invalid saved bitrate → 5 Mbps default. Explicit 0 keeps Auto.
     if (settings.bitrateMbps === undefined || settings.bitrateMbps === null || !Number.isFinite(Number(settings.bitrateMbps))) {
@@ -876,18 +896,35 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
   function resetFpsCounters() {
     renderCount = 0;
     renderWindowStart = performance.now();
+    lastFpsPresentAt = 0;
     diagnostics.currentViewerFps = null;
     diagnostics.currentAgentFps = null;
-    if (agentFps) agentFps.textContent = "--";
     if (viewerFps) viewerFps.textContent = "--";
   }
 
   function updateAgentFpsDisplay(agentValue) {
-    if (agentValue === undefined || agentValue === null || !agentFps) return;
+    // Keep agent encode rate internal for adaptive quality; do not show in the toolbar.
+    if (agentValue === undefined || agentValue === null) return;
     const fps = Math.round(Number(agentValue));
     if (!Number.isFinite(fps)) return;
-    agentFps.textContent = String(fps);
     diagnostics.currentAgentFps = fps;
+  }
+
+  function setIncomingFpsDisplay(fps) {
+    const value = Math.round(Number(fps));
+    if (!Number.isFinite(value)) return;
+    diagnostics.currentViewerFps = value;
+    if (viewerFps) viewerFps.textContent = String(value);
+  }
+
+  /** Decay sticky toolbar FPS when the picture is frozen. */
+  function decayViewerFpsIfStale(now = performance.now()) {
+    if (!lastFpsPresentAt) return;
+    if (now - lastFpsPresentAt < FPS_DECAY_MS) return;
+    if (diagnostics.currentViewerFps === 0) return;
+    renderCount = 0;
+    renderWindowStart = now;
+    setIncomingFpsDisplay(0);
   }
 
   function updateFpsDisplay(agentValue) {
@@ -895,14 +932,36 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
       updateAgentFpsDisplay(agentValue);
     }
     const now = performance.now();
+    lastFpsPresentAt = now;
     renderCount += 1;
     const elapsed = now - renderWindowStart;
-    if (elapsed >= 1000 && viewerFps) {
-      const fps = Math.round((renderCount * 1000) / elapsed);
-      viewerFps.textContent = String(fps);
-      diagnostics.currentViewerFps = fps;
+    if (elapsed >= 1000) {
+      setIncomingFpsDisplay((renderCount * 1000) / elapsed);
       renderCount = 0;
       renderWindowStart = now;
+    }
+  }
+
+  function markFramePresented(agentFps) {
+    const now = performance.now();
+    lastPresentedAt = now;
+    hasRenderedFrame = true;
+    decodeStallRecoveryArmed = false;
+    clearOfflineTimer();
+    clearFirstFrameWatch();
+    clearStallRecovery();
+    // Successful presents reset full stall restart pressure.
+    stallRestartCount = 0;
+    startRetryCount = 0;
+    stallKeyframeAttempts = 0;
+    stallRecoveryBackoffMs = STALL_RESTART_GAP_BASE_MS;
+    if (streamState !== "streaming" && desiredStreaming) {
+      setStreamState("streaming", "Streaming");
+    }
+    if (agentFps !== undefined && agentFps !== null) {
+      updateFpsDisplay(agentFps);
+    } else {
+      updateFpsDisplay();
     }
   }
 
@@ -1357,7 +1416,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     if (fsHudResolution) fsHudResolution.textContent = snapshot.resolution;
     if (fsHudCodec) fsHudCodec.textContent = snapshot.codec;
     if (fsHudFps) {
-      fsHudFps.textContent = `${snapshot.fps == null ? "--" : Math.round(snapshot.fps)} → ${snapshot.viewerRate == null ? "--" : Math.round(snapshot.viewerRate)} FPS`;
+      fsHudFps.textContent = `${snapshot.viewerRate == null ? "--" : Math.round(snapshot.viewerRate)} FPS`;
     }
     if (fsHudLatency) fsHudLatency.textContent = `${msText(latencyAvg)} input`;
     if (fsHudNetwork) {
@@ -1510,7 +1569,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     diagnosticEls.Render.textContent = msText(renderMs);
     diagnosticEls.Queue.textContent = queue == null ? "managed by browser" : String(queue);
     diagnosticEls.Dropped.textContent = `${Math.round(dropped)} / ${diagnostics.coalescedFrames}`;
-    diagnosticEls.Fps.textContent = `${fps == null ? "--" : Math.round(fps)} → ${viewerRate == null ? "--" : Math.round(viewerRate)}`;
+    diagnosticEls.Fps.textContent = viewerRate == null ? "--" : String(Math.round(viewerRate));
     diagnosticEls.Input.textContent = msText(latencyAvg);
     renderFullscreenHud();
   }
@@ -1520,6 +1579,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
   networkStats?.addEventListener("click", () => setDiagnosticsVisible(true));
   try { setDiagnosticsVisible(localStorage.getItem("overlord.rd.statsHud") === "1"); } catch {}
   setInterval(() => {
+    decayViewerFpsIfStale();
+    maybeReleaseStuckDecodePressure();
     sampleCanvasAdaptiveQuality();
     renderDiagnostics();
   }, 250);
@@ -1674,6 +1735,8 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
       stallRecoveryTimer = null;
       setStreamState("starting", `Restarting stream · attempt ${attempt}/${max}`);
       intentionalRestart = true;
+      const restartGap = stallRecoveryBackoffMs;
+      stallRecoveryBackoffMs = Math.min(STALL_RESTART_GAP_MAX_MS, Math.round(stallRecoveryBackoffMs * 1.75));
       stopDesktopStream({ userInitiated: false });
       stallRecoveryTimer = setTimeout(() => {
         stallRecoveryTimer = null;
@@ -1682,7 +1745,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
         if (!desiredStreaming) return;
         if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
         startDesktopStream({ reason: "recovery", confirmFirewall: false });
-      }, 300);
+      }, restartGap);
     };
     tick();
   }
@@ -1747,7 +1810,9 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
       }
       if (desiredStreaming) return;
       lastFrameAt = 0;
+      lastPresentedAt = 0;
       hasRenderedFrame = false;
+      decodeStallRecoveryArmed = false;
       clearFirstFrameWatch();
       setStreamState("idle", "Stopped");
       return;
@@ -1926,20 +1991,14 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     }
   }
 
-  // The canvas path counts WS frames via markFrameReceived + updateFpsDisplay.
-  // WebRTC bypasses WS entirely, so we tap the <video>'s rendered-frame callback
-  // (Chrome/Edge/Firefox 132+) to feed the same counters — otherwise the
-  // frame watcher flips to "No frames" and FPS sticks at --.
+  // The canvas path counts WS packets via markFrameReceived and presents via
+  // markFramePresented. WebRTC bypasses WS FRM, so RVFC feeds both clocks.
   let webrtcRvfcHandle = 0;
-  let webrtcFpsCount = 0;
-  let webrtcFpsWindowStart = 0;
   function startWebrtcFrameTicker() {
     if (!webrtcVideo || typeof webrtcVideo.requestVideoFrameCallback !== "function") return;
     stopWebrtcFrameTicker();
-    webrtcFpsCount = 0;
-    webrtcFpsWindowStart = performance.now();
-    const tick = (now, metadata = {}) => {
-      markFrameReceived();
+    const tick = (_now, metadata = {}) => {
+      lastFrameAt = performance.now();
       if (Number.isFinite(metadata.processingDuration)) {
         diagnostics.decodeMs = smoothed(diagnostics.decodeMs, metadata.processingDuration * 1000);
       }
@@ -1948,15 +2007,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
       }
       diagnostics.width = webrtcVideo.videoWidth || diagnostics.width;
       diagnostics.height = webrtcVideo.videoHeight || diagnostics.height;
-      webrtcFpsCount += 1;
-      const elapsed = now - webrtcFpsWindowStart;
-      if (elapsed >= 1000) {
-        const fps = Math.round((webrtcFpsCount * 1000) / elapsed);
-        diagnostics.currentViewerFps = fps;
-        if (viewerFps) viewerFps.textContent = String(fps);
-        webrtcFpsCount = 0;
-        webrtcFpsWindowStart = now;
-      }
+      markFramePresented();
       webrtcRvfcHandle = webrtcVideo.requestVideoFrameCallback(tick);
     };
     webrtcRvfcHandle = webrtcVideo.requestVideoFrameCallback(tick);
@@ -2186,7 +2237,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
         sendCmd("desktop_set_profile", { ...DEFAULT_MANUAL_PROFILE, source: "auto_efficient" });
       }
       if (streamProfileDetail && !started) {
-        streamProfileDetail.textContent = "Auto starts at 480p @ 15 FPS and upgrades to 720p @ 15 FPS when the link is healthy.";
+        streamProfileDetail.textContent = "Auto starts at 480p @ 15 FPS and upgrades toward 1080p @ 15 FPS when the link is healthy.";
       }
       return;
     }
@@ -2200,8 +2251,14 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
   function sampleCanvasAdaptiveQuality() {
     if (!adaptiveProfileRunning || streamProfileSelect?.value !== "auto") return;
     if (getWebrtcMode() !== "off" && diagnostics.network?.video) return;
+    if (stallRecoveryInProgress || streamState === "stalled" || streamState === "starting") return;
+    const now = performance.now();
+    // Stale/missing present FPS is unknown — do not feed sticky 1 FPS into adaptive.
+    const presentFresh = lastFpsPresentAt && (now - lastFpsPresentAt) < FPS_DECAY_MS;
+    const viewerFps = presentFresh ? diagnostics.currentViewerFps : null;
+    if (viewerFps == null && diagnostics.currentAgentFps == null && !diagnostics.agent?.fps) return;
     adaptiveQuality.sampleCanvas({
-      viewerFps: diagnostics.currentViewerFps,
+      viewerFps,
       agentFps: diagnostics.currentAgentFps ?? diagnostics.agent?.fps,
       decodeQueue: diagnostics.decodeQueue,
       decodePressure: canvasDecodePressure,
@@ -2300,17 +2357,17 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     const selectedDisplay = Number.parseInt(displaySelect?.value || "0", 10) || 0;
     if (Number.isFinite(Number(msg.display)) && Number(msg.display) !== selectedDisplay) return;
     const previous = streamProfileSelect.value;
-    encoderProfiles = normalizeAdaptiveProfiles(msg.profiles);
+    encoderProfiles = filterAllowedStreamProfiles(msg.profiles);
     streamProfileSelect.innerHTML = "";
     const autoOption = document.createElement("option");
     autoOption.value = "auto";
-    autoOption.textContent = "Auto (480p→720p @ 15 FPS)";
-    autoOption.title = "Starts at 480p 15 FPS and upgrades to 720p 15 FPS when the connection is healthy";
+    autoOption.textContent = "Auto (480p→720p→1080p @ 15 FPS)";
+    autoOption.title = "Starts at 480p 15 FPS and upgrades toward 1080p 15 FPS when the connection is healthy";
     streamProfileSelect.appendChild(autoOption);
     for (const profile of encoderProfiles) {
-      const maxHeight = Number(profile.maxHeight);
+      const maxHeight = Number(profile.maxHeight) || Number(profile.height);
       const fps = Number(profile.fps);
-      if (!Number.isFinite(maxHeight) || !Number.isFinite(fps)) continue;
+      if (!isAllowedManualStreamProfile(maxHeight, fps)) continue;
       const option = document.createElement("option");
       option.value = `${maxHeight}:${fps}`;
       option.textContent = String(profile.label || `${fps} FPS - ${Number(profile.height) || maxHeight}p`);
@@ -2324,14 +2381,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     const manualExtraProfiles = [
       { maxHeight: 480, fps: 15, label: "15 FPS - 480p", title: "Default low-bandwidth profile" },
       { maxHeight: 720, fps: 15, label: "15 FPS - 720p", title: "Efficient HD profile" },
-      { maxHeight: 480, fps: 30, label: "30 FPS - 480p", title: "Manual low-bandwidth profile" },
-      { maxHeight: 480, fps: 60, label: "60 FPS - 480p", title: "Manual low-bandwidth profile" },
-      { maxHeight: 720, fps: 30, label: "30 FPS - 720p", title: "Manual profile" },
-      { maxHeight: 720, fps: 60, label: "60 FPS - 720p", title: "Manual profile" },
-      { maxHeight: 1440, fps: 30, label: "30 FPS - 1440p", title: "Manual high-resolution profile" },
-      { maxHeight: 1440, fps: 60, label: "60 FPS - 1440p", title: "Manual high-resolution profile" },
-      { maxHeight: 2160, fps: 30, label: "30 FPS - 2160p (4K)", title: "Manual high-resolution profile" },
-      { maxHeight: 2160, fps: 60, label: "60 FPS - 2160p (4K)", title: "Manual high-resolution profile" },
+      { maxHeight: 1080, fps: 15, label: "15 FPS - 1080p", title: "Full HD profile" },
     ];
     const existingProfiles = new Set(Array.from(streamProfileSelect.options, (option) => option.value));
     for (const profile of manualExtraProfiles) {
@@ -2343,8 +2393,11 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
       option.title = profile.title;
       streamProfileSelect.appendChild(option);
     }
-    if (!setSelectValue(streamProfileSelect, savedStreamProfile || DEFAULT_STREAM_PROFILE) &&
-        !setSelectValue(streamProfileSelect, previous) &&
+    const preferred =
+      (savedStreamProfile && isAllowedStreamProfileKey(savedStreamProfile) && savedStreamProfile) ||
+      (previous && isAllowedStreamProfileKey(previous) && previous) ||
+      DEFAULT_STREAM_PROFILE;
+    if (!setSelectValue(streamProfileSelect, preferred) &&
         !setSelectValue(streamProfileSelect, DEFAULT_STREAM_PROFILE)) {
       streamProfileSelect.value = DEFAULT_STREAM_PROFILE;
     }
@@ -2352,7 +2405,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     if (streamProfileDetail) {
       const providers = streamProfileSelect.selectedOptions[0]?.dataset?.providers || "";
       streamProfileDetail.textContent = streamProfileSelect.value === "auto"
-        ? "Auto starts at 480p @ 15 FPS and upgrades to 720p @ 15 FPS when the link is healthy."
+        ? "Auto starts at 480p @ 15 FPS and upgrades toward 1080p @ 15 FPS when the link is healthy."
         : (providers ? `Available through ${providers}.` :
           (msg.detail || (msg.probed ? "Profiles tested on this display adapter." : "Safe fallback profiles shown.")));
     }
@@ -2448,8 +2501,11 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     pushBitrate();
     desiredStreaming = true;
     lastFrameAt = 0;
+    lastPresentedAt = 0;
     streamStartedAt = performance.now();
     hasRenderedFrame = false;
+    decodeStallRecoveryArmed = false;
+    canvasDecodePressureSince = 0;
     lastViewerKeyframeRequestAt = 0;
     diagnostics.coalescedFrames = 0;
     firstFrameLogged = false;
@@ -2496,8 +2552,12 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     adaptiveProfileRunning = false;
     adaptiveQuality.stop();
     lastFrameAt = 0;
+    lastPresentedAt = 0;
     hasRenderedFrame = false;
+    decodeStallRecoveryArmed = false;
+    canvasDecodePressureSince = 0;
     streamStartedAt = 0;
+    if (userInitiated) stallRecoveryBackoffMs = STALL_RESTART_GAP_BASE_MS;
     setStreamState(userInitiated ? "stopping" : streamState === "starting" ? "starting" : "stopping",
       userInitiated ? "Stopping stream" : "Restarting stream");
     disablePrivacyIfActive();
@@ -2518,7 +2578,9 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     adaptiveProfileRunning = false;
     adaptiveQuality.stop();
     lastFrameAt = 0;
+    lastPresentedAt = 0;
     hasRenderedFrame = false;
+    decodeStallRecoveryArmed = false;
     clearFirstFrameWatch();
     setStreamState("starting", "Restarting stream");
     disablePrivacyIfActive();
@@ -2840,13 +2902,15 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     const now = performance.now();
     const frameGapMs = lastFrameAt ? now - lastFrameAt : 0;
     lastFrameAt = now;
-    hasRenderedFrame = true;
     clearOfflineTimer();
-    clearStallRecovery();
-    clearFirstFrameWatch();
-    stallRestartCount = 0;
-    startRetryCount = 0;
-    stallKeyframeAttempts = 0;
+    // Packet arrival proves the network path is alive. Do not treat it as a
+    // successful present — H.264 can deliver undecodable deltas while the
+    // canvas stays frozen. Only clear full stall recovery when presents are
+    // also recent (or we have never presented yet and are still starting).
+    const presentFresh = lastPresentedAt && (now - lastPresentedAt) < DECODE_STALL_MS;
+    if (presentFresh || (!hasRenderedFrame && streamState === "starting")) {
+      clearStallRecovery();
+    }
     if (
       desiredStreaming &&
       frameGapMs >= VIEWER_FRAME_GAP_KEYFRAME_MS &&
@@ -2857,16 +2921,58 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     }
     if (!firstFrameLogged) {
       firstFrameLogged = true;
-      rdDebug("first frame received", {
+      rdDebug("first frame packet received", {
         streamState,
         desiredStreaming,
         canvas: { width: canvas.width, height: canvas.height },
         transport: getWebrtcMode(),
       });
     }
-    if (streamState !== "streaming" && desiredStreaming) {
+    // Stay on "starting" until a frame is actually presented.
+    if (streamState !== "streaming" && desiredStreaming && hasRenderedFrame) {
       setStreamState("streaming", "Streaming");
+    } else if (desiredStreaming && streamState === "stalled" && presentFresh) {
+      setStreamState("streaming", "Streaming");
+    } else if (desiredStreaming && !hasRenderedFrame && streamState !== "starting" && streamState !== "stalled") {
+      setStreamState("starting", "Connected · waiting for first frame");
     }
+  }
+
+  function beginDecodeStallRecovery() {
+    if (!desiredStreaming || stallRecoveryInProgress || decodeStallRecoveryArmed) return;
+    if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
+    decodeStallRecoveryArmed = true;
+    if (streamState !== "stalled") {
+      setStreamState("stalled", "Frames arriving · display frozen");
+    }
+    const now = performance.now();
+    if (!lastViewerKeyframeRequestAt || now - lastViewerKeyframeRequestAt >= VIEWER_FRAME_GAP_KEYFRAME_THROTTLE_MS) {
+      lastViewerKeyframeRequestAt = now;
+      try {
+        sendCmd("desktop_request_keyframe", { reason: "viewer_decode_stall" });
+      } catch {
+        // ignore
+      }
+    }
+    // Prefer codec recovery over stop/start when packets are still flowing.
+    const codec = String(diagnostics.codec || negotiatedCodec || "").toLowerCase();
+    if (codec.includes("h264") || codec.includes("hevc")) {
+      const restarted = tryRecoverH264Stream("viewer_decode_stall");
+      if (!restarted) {
+        fallbackToJpegCodec("viewer_decode_stall");
+      }
+    }
+  }
+
+  function maybeReleaseStuckDecodePressure(now = performance.now()) {
+    if (!canvasDecodePressure || !canvasDecodePressureSince) return;
+    if (now - canvasDecodePressureSince < DECODE_PRESSURE_WATCHDOG_MS) return;
+    rdDebug("decode pressure watchdog release", {
+      heldMs: Math.round(now - canvasDecodePressureSince),
+      queue: diagnostics.decodeQueue,
+    });
+    updateCanvasDecodePressure(true);
+    beginDecodeStallRecovery();
   }
 
   function drawJpegFallback(blob, target) {
@@ -2965,7 +3071,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     }
     diagnostics.width = width;
     diagnostics.height = height;
-    updateFpsDisplay();
+    markFramePresented();
   }
 
   function queueDecodedVideoFrame(frame, timing) {
@@ -3255,6 +3361,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
     else if (canvasDecodePressure && shouldRelease) next = false;
     if (next === canvasDecodePressure) return;
     canvasDecodePressure = next;
+    canvasDecodePressureSince = next ? performance.now() : 0;
     sendCmd("desktop_decode_pressure", { active: next, queueSize });
   }
 
@@ -3279,7 +3386,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
       diagnostics.codec = "jpeg";
       await drawJpegSlice(jpegBytes, null);
       recordCanvasFrameTiming(receivedAt, decodeStartedAt);
-      updateFpsDisplay(fps);
+      markFramePresented(fps);
       updateCanvasDecodePressure(true);
       return;
     }
@@ -3340,7 +3447,10 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
         }
       }
 
-      updateFpsDisplay(fps);
+      // Keepalive empty blocks prove the socket is alive but must not fake FPS.
+      if (blockCount > 0) {
+        markFramePresented(fps);
+      }
       recordCanvasFrameTiming(receivedAt, decodeStartedAt);
       updateCanvasDecodePressure(true);
       return;
@@ -3647,7 +3757,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
       const now = performance.now();
       if (desiredStreaming) {
         if (stallRecoveryInProgress) return;
-        // Never received a first frame after start — first-frame watch handles primary recovery;
+        // Never received a first presented frame after start — first-frame watch handles primary recovery;
         // this is a backstop if the timer was cleared without frames.
         if (!hasRenderedFrame && streamStartedAt && now - streamStartedAt > FIRST_FRAME_MS + 2000) {
           if (startRetryCount >= MAX_START_RETRIES) {
@@ -3659,6 +3769,7 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
           beginStallRecovery("start");
           return;
         }
+        // Network path dead: no packets at all.
         if (lastFrameAt && now - lastFrameAt > STALL_MS) {
           if (stallRestartCount >= MAX_STALL_RESTARTS) {
             if (streamState !== "error") {
@@ -3670,6 +3781,32 @@ const REMOTE_DESKTOP_JS_VERSION = "1.0.5";
             setStreamState("stalled", "No frames");
           }
           beginStallRecovery("stall");
+          return;
+        }
+        // Packets still arriving but picture frozen — decode/path recovery first;
+        // escalate to full stop/start if presents stay dead well past decode stall.
+        if (
+          hasRenderedFrame &&
+          lastFrameAt &&
+          lastPresentedAt &&
+          now - lastFrameAt <= STALL_MS &&
+          now - lastPresentedAt > DECODE_STALL_MS
+        ) {
+          if (now - lastPresentedAt > DECODE_STALL_MS * 2) {
+            decodeStallRecoveryArmed = false;
+            if (stallRestartCount >= MAX_STALL_RESTARTS) {
+              if (streamState !== "error") {
+                setStreamState("error", "No frames · retries exhausted");
+              }
+            } else {
+              if (streamState !== "stalled") {
+                setStreamState("stalled", "Display frozen");
+              }
+              beginStallRecovery("stall");
+            }
+          } else {
+            beginDecodeStallRecovery();
+          }
         }
       } else if (streamState !== "offline" && streamState !== "disconnected" && streamState !== "error") {
         if (lastFrameAt && now - lastFrameAt < STALL_MS) {

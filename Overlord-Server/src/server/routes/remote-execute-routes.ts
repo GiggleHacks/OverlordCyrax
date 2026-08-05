@@ -183,6 +183,7 @@ const EXEC_TIMEOUT_MS = 60_000;
 const SCRIPT_TIMEOUT_MS = 30_000;
 const JOB_TTL_MS = 30 * 60_000;
 const READY_TTL_MS = 30 * 60_000;
+const TERMINAL_LIST_TTL_MS = 10 * 60_000;
 const IDLE_ACK_TIMEOUT_MS = 25_000;
 const IDLE_PROGRESS_TIMEOUT_MS = 150_000;
 const PULL_CLEANUP_GRACE_MS = 60_000;
@@ -431,6 +432,61 @@ function markJobReady(job: RemoteExecuteJob) {
   job.error = undefined;
   cleanupStagingArtifacts(job, { immediate: true });
   rescheduleJobCleanup(job, READY_TTL_MS);
+}
+
+function revertJobToReady(
+  job: RemoteExecuteJob,
+  lastError: { code: string; message: string },
+) {
+  clearIdleWatchdog(job);
+  job.status = "ready";
+  job.phase = "ready";
+  job.percent = 100;
+  job.bytesTransferred = job.totalBytes;
+  job.completedAt = undefined;
+  job.updatedAt = now();
+  job.error = undefined;
+  job.lastError = lastError;
+  cleanupStagingArtifacts(job, { immediate: true });
+  rescheduleJobCleanup(job, READY_TTL_MS);
+}
+
+/** Keep payload executable after transfer when launch fails for a recoverable reason. */
+function canKeepReadyAfterExecFailure(
+  opts: { fromReady?: boolean; transferComplete?: boolean },
+  missingFile: boolean,
+): boolean {
+  if (missingFile) return false;
+  return Boolean(opts.fromReady || opts.transferComplete);
+}
+
+function listJobsForClient(clientId: string) {
+  const cutoff = now() - TERMINAL_LIST_TTL_MS;
+  const jobs: RemoteExecuteJob[] = [];
+  for (const job of remoteExecuteJobs.values()) {
+    if (job.clientId !== clientId) continue;
+    if (job.status === "queued" || job.status === "running" || job.status === "ready") {
+      jobs.push(job);
+      continue;
+    }
+    if (
+      (job.status === "succeeded" || job.status === "failed") &&
+      (job.updatedAt || job.completedAt || 0) >= cutoff
+    ) {
+      jobs.push(job);
+    }
+  }
+  jobs.sort((a, b) => {
+    const rank = (job: RemoteExecuteJob) => {
+      if (job.status === "running" || job.status === "queued") return 0;
+      if (job.status === "ready") return 1;
+      return 2;
+    };
+    const byRank = rank(a) - rank(b);
+    if (byRank !== 0) return byRank;
+    return (b.updatedAt || 0) - (a.updatedAt || 0);
+  });
+  return jobs.map((job) => serializeJob(job));
 }
 
 function isJobStopped(job: RemoteExecuteJob): boolean {
@@ -1511,17 +1567,18 @@ async function executeOnClient(
 
   if (job.cancelled) return false;
 
+  const keepReadyOpts = {
+    fromReady: opts.fromReady,
+    transferComplete: job.transferComplete,
+  };
+
   if (!execResult.ok) {
     if (execResult.code === "send_command_failed" && /offline/i.test(String(execResult.message || ""))) {
-      if (opts.fromReady) {
-        job.status = "ready";
-        job.phase = "ready";
-        job.percent = 100;
-        job.updatedAt = now();
-        job.lastError = {
+      if (canKeepReadyAfterExecFailure(keepReadyOpts, false)) {
+        revertJobToReady(job, {
           code: "client_offline",
           message: execResult.message || "Client is offline",
-        };
+        });
         return false;
       }
     }
@@ -1552,19 +1609,17 @@ async function executeOnClient(
       if (!scriptResult.ok) {
         const scriptErr = scriptResult.error || "script_exec fallback failed";
         const combined = `silent_exec: ${execResult.message || "failed"}; script_exec fallback: ${scriptErr}`;
-        if (opts.fromReady) {
-          if (isMissingFileError(scriptErr) || isMissingFileError(String(scriptResult.result || ""))) {
+        const missing =
+          isMissingFileError(scriptErr) || isMissingFileError(String(scriptResult.result || ""));
+        if (canKeepReadyAfterExecFailure(keepReadyOpts, missing)) {
+          if (missing) {
             failJob(job, "missing_file", combined, {
               phase: "execute",
               clientMessage: scriptErr,
             }, deps);
             return false;
           }
-          job.status = "ready";
-          job.phase = "ready";
-          job.percent = 100;
-          job.updatedAt = now();
-          job.lastError = { code: "execute_failed", message: combined };
+          revertJobToReady(job, { code: "execute_failed", message: combined });
           return false;
         }
         failJob(job, "execute_failed", combined, {
@@ -1581,15 +1636,13 @@ async function executeOnClient(
       }
     } else if (execResult.code === "execute_timeout") {
       // Never second-launch on timeout (process may already be running).
+      // fromReady: revert so operator can inspect; upload_and_run timeout stays failed
+      // (process may already be running — do not offer a second launch as "ready").
       if (opts.fromReady) {
-        job.status = "ready";
-        job.phase = "ready";
-        job.percent = 100;
-        job.updatedAt = now();
-        job.lastError = {
+        revertJobToReady(job, {
           code: "execute_timeout",
           message: execResult.message || "execution start timed out on the client",
-        };
+        });
         return false;
       }
       failJob(job, "execute_timeout", execResult.message || "execution start timed out on the client", {
@@ -1599,16 +1652,13 @@ async function executeOnClient(
       return false;
     } else {
       const msg = execResult.message || "Failed to start remote execution";
-      if (opts.fromReady) {
-        if (isMissingFileError(msg)) {
+      const missing = isMissingFileError(msg);
+      if (canKeepReadyAfterExecFailure(keepReadyOpts, missing)) {
+        if (missing) {
           failJob(job, "missing_file", msg, { phase: "execute", clientMessage: msg }, deps);
           return false;
         }
-        job.status = "ready";
-        job.phase = "ready";
-        job.percent = 100;
-        job.updatedAt = now();
-        job.lastError = { code: execResult.code || "execute_failed", message: msg };
+        revertJobToReady(job, { code: execResult.code || "execute_failed", message: msg });
         return false;
       }
       failJob(job, execResult.code || "execute_failed", msg, {
@@ -1750,17 +1800,19 @@ export async function handleRemoteExecuteRoutes(
 ): Promise<Response | null> {
   const executeMatch = url.pathname.match(/^\/api\/clients\/([^/]+)\/remote-execute\/([^/]+)\/execute$/);
   const statusMatch = url.pathname.match(/^\/api\/clients\/([^/]+)\/remote-execute\/([^/]+)$/);
-  const postMatch = url.pathname.match(/^\/api\/clients\/([^/]+)\/remote-execute$/);
+  const collectionMatch = url.pathname.match(/^\/api\/clients\/([^/]+)\/remote-execute$/);
 
   if (req.method === "POST" && executeMatch) {
     // handled below after auth
-  } else if (req.method === "GET" && !statusMatch) {
-    return null;
-  } else if (req.method === "DELETE" && !statusMatch) {
-    return null;
-  } else if (req.method === "POST" && !postMatch && !executeMatch) {
-    return null;
-  } else if (req.method !== "GET" && req.method !== "POST" && req.method !== "DELETE") {
+  } else if (req.method === "GET" && statusMatch) {
+    // job status — handled below
+  } else if (req.method === "DELETE" && statusMatch) {
+    // cancel — handled below
+  } else if (req.method === "GET" && collectionMatch) {
+    // list — handled below
+  } else if (req.method === "POST" && collectionMatch) {
+    // create — handled below
+  } else {
     return null;
   }
 
@@ -1833,9 +1885,20 @@ export async function handleRemoteExecuteRoutes(
     return Response.json(serializeJob(job));
   }
 
-  if (req.method !== "POST" || !postMatch) return null;
+  if (req.method === "GET" && collectionMatch) {
+    const targetId = decodeURIComponent(collectionMatch[1]);
+    try {
+      requireClientAccess(user, targetId);
+    } catch (error) {
+      if (error instanceof Response) return error;
+      return new Response("Forbidden", { status: 403 });
+    }
+    return Response.json({ ok: true, jobs: listJobsForClient(targetId) });
+  }
 
-  const targetId = decodeURIComponent(postMatch[1]);
+  if (req.method !== "POST" || !collectionMatch) return null;
+
+  const targetId = decodeURIComponent(collectionMatch[1]);
   try {
     requireClientAccess(user, targetId);
   } catch (error) {

@@ -1,11 +1,29 @@
 const MIN_BITRATE_MBPS = 2;
 const MAX_BITRATE_MBPS = 50;
 
-/** Default Cyrax ladder: start 480p15, upgrade to 720p15 when the link is healthy. */
+/** Default Cyrax ladder: start 480p15, upgrade toward 1080p15 when the link is healthy. */
 export const DEFAULT_EFFICIENT_PROFILES = Object.freeze([
+  { maxHeight: 1080, width: 1920, height: 1080, fps: 15, label: "15 FPS - 1080p" },
   { maxHeight: 720, width: 1280, height: 720, fps: 15, label: "15 FPS - 720p" },
   { maxHeight: 480, width: 854, height: 480, fps: 15, label: "15 FPS - 480p" },
 ]);
+
+/** Operator-facing stream profiles (UI allowlist). */
+export const ALLOWED_STREAM_PROFILE_KEYS = Object.freeze(["auto", "480:15", "720:15", "1080:15"]);
+export const ALLOWED_MANUAL_STREAM_HEIGHTS = Object.freeze([480, 720, 1080]);
+export const ALLOWED_MANUAL_STREAM_FPS = 15;
+
+export function isAllowedManualStreamProfile(maxHeight, fps) {
+  const h = Math.floor(Number(maxHeight) || 0);
+  const f = Math.floor(Number(fps) || 0);
+  return ALLOWED_MANUAL_STREAM_HEIGHTS.includes(h) && f === ALLOWED_MANUAL_STREAM_FPS;
+}
+
+export function filterAllowedStreamProfiles(profiles) {
+  return normalizeAdaptiveProfiles(profiles).filter((profile) =>
+    isAllowedManualStreamProfile(profile.maxHeight || profile.height, profile.fps),
+  );
+}
 
 function finite(value) {
   const number = Number(value);

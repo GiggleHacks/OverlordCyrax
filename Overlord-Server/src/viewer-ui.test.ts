@@ -197,18 +197,24 @@ describe("unified viewer UI", () => {
   test("uses capability-driven desktop profiles with safe defaults", async () => {
     const html = await publicFile("remotedesktop.html");
     const js = await publicFile("assets/remotedesktop.js");
-    expect(html).toContain('<option value="auto">Auto (480p→720p @ 15 FPS)</option>');
+    expect(html).toContain('<option value="auto">Auto (480p→720p→1080p @ 15 FPS)</option>');
     expect(html).toContain('<option value="480:15" selected>15 FPS - 480p</option>');
     expect(html).toContain('<option value="720:15">15 FPS - 720p</option>');
-    expect(html).toContain('<option value="480:30">30 FPS - 480p</option>');
-    expect(html).toContain('<option value="720:30">30 FPS - 720p</option>');
-    expect(html).toContain('<option value="1080:60">60 FPS - 1080p</option>');
+    expect(html).toContain('<option value="1080:15">15 FPS - 1080p</option>');
+    expect(html).not.toContain('<option value="480:30">');
+    expect(html).not.toContain('<option value="1080:60">');
+    expect(html).not.toContain('<option value="1440:60">');
     expect(html).toContain('id="streamProfileDetail"');
+    expect(html).toContain('title="Incoming stream frames per second"');
+    expect(html).toContain('id="viewerFps"');
+    expect(html).not.toContain('id="agentFps"');
     expect(js).toContain('sendCmd("desktop_encoder_capabilities"');
     expect(js).toContain('streamProfileSelect?.value || "480:15"');
     expect(js).toContain("manualExtraProfiles");
+    expect(js).toContain("filterAllowedStreamProfiles");
     expect(js).toContain("DEFAULT_EFFICIENT_PROFILES");
     expect(js).toContain("maxHeight: 480, fps: 15");
+    expect(js).toContain("setIncomingFpsDisplay");
     expect(js).toContain("const frameGapMs = lastFrameAt ? now - lastFrameAt : 0");
     expect(js).toContain("lastViewerKeyframeRequestAt");
     expect(js).not.toContain("lastViewerFrameGapKeyframeAt");

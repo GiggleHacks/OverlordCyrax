@@ -1,4 +1,4 @@
-const WEBCAMS_JS_VERSION = "1.5.0";
+const WEBCAMS_JS_VERSION = "1.6.0";
 const MAX_WEBCAM_TILES = 200;
 const TILE_GAP_PX = 8;
 // Webcam feeds are landscape; score layouts by how the feed fits the cell, not raw cell area.
@@ -243,7 +243,7 @@ for (const [index, id] of ids.entries()) {
   tile.innerHTML = `<button class="tile-expand" title="Open in viewer" aria-label="Open webcam in viewer"><i class="fa-solid fa-expand"></i></button><span class="tile-client">${id.slice(0, 12)}</span><span class="tile-status"><i class="fa-solid fa-circle-notch fa-spin"></i> Connecting</span><span class="tile-countdown" hidden>30s</span><span class="tile-ping"></span><button class="tile-stop" title="Stop webcam" aria-label="Stop webcam"><i class="fa-solid fa-stop"></i></button><img class="tile-snapshot" alt="" hidden><iframe title="Webcam ${id}" src="about:blank"></iframe>`;
   tile.querySelector(".tile-stop").onclick = (event) => { event.stopPropagation(); stopTile(tile); };
   tile.querySelector(".tile-expand").onclick = () => {
-    const viewerUrl = `/viewer?clientId=${encodeURIComponent(id)}&mode=webcam&transition=1&fromArray=1`;
+    const viewerUrl = `/viewer?clientId=${encodeURIComponent(id)}&mode=dashboard2&fromArray=1`;
     const win = window.open(viewerUrl, "_blank");
     if (!win) return;
     const session = ++focusSession;

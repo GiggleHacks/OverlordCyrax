@@ -34,7 +34,7 @@ describe("webcam tile failures", () => {
 
   test("expands selected tile via popup only without competing array stream", async () => {
     const js = await publicAsset("webcams.js");
-    expect(js).toContain('const WEBCAMS_JS_VERSION = "1.5.0"');
+    expect(js).toContain('const WEBCAMS_JS_VERSION = "1.6.0"');
     expect(js).toContain("function stopAllTiles()");
     expect(js).toContain("function startTile(tile)");
     expect(js).toContain("function restoreAllTiles()");
@@ -42,7 +42,9 @@ describe("webcam tile failures", () => {
     expect(js).toContain("if (!win) return");
     expect(js).toContain("stopAllTiles()");
     expect(js).toContain("watchFocusedViewer(win, session)");
+    expect(js).toContain("mode=dashboard2");
     expect(js).toContain("fromArray=1");
+    expect(js).not.toContain("mode=webcam&transition=1&fromArray=1");
     expect(js).toContain("webcam_array_viewer_closed");
     expect(js).toContain("win.closed");
     // Expand must not leave the selected tile live in the array while the popup streams.

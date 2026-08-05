@@ -21,7 +21,7 @@ bare-metal installation is strongly recommended instead of Docker Desktop.
 
 ## Cyrax Edition (this fork)
 
-This fork tracks [vxaboveground/Overlord](https://github.com/vxaboveground/Overlord) (currently synced at upstream **3.0.7** (Cyrax **3.0.18**)) and adds a large custom layer on top. Highlights:
+This fork tracks [vxaboveground/Overlord](https://github.com/vxaboveground/Overlord) (currently synced at upstream **3.0.7** (Cyrax **3.0.21**)) and adds a large custom layer on top. Highlights:
 
 **Interface & viewing**
 - **Dashboard 2.0** — retro MDI desktop: draggable, 8-way resizable windows (Remote Desktop / Webcam / Process Manager 2.0 / File Manager 2.0), two custom layouts (click apply · right-click save/lock) + factory reset that keeps them

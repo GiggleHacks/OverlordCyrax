@@ -375,7 +375,8 @@ export function handleFrame(info: ClientInfo, payload: unknown, relayToViewers =
 
   const now = Date.now();
   // Any successfully handled live frame (including h264/hevc) keeps presence fresh.
-  if (handledByViewerRelay || safeFormat) {
+  // Screenshots (non-relay jpeg) also refresh presence below.
+  if (handledByViewerRelay || (!relayToViewers && safeFormat)) {
     info.lastSeen = now;
     info.online = true;
     if (shouldSyncClientToDb(info.id, now)) {
@@ -391,5 +392,11 @@ export function handleFrame(info: ClientInfo, payload: unknown, relayToViewers =
       });
     }
   }
-  return handledByViewerRelay || safeFormat !== "";
+  // Live streams must only frame_ack when the viewer relay accepted the frame.
+  // JPEG used to always return true via safeFormat and bypassed canvas flow-control
+  // holds and failed viewer sends. Screenshots still ack via the non-relay path.
+  if (relayToViewers) {
+    return handledByViewerRelay;
+  }
+  return safeFormat !== "";
 }

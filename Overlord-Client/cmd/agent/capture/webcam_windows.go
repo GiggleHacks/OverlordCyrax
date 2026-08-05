@@ -5,12 +5,14 @@ package capture
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
 	"image/jpeg"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cam "github.com/Kirizu-Official/windows-camera-go/camera/v1"
@@ -116,6 +118,15 @@ func activeWebcamFrameFPS(requested int, captureFPS float64) int {
 	return requested
 }
 
+// Webcam shares the agent media writer with remote desktop. Prefer skipping a
+// frame under contention over blocking long enough to stall the camera UI.
+const webcamWriteTimeout = 750 * time.Millisecond
+
+var (
+	webcamWriteSkipLogAt atomic.Int64
+	webcamWriteSkips     atomic.Uint64
+)
+
 func NowWebcam(ctx context.Context, env *rt.Env) error {
 	if ctx.Err() != nil {
 		return nil
@@ -139,8 +150,8 @@ func NowWebcam(ctx context.Context, env *rt.Env) error {
 		state.latestMu.Unlock()
 		return nil
 	}
-	frameBytes := state.latestBytes
-	state.sentSeq = state.latestSeq
+	frameBytes := append([]byte(nil), state.latestBytes...)
+	frameSeq := state.latestSeq
 	state.latestMu.Unlock()
 
 	frameFPS := activeWebcamFrameFPS(env.WebcamFPS, state.captureFPS)
@@ -205,14 +216,40 @@ func NowWebcam(ctx context.Context, env *rt.Env) error {
 		dur := time.Second / time.Duration(frameFPS)
 		if werr := webrtcpub.WriteH264(webrtcpub.KindWebcam, frameBytes, dur); werr != nil {
 			log.Printf("webrtc: write webcam h264 failed: %v", werr)
+		} else {
+			state.latestMu.Lock()
+			if frameSeq > state.sentSeq {
+				state.sentSeq = frameSeq
+			}
+			state.latestMu.Unlock()
 		}
 		return nil
 	}
 	// Do not use the stream-cancel context for socket writes; canceling an in-flight
 	// write during webcam_stop can tear down the whole websocket on some transports.
-	writeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Short timeout: under RD load, skip this frame instead of stalling the camera loop.
+	writeCtx, cancel := context.WithTimeout(context.Background(), webcamWriteTimeout)
 	defer cancel()
-	return wire.WriteMsg(writeCtx, env.Conn, frame)
+	if err := wire.WriteMsg(writeCtx, env.Conn, frame); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			n := webcamWriteSkips.Add(1)
+			now := time.Now().UnixNano()
+			prev := webcamWriteSkipLogAt.Load()
+			if prev == 0 || now-prev >= int64(2*time.Second) {
+				if webcamWriteSkipLogAt.CompareAndSwap(prev, now) {
+					log.Printf("webcam: skipped frame under writer contention (skips=%d timeout=%s)", n, webcamWriteTimeout)
+				}
+			}
+			return nil
+		}
+		return err
+	}
+	state.latestMu.Lock()
+	if frameSeq > state.sentSeq {
+		state.sentSeq = frameSeq
+	}
+	state.latestMu.Unlock()
+	return nil
 }
 
 func CleanupWebcam() {

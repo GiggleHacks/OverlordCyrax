@@ -116,6 +116,9 @@ const WEBCAM_JS_VERSION = "1.3.0";
   const MAX_STALL_RESTARTS = 3;
   const STALL_COUNTDOWN_SEC = 3;
   const MAX_START_RETRIES = embedded ? 3 : 3;
+  const STALL_RESTART_GAP_BASE_MS = 300;
+  const STALL_RESTART_GAP_MAX_MS = 4000;
+  let stallRecoveryBackoffMs = STALL_RESTART_GAP_BASE_MS;
   let webcamReconnectDelay = 1500;
 
   /* ── Remote system audio while viewing webcam ── */
@@ -632,6 +635,7 @@ const WEBCAM_JS_VERSION = "1.3.0";
       lastRenderedFrameAt = performance.now();
       startRetryCount = 0;
       stallRestartCount = 0;
+      stallRecoveryBackoffMs = STALL_RESTART_GAP_BASE_MS;
       h264ErrorCount = 0;
       clearStallRecovery();
       if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
@@ -782,6 +786,8 @@ const WEBCAM_JS_VERSION = "1.3.0";
   function restartWebcamStream() {
     intentionalRestart = true;
     send("webcam_stop");
+    const restartGap = stallRecoveryBackoffMs;
+    stallRecoveryBackoffMs = Math.min(STALL_RESTART_GAP_MAX_MS, Math.round(stallRecoveryBackoffMs * 1.75));
     stallRecoveryTimer = setTimeout(() => {
       stallRecoveryTimer = null;
       intentionalRestart = false;
@@ -789,7 +795,7 @@ const WEBCAM_JS_VERSION = "1.3.0";
       if (!desiredStreaming) return;
       if (streamState === "offline" || streamState === "disconnected" || streamState === "error") return;
       startStreaming(false);
-    }, 300);
+    }, restartGap);
   }
 
   function beginStallRecovery(kind) {
@@ -803,6 +809,18 @@ const WEBCAM_JS_VERSION = "1.3.0";
         setStreamState("error", "Unable to start camera · verify the device has a camera and it is not in use by another app");
       } else {
         setStreamState("error", "Camera stopped delivering images");
+      }
+      // One quiet auto-retry for embedded/D2 after cooldown so a brief RD spike is not terminal.
+      if (embedded && desiredStreaming) {
+        stallRecoveryTimer = setTimeout(() => {
+          stallRecoveryTimer = null;
+          if (!desiredStreaming || streamState !== "error") return;
+          startRetryCount = 0;
+          stallRestartCount = 0;
+          stallRecoveryBackoffMs = STALL_RESTART_GAP_BASE_MS;
+          setStreamState("starting", "Retrying camera…");
+          startStreaming(false);
+        }, 8000);
       }
       return;
     }
@@ -841,12 +859,17 @@ const WEBCAM_JS_VERSION = "1.3.0";
   function armRenderWatch() {
     if (renderWatchTimer) clearInterval(renderWatchTimer);
     renderWatchTimer = setInterval(() => {
+      decayViewerFpsIfStale();
       if (!desiredStreaming) return;
       if (stallRecoveryInProgress) return;
       if (streamState !== "streaming" && streamState !== "starting") return;
-      const last = Math.max(lastRenderedFrameAt, lastFrameReceivedAt);
-      if (!last) return;
-      if (performance.now() - last <= STALL_MS) return;
+      const now = performance.now();
+      // Prefer present clock for stall; packet-only keepalives must not hide a frozen picture forever.
+      const lastPresent = lastRenderedFrameAt;
+      const lastPacket = lastFrameReceivedAt;
+      if (!lastPresent && !lastPacket) return;
+      if (lastPresent && now - lastPresent <= STALL_MS) return;
+      if (!lastPresent && lastPacket && now - lastPacket <= STALL_MS) return;
       if (stallRestartCount >= MAX_STALL_RESTARTS) {
         setStreamState("error", "Camera stopped delivering images");
         return;
@@ -863,6 +886,7 @@ const WEBCAM_JS_VERSION = "1.3.0";
     lastFrameReceivedAt = lastRenderedFrameAt;
     startRetryCount = 0;
     stallRestartCount = 0;
+    stallRecoveryBackoffMs = STALL_RESTART_GAP_BASE_MS;
     clearStallRecovery();
     if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
     if (streamState !== "streaming") setStreamState("streaming", "Streaming");
@@ -878,6 +902,17 @@ const WEBCAM_JS_VERSION = "1.3.0";
       postStatusToParent(streamState);
       renderWindowStart = now;
     }
+  }
+
+  function decayViewerFpsIfStale() {
+    if (!viewerFps) return;
+    if (!lastRenderedFrameAt) return;
+    if (performance.now() - lastRenderedFrameAt < 1250) return;
+    if (viewerFps.textContent === "0") return;
+    renderCount = 0;
+    renderWindowStart = performance.now();
+    viewerFps.textContent = "0";
+    postStatusToParent(streamState);
   }
 
   async function drawJpeg(bytes) {
@@ -898,6 +933,7 @@ const WEBCAM_JS_VERSION = "1.3.0";
     lastRenderedFrameAt = performance.now();
     startRetryCount = 0;
     stallRestartCount = 0;
+    stallRecoveryBackoffMs = STALL_RESTART_GAP_BASE_MS;
     clearStallRecovery();
     if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; }
     bitmap.close();

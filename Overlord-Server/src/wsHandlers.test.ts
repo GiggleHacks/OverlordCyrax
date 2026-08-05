@@ -241,6 +241,43 @@ describe("wsHandlers frame routing", () => {
     }
   });
 
+  test("live jpeg frame_ack follows viewer relay result (not safeFormat alone)", () => {
+    const runtime = globalThis as unknown as {
+      __rdBroadcast?: (clientId: string, bytes: Uint8Array, header: unknown) => boolean;
+    };
+    let relayOk = false;
+    runtime.__rdBroadcast = () => relayOk;
+    const client = {
+      id: "jpeg-flow",
+      lastSeen: Date.now() - 60_000,
+      online: true,
+      isAdmin: false,
+    } as unknown as ClientInfo;
+    const liveJpeg = {
+      type: "frame",
+      header: { fps: 15, format: "jpeg", width: 1280, height: 720 },
+      data: new Uint8Array([1, 2, 3]),
+    };
+    try {
+      expect(shouldRelayFrameToViewers(liveJpeg)).toBe(true);
+      expect(handleFrame(client, liveJpeg, true)).toBe(false);
+
+      relayOk = true;
+      expect(handleFrame(client, liveJpeg, true)).toBe(true);
+
+      // Screenshots still succeed without relay so callers can ack storage paths.
+      const screenshot = {
+        type: "frame",
+        header: { fps: 0, format: "jpeg", width: 1280, height: 720 },
+        data: new Uint8Array([9, 9, 9]),
+      };
+      expect(shouldRelayFrameToViewers(screenshot)).toBe(false);
+      expect(handleFrame(client, screenshot, false)).toBe(true);
+    } finally {
+      delete runtime.__rdBroadcast;
+    }
+  });
+
   test("relays webcam and backstage frames even when fps is 0 (legacy agents)", () => {
     const webcamBroadcasts: unknown[] = [];
     const backstageBroadcasts: unknown[] = [];

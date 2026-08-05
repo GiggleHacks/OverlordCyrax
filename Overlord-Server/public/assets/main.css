@@ -3324,18 +3324,25 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
 }
 .sp-rex-host {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
+  inset: 0;
   z-index: 40;
   pointer-events: none;
-  max-width: min(420px, calc(100% - 24px));
+  overflow: hidden;
 }
 .sp-rex-panel {
+  position: absolute;
   pointer-events: auto;
-  width: min(400px, 100%);
+  width: min(312px, calc(100% - 16px));
   font-family: "JetBrains Mono", "Consolas", "Courier New", monospace;
   color: #e2e8f0;
   filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.55));
+}
+.sp-rex-panel.is-dragging {
+  opacity: 0.96;
+  user-select: none;
+}
+.sp-rex-panel.is-focus {
+  outline: 1px solid rgba(96, 165, 250, 0.45);
 }
 .sp-rex-chrome {
   background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
@@ -3351,13 +3358,15 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 4px 6px;
+  padding: 3px 5px;
   background: linear-gradient(90deg, #1d4ed8, #2563eb 55%, #1e40af);
   color: #f8fafc;
   border-bottom: 1px solid #0f172a;
+  cursor: move;
+  touch-action: none;
 }
 .sp-rex-title {
-  font: 700 12px/1.2 "JetBrains Mono", Consolas, monospace;
+  font: 700 11px/1.2 "JetBrains Mono", Consolas, monospace;
   letter-spacing: 0.02em;
   text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35);
 }
@@ -3365,10 +3374,10 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
   border: 1px solid #0f172a;
   background: #cbd5e1;
   color: #0f172a;
-  width: 18px;
-  height: 18px;
-  line-height: 14px;
-  font-size: 14px;
+  width: 16px;
+  height: 16px;
+  line-height: 12px;
+  font-size: 13px;
   font-weight: 700;
   padding: 0;
   cursor: pointer;
@@ -3378,17 +3387,62 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
 .sp-rex-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 7px;
+  padding: 8px 9px;
   background: #0b1220;
+}
+.sp-rex-body.is-dimmed {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.sp-rex-files {
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+.sp-rex-section-label {
+  font: 700 10px/1.2 "Inter", system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.sp-rex-section-hint {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #64748b;
+  margin-left: 4px;
+}
+.sp-rex-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(200px, 30vh);
+  overflow: auto;
+  min-height: 0;
+}
+.sp-rex-activity {
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  gap: 5px;
+}
+.sp-rex-activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sp-rex-row-progress {
+  font: 600 10px/1.3 "JetBrains Mono", Consolas, monospace;
 }
 .sp-rex-footer {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
-  padding: 0 10px 10px;
+  gap: 5px;
+  padding: 0 8px 8px;
   background: #0b1220;
+}
+.sp-rex-footer .sp-modal-btn {
+  padding: 6px 10px;
+  font-size: 11.5px;
 }
 .sp-rex-progress-label {
   font: 700 12px/1.3 "JetBrains Mono", Consolas, monospace;
@@ -3401,6 +3455,10 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
   font: 400 11px/1.35 "JetBrains Mono", Consolas, monospace;
   color: #cbd5e1;
 }
+.sp-rex-progress-wrap {
+  position: relative;
+  width: 100%;
+}
 .sp-rex-win98-track {
   display: grid;
   grid-template-columns: repeat(20, 1fr);
@@ -3411,16 +3469,167 @@ body.viewer-side-collapsed .side-panel-resize { display: none; }
   border-top-color: #0f172a;
   border-left-color: #0f172a;
   box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #94a3b8;
-  min-height: 18px;
+  min-height: 22px;
+}
+.sp-rex-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font: 700 11px/1 "JetBrains Mono", Consolas, monospace;
+  color: #f8fafc;
+  text-shadow: 0 0 3px #000, 0 1px 2px #000;
+  letter-spacing: 0.02em;
 }
 .sp-rex-seg {
   background: #1e293b;
-  min-height: 10px;
+  min-height: 12px;
   box-shadow: inset 0 0 0 1px #0f172a;
 }
 .sp-rex-seg.is-on {
   background: linear-gradient(180deg, #4ade80, #16a34a);
   box-shadow: inset 0 0 0 1px #14532d;
+}
+.sp-rex-progress-wrap.rex-tone-run .sp-rex-seg.is-on {
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+  box-shadow: inset 0 0 0 1px #1e3a8a;
+}
+.sp-rex-progress-wrap.rex-tone-warn .sp-rex-seg.is-on {
+  background: linear-gradient(180deg, #fbbf24, #d97706);
+  box-shadow: inset 0 0 0 1px #92400e;
+}
+.sp-rex-progress-wrap.rex-tone-ok .sp-rex-seg.is-on {
+  background: linear-gradient(180deg, #4ade80, #16a34a);
+  box-shadow: inset 0 0 0 1px #14532d;
+}
+.sp-rex-progress-wrap.rex-tone-err .sp-rex-seg.is-on {
+  background: linear-gradient(180deg, #f87171, #dc2626);
+  box-shadow: inset 0 0 0 1px #7f1d1d;
+}
+.sp-rex-progress-wrap.rex-tone-idle .sp-rex-seg.is-on {
+  background: linear-gradient(180deg, #94a3b8, #64748b);
+  box-shadow: inset 0 0 0 1px #334155;
+}
+.sp-rex-progress-label.rex-tone-idle,
+.sp-progress-detail.rex-tone-idle { color: #94a3b8; }
+.sp-rex-progress-label.rex-tone-run,
+.sp-progress-detail.rex-tone-run { color: #93c5fd; }
+.sp-rex-progress-label.rex-tone-warn,
+.sp-progress-detail.rex-tone-warn { color: #fde68a; }
+.sp-rex-progress-label.rex-tone-ok,
+.sp-progress-detail.rex-tone-ok { color: #86efac; }
+.sp-rex-progress-label.rex-tone-err,
+.sp-progress-detail.rex-tone-err { color: #fca5a5; }
+.sp-rex-detach-hint {
+  margin: 0;
+  font: 400 10px/1.3 "Inter", system-ui, sans-serif;
+  color: #64748b;
+}
+.sp-rex-empty-hint { margin: 0 0 4px; }
+.sp-rex-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sp-rex-file-btn {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.9);
+  color: #e2e8f0;
+  font: 600 11px/1 "Inter", system-ui, sans-serif;
+  cursor: pointer;
+}
+.sp-rex-file-btn:hover { filter: brightness(1.08); }
+.sp-rex-file-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+.sp-rex-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #cbd5e1;
+  font: 400 12px/1.2 "JetBrains Mono", Consolas, monospace;
+}
+.sp-rex-session {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  margin-bottom: 0;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.75);
+}
+.sp-rex-session.rex-tone-ok { border-color: rgba(74, 222, 128, 0.35); }
+.sp-rex-session.rex-tone-run { border-color: rgba(96, 165, 250, 0.4); }
+.sp-rex-session.rex-tone-warn { border-color: rgba(251, 191, 36, 0.4); }
+.sp-rex-session.rex-tone-err { border-color: rgba(248, 113, 113, 0.4); }
+.sp-rex-session-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sp-rex-badge {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font: 700 10px/1.2 "Inter", system-ui, sans-serif;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: rgba(148, 163, 184, 0.15);
+  color: #cbd5e1;
+}
+.sp-rex-badge.rex-tone-ok { background: rgba(22, 163, 74, 0.25); color: #86efac; }
+.sp-rex-badge.rex-tone-run { background: rgba(37, 99, 235, 0.28); color: #93c5fd; }
+.sp-rex-badge.rex-tone-warn { background: rgba(217, 119, 6, 0.28); color: #fde68a; }
+.sp-rex-badge.rex-tone-err { background: rgba(220, 38, 38, 0.28); color: #fca5a5; }
+.sp-rex-session-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 12px/1.2 "JetBrains Mono", Consolas, monospace;
+  color: #f1f5f9;
+}
+.sp-rex-session-meta {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font: 400 10px/1.2 "Inter", system-ui, sans-serif;
+  color: #94a3b8;
+}
+.sp-rex-session-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 10px/1.3 "JetBrains Mono", Consolas, monospace;
+  color: #64748b;
+}
+.sp-rex-session-err {
+  font: 400 10.5px/1.35 "JetBrains Mono", Consolas, monospace;
+  color: #fca5a5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sp-rex-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .sp-rex-error {
   margin: 0;

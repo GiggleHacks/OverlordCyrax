@@ -529,7 +529,9 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
       const lastFrameAgeMs = state.lastFrameAt ? now - state.lastFrameAt : Number.POSITIVE_INFINITY;
       const startAgeMs = state.startedAt ? now - state.startedAt : Number.POSITIVE_INFINITY;
       const staleWithoutFrames = state.isStreaming && state.lastFrameAt === 0 && startAgeMs >= 3000;
-      const stalled = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs >= 5000;
+      // Treat ≥3s without frames as stalled so join/recovery always re-commands the agent
+      // (closes the old 3–5s dead zone where viewers were told "starting" but agent was not restarted).
+      const stalled = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs >= 3000;
       const needsStart = !state.isStreaming || staleWithoutFrames || stalled;
       const framesFresh = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs <= 3000;
 
@@ -1279,7 +1281,7 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
       const lastFrameAgeMs = state.lastFrameAt ? now - state.lastFrameAt : Number.POSITIVE_INFINITY;
       const startAgeMs = state.startedAt ? now - state.startedAt : Number.POSITIVE_INFINITY;
       const staleWithoutFrames = state.isStreaming && state.lastFrameAt === 0 && startAgeMs >= 3000;
-      const stalled = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs >= 5000;
+      const stalled = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs >= 3000;
       const framesFresh = state.isStreaming && state.lastFrameAt > 0 && lastFrameAgeMs <= 3000;
       if (!state.isStreaming || staleWithoutFrames || stalled) {
         sendDesktopCommand(target, "webcam_set_fps", { fps: state.fps, useMax: state.useMax });
