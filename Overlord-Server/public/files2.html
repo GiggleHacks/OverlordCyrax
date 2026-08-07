@@ -320,6 +320,147 @@
         background: #38bdf8;
         transition: width 120ms ease;
       }
+      /* ── batch delete progress bar (PM2 twin) ── */
+      .fm2-delbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        background: #0a0e1a;
+        border-top: 1px solid #1c2440;
+        flex-shrink: 0;
+      }
+      .fm2-delbar[hidden] { display: none; }
+      .fm2-kb-track {
+        position: relative;
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 14px;
+        background: #05070d;
+        border: 1px solid;
+        border-color: #000 #2a3350 #2a3350 #000;
+      }
+      .fm2-kb-blocks {
+        display: flex;
+        gap: 1px;
+        height: 100%;
+        padding: 1px;
+        overflow: hidden;
+      }
+      .fm2-kb-blocks.is-cont {
+        display: block;
+        padding: 1px;
+      }
+      .fm2-kb-cont {
+        height: 100%;
+        width: 0%;
+        background: #2ee66b;
+        transition: width 160ms ease;
+      }
+      .fm2-kb-b { flex: 1 1 0; min-width: 2px; background: #141a2e; }
+      .fm2-kb-b.kb-cur { background: #ffd166; animation: fm2KbPulse 0.5s steps(2, end) infinite; }
+      .fm2-kb-b.kb-ok { background: #2ee66b; }
+      .fm2-kb-b.kb-fail { background: #f87171; }
+      @keyframes fm2KbPulse { 50% { opacity: 0.35; } }
+      .fm2-kb-pac {
+        position: absolute;
+        top: -1px;
+        left: 0;
+        width: 14px;
+        height: 14px;
+        pointer-events: none;
+        transition: left 200ms ease;
+        z-index: 2;
+      }
+      .fm2-kb-pac i {
+        position: absolute;
+        left: 0;
+        width: 14px;
+        height: 7px;
+        background: #ffd166;
+      }
+      .fm2-kb-pac i:first-child {
+        top: 0;
+        border-radius: 7px 7px 0 0;
+        transform-origin: center bottom;
+        animation: fm2KbPacTop 0.35s linear infinite;
+      }
+      .fm2-kb-pac i:last-child {
+        bottom: 0;
+        border-radius: 0 0 7px 7px;
+        transform-origin: center top;
+        animation: fm2KbPacBot 0.35s linear infinite;
+      }
+      .fm2-kb-pac.kb-pac-idle i { animation: none; }
+      @keyframes fm2KbPacTop { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-32deg); } }
+      @keyframes fm2KbPacBot { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(32deg); } }
+      .fm2-kb-text {
+        flex: 0 0 auto;
+        width: min(320px, 45%);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: right;
+        font-size: 10px;
+        color: #94a3b8;
+        font-variant-numeric: tabular-nums;
+      }
+      .fm2-kb-text .ok { color: #2ee66b; }
+      .fm2-kb-text .bad { color: #f87171; }
+      .fm2-summary {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        font-size: 10.5px;
+        color: #cbd5e1;
+        background: #0c1120;
+        border-bottom: 1px solid #1c2440;
+        flex-shrink: 0;
+      }
+      .fm2-summary[hidden] { display: none; }
+      .fm2-summary .ok { color: #2ee66b; }
+      .fm2-summary .bad { color: #f87171; }
+      .fm2-summary .warn { color: #facc15; }
+      .fm2-db {
+        font-size: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0 3px;
+        border-radius: 3px;
+        border: 1px solid transparent;
+        flex-shrink: 0;
+        white-space: nowrap;
+      }
+      .fm2-db i { font-size: 7px; }
+      .fm2-db-pending {
+        color: #93c5fd;
+        background: rgba(59, 130, 246, 0.14);
+        border-color: rgba(59, 130, 246, 0.35);
+      }
+      .fm2-db-deleted {
+        color: #2ee66b;
+        background: rgba(46, 230, 107, 0.12);
+        border-color: rgba(46, 230, 107, 0.35);
+      }
+      .fm2-db-inuse,
+      .fm2-db-denied,
+      .fm2-db-failed {
+        color: #f87171;
+        background: rgba(239, 68, 68, 0.12);
+        border-color: rgba(239, 68, 68, 0.4);
+      }
+      .fm2-db-notfound,
+      .fm2-db-timeout {
+        color: #facc15;
+        background: rgba(250, 204, 21, 0.12);
+        border-color: rgba(250, 204, 21, 0.35);
+      }
+      .fm2-db-offline {
+        color: #fb923c;
+        background: rgba(251, 146, 60, 0.12);
+        border-color: rgba(251, 146, 60, 0.35);
+      }
       .fm2-toast {
         position: fixed;
         right: 10px;
@@ -343,6 +484,42 @@
         outline-offset: -3px;
         background: rgba(56, 189, 248, 0.06);
       }
+      body.fm2-batch-lock .fm2-place { pointer-events: none; opacity: 0.55; }
+      body.fm2-batch-lock .fm2-path { pointer-events: none; opacity: 0.55; }
+      /* ── context menu ────────────────────────── */
+      #fm2-ctx {
+        position: fixed;
+        z-index: 60;
+        min-width: 168px;
+        padding: 3px;
+        background: #10152a;
+        border: 1px solid #27304f;
+        border-radius: 6px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+        font-size: 11px;
+      }
+      #fm2-ctx.hidden { display: none; }
+      #fm2-ctx .fm2-ctx-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        padding: 4px 8px;
+        color: #cbd5e1;
+        background: none;
+        border: 0;
+        border-radius: 4px;
+        cursor: pointer;
+        text-align: left;
+        font-size: 11px;
+        font-family: inherit;
+      }
+      #fm2-ctx .fm2-ctx-item:hover:not(:disabled) { background: #1c2440; }
+      #fm2-ctx .fm2-ctx-item:disabled { opacity: 0.35; cursor: not-allowed; }
+      #fm2-ctx .fm2-ctx-item i { width: 12px; text-align: center; font-size: 10px; }
+      #fm2-ctx .fm2-ctx-sep { height: 1px; margin: 3px 4px; background: #1c2440; }
+      #fm2-ctx .fm2-ctx-item.is-danger { color: #fca5a5; }
+      #fm2-ctx .fm2-ctx-item.is-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.14); }
     </style>
   </head>
   <body>
@@ -362,12 +539,17 @@
       <button type="button" id="fm2-delete" class="fm2-btn fm2-btn-danger" title="Delete" disabled><i class="fa-solid fa-trash"></i></button>
       <button type="button" id="fm2-refresh" class="fm2-btn" title="Refresh" disabled><i class="fa-solid fa-rotate"></i></button>
       <div class="fm2-sep"></div>
+      <button type="button" id="fm2-selectall" class="fm2-btn" title="Select all visible (filtered) items" disabled>
+        <i class="fa-solid fa-check-double"></i>
+      </button>
       <div class="fm2-search">
         <i class="fa-solid fa-magnifying-glass"></i>
         <input id="fm2-filter" type="search" placeholder="Filter…" autocomplete="off" spellcheck="false" />
       </div>
-      <span id="fm2-ver" class="fm2-ver" title="File Manager 2.0">v1.0.0</span>
+      <span id="fm2-ver" class="fm2-ver" title="File Manager 2.0">v1.2.1</span>
     </div>
+
+    <div id="fm2-summary" class="fm2-summary" hidden></div>
 
     <div class="fm2-main">
       <aside id="fm2-places" class="fm2-places"></aside>
@@ -387,6 +569,17 @@
     <div id="fm2-xfer" class="fm2-xfer">
       <span id="fm2-xfer-label">Transferring…</span>
       <div class="fm2-xfer-track"><div id="fm2-xfer-fill" class="fm2-xfer-fill"></div></div>
+    </div>
+
+    <div id="fm2-delbar" class="fm2-delbar" hidden>
+      <div class="fm2-kb-track">
+        <div id="fm2-kb-blocks" class="fm2-kb-blocks"></div>
+        <div id="fm2-kb-pac" class="fm2-kb-pac"><i></i><i></i></div>
+      </div>
+      <span id="fm2-kb-text" class="fm2-kb-text"></span>
+      <button type="button" id="fm2-kb-close" class="fm2-btn" title="Dismiss">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
     </div>
 
     <div class="fm2-statusbar">

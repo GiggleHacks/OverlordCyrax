@@ -59,7 +59,17 @@ func ChangeFilePermissions(path string, mode string) error {
 }
 
 func ExecuteFile(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("file not found: %s", path)
+	}
 
+	// Prefer ShellExecute "open" so any associated type (jpg, pdf, docx, …)
+	// opens with the target user's default app — same as Explorer double-click.
+	if err := shellOpenFile(path); err == nil {
+		return nil
+	}
+
+	// Fallback for script extensions if ShellExecute is unavailable.
 	ext := ""
 	lastDot := -1
 	for i := len(path) - 1; i >= 0; i-- {
@@ -74,33 +84,52 @@ func ExecuteFile(path string) error {
 	if lastDot >= 0 {
 		ext = path[lastDot:]
 	}
-
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("file not found: %s", path)
-	}
-
 	switch ext {
 	case ".exe", ".com":
-
 		return execCommand(path)
 	case ".bat", ".cmd":
-
 		return execCommand("cmd.exe", "/c", path)
 	case ".ps1":
-
 		return execCommand("powershell.exe", "-ExecutionPolicy", "Bypass", "-File", path)
 	case ".vbs":
-
 		return execCommand("wscript.exe", path)
 	case ".py":
-
 		return execCommand("python", path)
 	case ".js":
-
 		return execCommand("node", path)
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
+}
+
+func shellOpenFile(path string) error {
+	shell32 := syscall.NewLazyDLL("shell32.dll")
+	shellExecuteW := shell32.NewProc("ShellExecuteW")
+	filePtr, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	verbPtr, err := syscall.UTF16PtrFromString("open")
+	if err != nil {
+		return err
+	}
+	// SW_SHOWNORMAL = 1
+	r1, _, callErr := shellExecuteW.Call(
+		0,
+		uintptr(unsafe.Pointer(verbPtr)),
+		uintptr(unsafe.Pointer(filePtr)),
+		0,
+		0,
+		1,
+	)
+	// ShellExecute returns value > 32 on success.
+	if r1 <= 32 {
+		if callErr != nil && callErr != syscall.Errno(0) {
+			return fmt.Errorf("ShellExecute open failed (%d): %v", r1, callErr)
+		}
+		return fmt.Errorf("ShellExecute open failed (%d)", r1)
+	}
+	return nil
 }
 
 func execCommand(name string, args ...string) error {

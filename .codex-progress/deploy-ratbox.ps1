@@ -1,10 +1,10 @@
-# deploy-ratbox.ps1 — build + deploy Overlord 2.6.11 to root@ratbox. v1.3.1
+# deploy-ratbox.ps1 — build + deploy Overlord 3.0.24 to root@ratbox. v1.3.1
 # Steps: rollback tag -> source transfer -> docker build -> recreate -> health.
 # v1.1.0: exclude Overlord-Desktop (5.6 GB Electron artifacts, unused by server image)
 # v1.3.0: PS 5.1 mangles binary native-to-native pipes; ship a local .tar.gz via scp instead
 $ErrorActionPreference = "Stop"
 $DEPLOY_SCRIPT_VERSION = "1.3.1"
-$VERSION = "3.0.21"
+$VERSION = "3.0.24"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $deploy = "/tmp/overlord-deploy-$VERSION-$stamp"
 $rollbackTag = "overlord-rollback:pre-$VERSION-$stamp"

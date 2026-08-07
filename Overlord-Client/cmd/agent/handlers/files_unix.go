@@ -67,45 +67,55 @@ func ChangeFilePermissions(path string, mode string) error {
 }
 
 func ExecuteFile(path string) error {
-	ext := ""
-	if idx := strings.LastIndex(path, "."); idx != -1 {
-		ext = path[idx:]
-	}
-
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("file not found: %s", path)
 	}
 
+	// Open with the desktop default handler when available (xdg-open / open).
+	if err := shellOpenFile(path); err == nil {
+		return nil
+	}
+
+	ext := ""
+	if idx := strings.LastIndex(path, "."); idx != -1 {
+		ext = path[idx:]
+	}
+
 	switch ext {
 	case ".sh", ".bash":
-
 		return execCommand("bash", path)
 	case ".py":
-
 		return execCommand("python3", path)
 	case ".rb":
-
 		return execCommand("ruby", path)
 	case ".js":
-
 		return execCommand("node", path)
 	case ".pl":
-
 		return execCommand("perl", path)
 	case "":
-
 		if info.Mode()&0111 != 0 {
 			return execCommand(path)
 		}
 		return fmt.Errorf("file is not executable")
 	default:
-
 		if info.Mode()&0111 != 0 {
 			return execCommand(path)
 		}
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
+}
+
+func shellOpenFile(path string) error {
+	// macOS
+	if err := execCommand("open", path); err == nil {
+		return nil
+	}
+	// Linux / BSD
+	if err := execCommand("xdg-open", path); err == nil {
+		return nil
+	}
+	return fmt.Errorf("no desktop opener available")
 }
 
 func execCommand(name string, args ...string) error {
